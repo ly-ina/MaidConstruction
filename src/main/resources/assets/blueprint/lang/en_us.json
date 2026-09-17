@@ -46,7 +46,9 @@
   "tooltip.blueprint.maid_off": "Maids are not allowed to build with this blueprint",
 
   "gui.blueprint.title": "Blueprint",
+  "gui.blueprint.name_label": "Name",
   "gui.blueprint.file_hint": "blueprints folder",
+  "gui.blueprint.no_files": "No files found",
   "gui.blueprint.rotate": "Rotate 90°",
   "gui.blueprint.clear_anchor": "Clear Anchor",
   "gui.blueprint.clear_schematic": "Clear Recording",

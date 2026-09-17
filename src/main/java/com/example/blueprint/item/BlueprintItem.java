@@ -100,6 +100,10 @@ public class BlueprintItem extends Item {
         return tag == null ? "" : tag.getString(KEY_NAME);
     }
 
+    public static void setBlueprintName(ItemStack stack, String name) {
+        stack.getOrCreateTag().putString(KEY_NAME, name == null ? "" : name);
+    }
+
     public static boolean hasPos1(ItemStack stack) {
         CompoundTag tag = stack.getTag();
         return tag != null && tag.contains(KEY_POS1);

@@ -46,7 +46,9 @@
   "tooltip.blueprint.maid_off": "已禁止女仆施工",
 
   "gui.blueprint.title": "蓝图",
+  "gui.blueprint.name_label": "名称",
   "gui.blueprint.file_hint": "blueprints 目录",
+  "gui.blueprint.no_files": "目录里没有文件",
   "gui.blueprint.rotate": "旋转 90°",
   "gui.blueprint.clear_anchor": "清空锚点",
   "gui.blueprint.clear_schematic": "清空录制",

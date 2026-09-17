@@ -8,6 +8,7 @@ import com.example.blueprint.network.packet.C2SClearBlueprintPacket;
 import com.example.blueprint.network.packet.C2SImportBlueprintPacket;
 import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
+import com.example.blueprint.network.packet.C2SSetNamePacket;
 import com.example.blueprint.network.packet.C2SSetRotationPacket;
 import com.example.blueprint.schematic.Schematic;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -15,7 +16,7 @@ import com.mojang.math.Axis;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.ObjectSelectionList;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.LightTexture;
@@ -34,14 +35,18 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * 蓝图面板：Shift + 右键空气打开。
  * <p>
- * 左边是结构的 3D 预览（可拖动旋转），中间是操作按钮，
- * 右边是 blueprints/ 目录下的文件，选中后即可导入。
+ * 左上角改名字，左边是 3D 预览（可拖动旋转），中间是操作按钮，
+ * 右边是 blueprints/ 目录下的文件，点一下选中再导入。
+ * <p>
+ * 文件列表是手写的而不是用原版的选择列表组件——原版的在这么窄的区域里
+ * 命中判定一直对不上，点上去没反应，自己算行号反而简单可靠。
  */
 @OnlyIn(Dist.CLIENT)
 @SuppressWarnings("deprecation") // renderSingleBlock 在 1.20.1 被标了过时，但没有等价的替代写法
@@ -52,11 +57,29 @@ public class BlueprintScreen extends Screen {
     private static final int PREVIEW_WIDTH = 150;
     private static final int FILE_WIDTH = 128;
     private static final int BUTTON_WIDTH = 100;
+    /** 标题栏高度，下面才是内容区 */
+    private static final int HEADER_HEIGHT = 22;
+    private static final int FILE_ROW_HEIGHT = 12;
     /** 预览最多画这么多方块，超了就按比例抽稀 */
     private static final int MAX_PREVIEW_BLOCKS = 1500;
 
+    private static final int COLOR_PANEL = 0xE8100014;
+    private static final int COLOR_DIVIDER = 0xFF3A3A3A;
+    private static final int COLOR_TEXT = 0xFFFFFF;
+    private static final int COLOR_LABEL = 0xAAAAAA;
+    private static final int COLOR_ROW = 0xBBBBBB;
+    private static final int COLOR_ROW_SELECTED = 0xFFFF55;
+    private static final int COLOR_STATUS = 0x55FF55;
+
     private final ItemStack stack;
-    private FileList fileList;
+    private EditBox nameBox;
+
+    private final List<Path> files = new ArrayList<>();
+    private int selectedFile = -1;
+    private int fileScroll = 0;
+    private int fileListX;
+    private int fileListY;
+    private int fileListHeight;
 
     private Schematic previewSchematic;
     private List<Schematic.BlockEntry> previewEntries = List.of();
@@ -79,8 +102,16 @@ public class BlueprintScreen extends Screen {
         int left = (this.width - WINDOW_WIDTH) / 2;
         int top = (this.height - WINDOW_HEIGHT) / 2;
 
+        // 左上角：蓝图名称，导出时拿它当文件名
+        this.nameBox = new EditBox(this.font, left + 76, top + 4, 132, 14,
+                Component.translatable("gui.blueprint.name_label"));
+        this.nameBox.setMaxLength(48);
+        this.nameBox.setValue(BlueprintItem.getBlueprintName(stack));
+        this.nameBox.setHint(Component.translatable("tooltip.blueprint.unnamed"));
+        this.addRenderableWidget(this.nameBox);
+
         int buttonX = left + PREVIEW_WIDTH + 8;
-        int y = top + 24;
+        int y = top + HEADER_HEIGHT + 6;
 
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.rotate"), b -> onRotate())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
@@ -100,34 +131,38 @@ public class BlueprintScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.close"), b -> onClose())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
 
-        int listX = left + WINDOW_WIDTH - FILE_WIDTH - 8;
-        this.fileList = new FileList(FILE_WIDTH, top + 24, top + WINDOW_HEIGHT - 10);
-        this.fileList.setLeftPos(listX);
-        this.addRenderableWidget(this.fileList);
+        this.fileListX = left + WINDOW_WIDTH - FILE_WIDTH - 8;
+        this.fileListY = top + HEADER_HEIGHT + 2;
+        this.fileListHeight = WINDOW_HEIGHT - HEADER_HEIGHT - 14;
+        refreshFiles();
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(graphics);
+        // 刻意不调用 renderBackground：它会铺一层背景纹理（没进世界时就是土方块），
+        // 这里只要一层半透明压暗，保证面板上的字看得清就行。
+        graphics.fill(0, 0, this.width, this.height, 0xC0000000);
 
         int left = (this.width - WINDOW_WIDTH) / 2;
         int top = (this.height - WINDOW_HEIGHT) / 2;
 
-        // 面板底板
-        graphics.fill(left, top, left + WINDOW_WIDTH, top + WINDOW_HEIGHT, 0xF0100010);
-        graphics.fill(left + PREVIEW_WIDTH, top + 18, left + PREVIEW_WIDTH + 1, top + WINDOW_HEIGHT, 0xFF404040);
-        graphics.fill(left + WINDOW_WIDTH - FILE_WIDTH - 12, top + 18,
-                left + WINDOW_WIDTH - FILE_WIDTH - 11, top + WINDOW_HEIGHT, 0xFF404040);
+        graphics.fill(left, top, left + WINDOW_WIDTH, top + WINDOW_HEIGHT, COLOR_PANEL);
+        graphics.fill(left + PREVIEW_WIDTH, top + HEADER_HEIGHT, left + PREVIEW_WIDTH + 1, top + WINDOW_HEIGHT, COLOR_DIVIDER);
+        graphics.fill(this.fileListX - 6, top + HEADER_HEIGHT, this.fileListX - 5, top + WINDOW_HEIGHT, COLOR_DIVIDER);
 
-        graphics.drawString(this.font, this.title, left + 6, top + 6, 0xFFFFFF, false);
+        graphics.drawString(this.font, this.title, left + 6, top + 7, COLOR_TEXT, false);
+        graphics.drawString(this.font, Component.translatable("gui.blueprint.name_label"),
+                left + 48, top + 7, COLOR_LABEL, false);
         graphics.drawString(this.font, Component.translatable("gui.blueprint.file_hint"),
-                left + WINDOW_WIDTH - FILE_WIDTH - 8, top + 6, 0x888888, false);
+                this.fileListX, top + 7, COLOR_LABEL, false);
 
         drawPreview(graphics, left, top);
+        drawFileList(graphics);
 
         super.render(graphics, mouseX, mouseY, partialTick);
 
-        graphics.drawString(this.font, this.status, left + PREVIEW_WIDTH + 8, top + WINDOW_HEIGHT - 12, 0x55FF55, false);
+        graphics.drawString(this.font, this.status,
+                left + PREVIEW_WIDTH + 8, top + WINDOW_HEIGHT - 11, COLOR_STATUS, false);
     }
 
     // ------------------------------------------------------------------
@@ -137,7 +172,7 @@ public class BlueprintScreen extends Screen {
     private void drawPreview(GuiGraphics graphics, int left, int top) {
         Schematic schematic = getPreview();
         int cx = left + PREVIEW_WIDTH / 2;
-        int cy = top + (WINDOW_HEIGHT + 18) / 2;
+        int cy = top + HEADER_HEIGHT + (WINDOW_HEIGHT - HEADER_HEIGHT) / 2;
 
         if (schematic == null) {
             graphics.drawCenteredString(this.font, Component.translatable("gui.blueprint.no_preview"), cx, cy, 0x888888);
@@ -178,7 +213,7 @@ public class BlueprintScreen extends Screen {
 
         graphics.drawCenteredString(this.font,
                 Component.literal(size.getX() + "×" + size.getY() + "×" + size.getZ()),
-                cx, top + WINDOW_HEIGHT - 14, 0x999999);
+                cx, top + WINDOW_HEIGHT - 13, 0x999999);
     }
 
     @Nullable
@@ -211,6 +246,76 @@ public class BlueprintScreen extends Screen {
         return schematic;
     }
 
+    // ------------------------------------------------------------------
+    // 文件列表（自绘）
+    // ------------------------------------------------------------------
+
+    private void refreshFiles() {
+        files.clear();
+        files.addAll(BlueprintTransfer.listFiles());
+        selectedFile = -1;
+        fileScroll = 0;
+    }
+
+    private void drawFileList(GuiGraphics graphics) {
+        graphics.enableScissor(fileListX, fileListY, fileListX + FILE_WIDTH, fileListY + fileListHeight);
+
+        if (files.isEmpty()) {
+            graphics.drawString(this.font, Component.translatable("gui.blueprint.no_files"),
+                    fileListX + 2, fileListY + 4, 0x777777, false);
+        }
+
+        for (int i = 0; i < files.size(); i++) {
+            int rowY = fileListY + i * FILE_ROW_HEIGHT - fileScroll;
+            if (rowY + FILE_ROW_HEIGHT < fileListY || rowY > fileListY + fileListHeight) {
+                continue;
+            }
+            String name = displayName(files.get(i));
+            graphics.drawString(this.font, name, fileListX + 2, rowY + 2,
+                    i == selectedFile ? COLOR_ROW_SELECTED : COLOR_ROW, false);
+        }
+
+        graphics.disableScissor();
+    }
+
+    private String displayName(Path path) {
+        String name = path.getFileName().toString();
+        if (name.endsWith(BlueprintTransfer.FILE_EXTENSION)) {
+            name = name.substring(0, name.length() - BlueprintTransfer.FILE_EXTENSION.length());
+        }
+        if (name.length() > 20) {
+            name = name.substring(0, 19) + "…";
+        }
+        return name;
+    }
+
+    private boolean isOverFileList(double mouseX, double mouseY) {
+        return mouseX >= fileListX && mouseX < fileListX + FILE_WIDTH
+                && mouseY >= fileListY && mouseY < fileListY + fileListHeight;
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button == 0 && isOverFileList(mouseX, mouseY)) {
+            int index = (int) ((mouseY - fileListY + fileScroll) / FILE_ROW_HEIGHT);
+            if (index >= 0 && index < files.size()) {
+                selectedFile = index;
+                return true;
+            }
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (isOverFileList(mouseX, mouseY)) {
+            int max = Math.max(0, files.size() * FILE_ROW_HEIGHT - fileListHeight);
+            fileScroll = Mth.clamp(fileScroll - (int) (delta * FILE_ROW_HEIGHT), 0, max);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, delta);
+    }
+
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (button == 0 && isOverPreview(mouseX, mouseY)) {
@@ -225,7 +330,7 @@ public class BlueprintScreen extends Screen {
         int left = (this.width - WINDOW_WIDTH) / 2;
         int top = (this.height - WINDOW_HEIGHT) / 2;
         return mouseX >= left && mouseX < left + PREVIEW_WIDTH
-                && mouseY >= top && mouseY < top + WINDOW_HEIGHT;
+                && mouseY >= top + HEADER_HEIGHT && mouseY < top + WINDOW_HEIGHT;
     }
 
     // ------------------------------------------------------------------
@@ -258,31 +363,33 @@ public class BlueprintScreen extends Screen {
             return;
         }
         try {
+            // 文件名跟随左上角输入的名称
+            String name = nameBox.getValue().trim();
+            if (name.isEmpty()) {
+                name = Component.translatable("tooltip.blueprint.unnamed").getString();
+            }
             byte[] data = BlueprintTransfer.encode(schematic);
-            Path file = BlueprintTransfer.writeToFile(BlueprintItem.getBlueprintName(stack), data);
+            Path file = BlueprintTransfer.writeToFile(name, data);
             setStatus(Component.translatable("gui.blueprint.exported", file.getFileName().toString()));
-            fileList.refresh();
+            refreshFiles();
         } catch (IOException e) {
             setStatus(Component.translatable("gui.blueprint.export_failed"));
         }
     }
 
     private void onImport() {
-        Path selected = fileList.getSelectedPath();
-        if (selected == null) {
+        if (selectedFile < 0 || selectedFile >= files.size()) {
             setStatus(Component.translatable("gui.blueprint.no_file_selected"));
             return;
         }
+        Path selected = files.get(selectedFile);
         try {
             byte[] data = Files.readAllBytes(selected);
             if (data.length > BlueprintTransfer.MAX_FILE_BYTES) {
                 setStatus(Component.translatable("message.blueprint.import_too_large"));
                 return;
             }
-            String name = selected.getFileName().toString();
-            if (name.endsWith(BlueprintTransfer.FILE_EXTENSION)) {
-                name = name.substring(0, name.length() - BlueprintTransfer.FILE_EXTENSION.length());
-            }
+            String name = displayName(selected);
             ModNetwork.CHANNEL.sendToServer(new C2SImportBlueprintPacket(data, name));
             setStatus(Component.translatable("gui.blueprint.importing"));
         } catch (IOException e) {
@@ -290,67 +397,23 @@ public class BlueprintScreen extends Screen {
         }
     }
 
+    @Override
+    public void onClose() {
+        // 关闭时把名字同步给服务端，存进物品 NBT
+        if (nameBox != null) {
+            String name = nameBox.getValue().trim();
+            if (!name.equals(BlueprintItem.getBlueprintName(stack))) {
+                ModNetwork.CHANNEL.sendToServer(new C2SSetNamePacket(name));
+            }
+        }
+        super.onClose();
+    }
+
     private void setStatus(Component message) {
         this.status = message;
         LocalPlayer player = Minecraft.getInstance().player;
         if (player != null) {
             player.displayClientMessage(message, false);
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // 文件列表
-    // ------------------------------------------------------------------
-
-    private class FileList extends ObjectSelectionList<FileList.Entry> {
-
-        FileList(int width, int top, int bottom) {
-            super(Minecraft.getInstance(), width, bottom - top, top, bottom, 14);
-            refresh();
-        }
-
-        void refresh() {
-            this.clearEntries();
-            for (Path path : BlueprintTransfer.listFiles()) {
-                this.addEntry(new Entry(path));
-            }
-        }
-
-        @Nullable
-        Path getSelectedPath() {
-            Entry entry = this.getSelected();
-            return entry == null ? null : entry.path;
-        }
-
-        private class Entry extends ObjectSelectionList.Entry<Entry> {
-            private final Path path;
-
-            Entry(Path path) {
-                this.path = path;
-            }
-
-            @Override
-            public Component getNarration() {
-                return Component.literal(path.getFileName().toString());
-            }
-
-            @Override
-            public void render(GuiGraphics graphics, int index, int top, int left, int width, int height,
-                               int mouseX, int mouseY, boolean hovering, float partialTick) {
-                String text = path.getFileName().toString();
-                if (text.length() > 18) {
-                    text = text.substring(0, 17) + "…";
-                }
-                boolean selected = FileList.this.getSelected() == this;
-                int color = selected ? 0xFFFF55 : (hovering ? 0xFFFFFF : 0xBBBBBB);
-                graphics.drawString(BlueprintScreen.this.font, text, left + 2, top + 3, color, false);
-            }
-
-            @Override
-            public boolean mouseClicked(double mouseX, double mouseY, int button) {
-                FileList.this.setSelected(this);
-                return true;
-            }
         }
     }
 }
