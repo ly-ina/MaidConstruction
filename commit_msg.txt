@@ -1,0 +1,8 @@
+Make the binding book highlight render through blocks
+
+The highlight used RenderType.LINES, which does depth testing, so a
+target behind a wall or a mob was completely invisible -- exactly the
+situation the highlight exists for. Build the vertices manually and
+drive the depth state through RenderSystem instead. Rolling a custom
+RenderType is not an option here because the RenderStateShard
+constants needed for it are protected.

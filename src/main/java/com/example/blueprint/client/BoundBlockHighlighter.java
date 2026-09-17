@@ -2,11 +2,15 @@ package com.example.blueprint.client;
 
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.item.BindingBookItem;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.Tesselator;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -27,8 +31,7 @@ import net.minecraftforge.fml.common.Mod;
  * 绑定书本来就是给远处仓库用的，光靠工具提示里那串坐标数字很难找到地方；
  * 高亮一下，站在基地里也能一眼看见自己绑的是哪个箱子。
  * <p>
- * 纯客户端行为：数据就在物品 NBT 里，不需要服务端参与，
- * 所以也不存在网络延迟。
+ * 纯客户端行为：数据就在物品 NBT 里，不需要服务端参与，所以也不存在网络延迟。
  */
 @OnlyIn(Dist.CLIENT)
 @Mod.EventBusSubscriber(modid = BlueprintMod.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
@@ -40,6 +43,10 @@ public class BoundBlockHighlighter {
     private static final double INFLATE = 0.002D;
     /** 呼吸一次的周期 */
     private static final long PULSE_PERIOD_MS = 1_000L;
+    /** 线宽，粗一点隔着墙也能看清 */
+    private static final float LINE_WIDTH = 2.5F;
+    /** 绘制完成后恢复成的线宽 */
+    private static final float DEFAULT_LINE_WIDTH = 1.0F;
 
     private static BlockPos target;
     private static ResourceLocation dimension;
@@ -113,13 +120,34 @@ public class BoundBlockHighlighter {
 
         pose.pushPose();
         pose.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
-
-        AABB box = new AABB(target).inflate(INFLATE);
-        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
-        LevelRenderer.renderLineBox(pose, buffers.getBuffer(RenderType.LINES),
-                box, 0.35F, 0.95F, 1.0F, alpha);
-        buffers.endBatch(RenderType.LINES);
-
+        drawThroughWalls(pose, new AABB(target).inflate(INFLATE), 0.35F, 0.95F, 1.0F, alpha);
         pose.popPose();
+    }
+
+    /**
+     * 画一个能穿透方块和生物的线框。
+     * <p>
+     * 没有直接用 {@code RenderType.LINES}：它带着深度测试，目标被墙挡住就完全看不见，
+     * 而高亮一个"在仓库深处的箱子"恰恰是最需要隔着墙看清楚的场合。
+     * <p>
+     * 想自己造一个"不测深度"的 RenderType 也行，但 {@code RenderStateShard} 里
+     * 那几个状态常量都是 protected，从外部访问不到。所以这里改成手动构建顶点，
+     * 深度状态由 RenderSystem 直接控制。
+     */
+    private static void drawThroughWalls(PoseStack pose, AABB box, float red, float green, float blue, float alpha) {
+        RenderSystem.disableDepthTest();
+        RenderSystem.depthMask(false);
+        RenderSystem.setShader(GameRenderer::getRendertypeLinesShader);
+        RenderSystem.lineWidth(LINE_WIDTH);
+
+        BufferBuilder builder = Tesselator.getInstance().getBuilder();
+        builder.begin(VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
+        LevelRenderer.renderLineBox(pose, builder, box, red, green, blue, alpha);
+        Tesselator.getInstance().end();
+
+        // 恢复现场，别把后面要渲染的东西一起带跑偏
+        RenderSystem.lineWidth(DEFAULT_LINE_WIDTH);
+        RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest();
     }
 }
