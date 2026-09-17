@@ -1,0 +1,730 @@
+# 开发者文档
+
+女仆建筑（Maid Construction）—— 一个 Create 风格的结构蓝图模组：录制结构、投影到任意位置、由车万女仆（TLM）的女仆代为施工。
+
+本文档面向两类读者：接手维护的人类开发者，以及需要在没有上下文的情况下定位和修改代码的 AI。因此除了"是什么"，更强调**为什么这样做**和**改哪里会踩坑**。
+
+---
+
+## 目录
+
+- [1. 项目概览](#1-项目概览)
+- [2. 快速上手](#2-快速上手)
+- [3. 架构总览](#3-架构总览)
+- [4. 核心数据模型](#4-核心数据模型)
+- [5. 四条主链路](#5-四条主链路)
+- [6. 扩展点指南](#6-扩展点指南)
+- [7. 关键陷阱与设计决策](#7-关键陷阱与设计决策)
+- [8. 排查手册](#8-排查手册)
+- [9. 构建与发布](#9-构建与发布)
+- [10. 给 AI 的特别提示](#10-给-ai-的特别提示)
+
+---
+
+## 1. 项目概览
+
+| 项 | 值 |
+|---|---|
+| 模组 ID | `blueprint` |
+| 显示名 | 女仆建筑 |
+| jar 产物 | `MaidConstruction-<version>.jar`（由 `mod_name` 去空格得到） |
+| MC / Forge | 1.20.1 / 47.1.3 |
+| 映射 | `official` |
+| 软依赖 | 车万女仆 `1.5.2-forge+mc1.20.1`、AE2 `15.4.10` |
+| 源码包 | `com.example.blueprint`，共 45 个类 |
+
+### 它做什么
+
+1. **录制**：手持蓝图框选两个角点，服务端扫描区域并存成一个结构。
+2. **投影**：手持蓝图移动时，结构以半透明"幽灵方块"显示，可旋转、可锚定到具体位置。
+3. **施工**：把蓝图交给女仆（或放进她的背包/饰品栏），女仆自动取料并逐块建造。
+4. **取料**：从附近的普通容器、绑定书指定的远程容器，或 AE2 的 ME 网络取材料。
+
+---
+
+## 2. 快速上手
+
+```bash
+# 构建（首次会反编译 MC，约需数分钟）
+./gradlew build
+
+# 启动客户端（需要把 TLM 放进 runtime 才能测女仆功能）
+./gradlew runClient
+
+# 启动服务端
+./gradlew runServer
+```
+
+**产物**：`build/libs/MaidConstruction-<version>.jar`
+
+### 开发环境的两个坑
+
+**一、AE2 只有 `compileOnly`，没有 `runtimeOnly`。**
+
+这是刻意的设计（见 [§7.2](#72-软依赖的隔离方式)），代价是**开发环境默认跑不了 ME 取料**。要测 AE2 相关功能，临时在 `build.gradle` 的 deps 里加一行：
+
+```groovy
+runtimeOnly fg.deobf("maven.modrinth:ae2:${ae2_version}")
+```
+
+测完记得删掉 —— 否则这个模组就变成硬依赖了。
+
+**二、TLM 是 `compileOnly` + `runtimeOnly`**，所以女仆相关功能开箱即可测。
+
+---
+
+## 3. 架构总览
+
+### 包划分
+
+```
+com.example.blueprint
+├── BlueprintMod            主类：物品注册、AE2 条件注册、网络注册
+├── build/                  ★ 建造核心，与具体模组解耦
+│   ├── BuildSession        一次建造的增量状态机
+│   ├── ItemProvider        材料来源接口 + 注册实现
+│   ├── ItemSource          女仆背包视角的材料接口
+│   ├── BlockMaterials      ← 扩展点：方块需要什么材料
+│   ├── BlockMaterialResolver
+│   ├── BlockEntityRotation ← 扩展点：旋转方块实体 NBT
+│   └── BlockEntityRotationResolver
+├── schematic/
+│   ├── Schematic           结构数据（palette + 索引数组）
+│   └── SchematicStorage    存档内的结构库（SavedData）
+├── item/
+│   ├── BlueprintItem       蓝图：选点、锚定、旋转、工具提示
+│   ├── BindingBookItem     绑定书：指定远程取料点
+│   └── BindingBookEvents   让绑定书抢到方块右键（兜底）
+├── client/                 ★ 全部标 @OnlyIn(CLIENT)
+│   ├── ProjectionRenderer  世界内的 3D 投影
+│   ├── CableBusOutline     AE2 线缆的示意轮廓
+│   ├── BoundBlockHighlighter  绑定书目标高亮（可穿透方块）
+│   ├── ClientSchematicCache   结构缓存（LRU 24）
+│   ├── ClientBlueprintBinder  收到数据后当场绑定到手持物品
+│   ├── BlueprintTransfer   导入导出的文件读写
+│   ├── BlueprintScreenOpener
+│   └── gui/BlueprintScreen 蓝图面板
+├── network/
+│   ├── ModNetwork          频道 + 8 个包的注册
+│   └── packet/             6 个 C2S + 1 个 S2C
+├── registry/ModItems       blueprint、binding_book
+└── integration/
+    ├── maid/               TLM 联动
+    │   ├── MaidExtension        @LittleMaidExtension 入口
+    │   ├── BlueprintBuildTask   女仆的"蓝图施工"工作模式
+    │   ├── MaidBuildTickHandler 服务端 tick 驱动器
+    │   ├── BlueprintBuildController ★ 施工状态机（最大文件）
+    │   ├── MaidItemSource       女仆背包的 ItemSource
+    │   └── BindingBookBauble    空饰品，仅为让饰品栏接受绑定书
+    └── ae2/                ★ AE2 联动，整包不得在 AE2 缺位时被触碰
+        ├── Ae2Compat            安全入口（不引用 AE2 类型）
+        ├── Ae2ItemProvider      ME 网络取料/还料
+        ├── Ae2MaterialResolver  线缆材料从部件 NBT 反推
+        ├── Ae2BlockEntityRotation 线缆部件朝向
+        ├── Ae2TerminalRegistry  女仆终端方块/物品/BE
+        ├── MaidTerminalBlock
+        └── MaidTerminalBlockEntity
+```
+
+### 依赖方向（重要）
+
+```
+        integration.maid ──┐
+                          ├──→ build / schematic / item   （核心）
+        integration.ae2 ───┘
+
+        client ──────────────→ build / schematic / item
+```
+
+**核心包（`build` / `schematic` / `item`）绝不 import 任何模组类型**。反向依赖靠两种机制实现：
+
+- **注册链**：核心定义接口（`BlockMaterials`、`BlockEntityRotation`），集成包实现并注册。
+- **安全入口**：`Ae2Compat` 本身不引用 AE2 类型，由它在中转时判断模组是否存在。
+
+违反这条会导致**没装对应模组的玩家无法启动游戏**。
+
+---
+
+## 4. 核心数据模型
+
+### 4.1 `Schematic` —— 结构数据
+
+存储方式和原版 structure 一致：
+
+```
+palette: List<BlockState>          去重后的方块状态表
+blocks:  int[volume]               每个位置在 palette 里的下标
+size:    Vec3i                     宽 × 高 × 长
+blockEntities: Map<Integer, CompoundTag>   位置下标 → 方块实体 NBT（已剔除坐标字段）
+```
+
+**索引公式**：`(y * size.getZ() + z) * size.getX() + x`
+
+**上限**：`MAX_SIDE = 128`、`MAX_VOLUME = 262144`。超限时抛 `IllegalStateException`，**消息本身是翻译键**（`schematic.side_too_large` 等），调用方直接 `Component.translatable(e.getMessage())`。
+
+**关键方法**：
+
+| 方法 | 说明 |
+|---|---|
+| `capture(Level, BlockPos a, BlockPos b)` | 扫描世界生成结构 |
+| `rotate(Rotation)` | 返回旋转后的**新实例**（`NONE` 返回自身） |
+| `rotateState(BlockState, Rotation)` | 私有，见 §7.3 |
+| `rotateDirection(Direction, Rotation)` | **公开的**方向旋转工具，多处共用 |
+| `stateAt / blockEntityAt / inBounds / entries` | 访问 |
+| `write / read` | NBT 序列化 |
+
+**两个刻意的选择**：
+
+- **不用 `NbtUtils` 读写方块状态**。1.20.1 的 `NbtUtils.readBlockState` 需要 `HolderGetter<Block>`，而蓝图读写常发生在拿不到世界 registry 的场合。自己实现格式反而可控。
+- **`entries()` 会为每个方块新建 `BlockPos` 和 `BlockEntry`**。大结构下别在渲染循环里调它 —— `ProjectionRenderer.rebuild` 就是为此改用下标遍历 + 复用 `MutableBlockPos`。
+
+### 4.2 `SchematicStorage` —— 存档内的结构库
+
+- 类型：`SavedData`，存在**主世界**（所以跨维度的蓝图也能解析）。
+- 存档名：`blueprint_schematics`。
+- 映射：`Map<UUID, Schematic>`。
+- **蓝图物品只存 UUID**，结构本体不入物品 NBT —— 否则一本蓝图会撑爆物品栏同步。
+
+```java
+static SchematicStorage get(ServerLevel level)   // 从主世界取/建
+UUID put(Schematic schematic)                    // 存入并标脏，返回新 UUID
+@Nullable Schematic get(UUID id)
+boolean remove(UUID id)
+```
+
+**注意**：`BlueprintItem.clearSchematic` **不删**存档里的结构。因为蓝图物品可以被复制（创造模式、`/give`），其他副本可能仍指向同一份数据，贸然删除会让它们失效。
+
+### 4.3 `BlueprintItem` 的 NBT 字段
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `Schematic` | UUID | 指向 `SchematicStorage` 里的结构 |
+| `Size` | int[3] | 结构尺寸（客户端投影要用，避免等数据包） |
+| `Name` | String | 蓝图名（也是导出文件名） |
+| `Pos1` | int[3] | 已选的第一个角点 |
+| `Anchor` | int[3] | 投影锚定位置 |
+| `Rotation` | int | 朝向的 `ordinal` |
+| `Completed` | boolean | 是否已建完 |
+| `MaidBuild` | boolean | 是否允许女仆施工（默认允许） |
+
+`Completed` 和 `MaidBuild` 存在物品 NBT 而不是内存里 —— 存档重载、女仆换班之后仍然有效，不会反复播报"施工完毕"。
+
+### 4.4 `BuildSession` —— 增量建造状态机
+
+内部状态：`order`（待放置列表）、`cursor`、`deferred`（支撑未就位的推迟列表）、`pass`、`finished`。
+
+**四个方法**：
+
+| 方法 | 用途 |
+|---|---|
+| `static plan(Schematic)` | 排序：`y` → 支撑优先级 → `z` → `x` |
+| `static bill(Schematic)` | **整座结构**从零建起需要哪些材料 |
+| `remainingBill(level, origin)` | **从现在这个进度**还差哪些材料（跳过已建成的方块） |
+| `step(level, origin, source, maxBlocks)` | 实际放置，返回 `StepResult` |
+| `peekNextTarget(level, origin)` | 下一个目标坐标（女仆据此决定走位） |
+
+**摆放顺序**：先放能独立存在的完整方块（`canOcclude()` 为真），再放半砖、火把这类依附物。第一轮放不下的进入 `deferred`，最多重试 `MAX_PASS = 3` 轮。
+
+**幂等性**：`step` 会跳过已经是目标状态的方块。所以女仆中途被打断、存档重载后重来，都不会破坏已建成的部分。
+
+**`bill` 与 `remainingBill` 的区别是被反复踩过的坑**，详见 [§7.5](#75-取料的三层数量账)。
+
+---
+
+## 5. 四条主链路
+
+### 5.1 录制链路
+
+```
+玩家右键方块（选点1）→ 写入物品 NBT 的 Pos1
+玩家右键方块（选点2）→ C2SCapturePacket
+    ↓
+服务端 Schematic.capture(level, pos1, pos2)
+    ├─ 逐格读 BlockState + BlockEntity.saveWithoutMetadata()
+    └─ 抛 IllegalStateException 时把消息当翻译键回报
+    ↓
+SchematicStorage.put(schematic) → 得到 UUID
+BlueprintItem.setSchematic(stack, id, size, name)
+    ↓
+S2CSchematicDataPacket（完整结构 NBT + id + 名字）
+    ↓
+客户端 ClientSchematicCache.put + ClientBlueprintBinder.bind
+```
+
+**`ClientBlueprintBinder` 为什么存在**：不走服务端物品 NBT 同步。那条路要经过容器槽位广播，慢半拍会让面板一直显示旧结构、得关掉重开才对。收到包就当场绑定，界面立刻正确。
+
+### 5.2 投影链路
+
+```
+ProjectionRenderer.onRenderLevel（AFTER_PARTICLES 阶段）
+    ├─ BlueprintItem.findHeld(player)    手持蓝图才画
+    ├─ 没录制但选了 Pos1 → 画选区线框
+    ├─ ClientSchematicCache.get(id, rotation)
+    │      本地缺失 → 发 C2SRequestSchematicPacket（2 秒节流）
+    ├─ origin = 锚点 或 视线所指位置
+    ├─ rebuild()   重算待渲染列表 PENDING（400ms 间隔 / id 变 / origin 变 / 结构实例变）
+    └─ 逐块渲染半透明幽灵方块
+```
+
+**面剔除**：邻居在结构内部且 `canOcclude()` 为真时跳过该面，避免半透明叠加和大量无用绘制。
+
+**渲染数量上限** `MAX_RENDER_BLOCKS = 20000`。
+
+**画不出模型的方块**：走 `BlockMaterials` 那套之外的兜底 —— 见 §5.5。
+
+### 5.3 建造链路
+
+```
+MaidBuildTickHandler（LevelTickEvent.END，ServerLevel）
+    └─ 遍历维度内所有已加载实体，找任务是 BlueprintBuildTask.UID 的女仆
+        └─ BlueprintBuildController.tick(level, maid)
+
+BlueprintBuildController 状态机：
+    MOVE_TO_SPOT   走到站位（锚点外扩 STAND_MARGIN=2 的一圈里找落脚点）
+    BUILD          调 session.step(...)
+                      ├─ placed > 0    → 挥手 + 音效，等 PLACE_COOLDOWN
+                      ├─ finished      → 收工，走还料流程
+                      └─ 都没发生       → 认为缺料，转 FETCH
+    FETCH          找来源 → 走过去 → 取料 → 回 BUILD
+```
+
+**为什么绕开 TLM 的 Brain 调度**：`BlueprintBuildTask.createBrainTasks()` 刻意返回 `List.of()`。施工由服务端 tick 主动驱动，行为可控（出错能提示玩家），且不要求主人在附近。区块卸载即自动停止。
+
+**状态机重入**：控制器按女仆 **entity id** 缓存在 `MaidBuildTickHandler` 的 Map 里。但**开工前的待命状态记在女仆的持久数据**（`BlueprintHomeModeBefore`）而不是控制器字段 —— 区块重载会换一个新的控制器实例，记在字段里会丢。
+
+### 5.4 取料链路（三层数量账）
+
+这是最容易改错的地方，单独展开见 [§7.5](#75-取料的三层数量账)。
+
+```
+1. pendingBill = session.remainingBill(level, anchor)
+        ↓  整座结构还缺什么（跳过已建成的方块）
+2. shortfall  = ItemProvider.missingAmounts(backpack, pendingBill)
+        ↓  再扣掉背包已有的 —— 这才是"真正要去拿的"
+3. 用 shortfall 找来源（findProvider）
+        ↓
+   provider.transferInto(backpack, pendingBill, 空位数)
+        ↓  内部会再算一次 missingAmounts，结果与 shortfall 一致
+```
+
+### 5.5 渲染兜底：画不出模型的方块
+
+`ProjectionRenderer` 和 `BlueprintScreen` 渲染方块时传的是 `ModelData.EMPTY`（投影那个位置还没有方块实体）。
+
+**多数方块无所谓，但 AE2 的 ME 线缆不是**：`CableBusBakedModel.getQuads()` 第一件事就是 `ModelData.get(...)` 取渲染状态，取不到直接 `Collections.emptyList()` —— **一个面都画不出来**。
+
+所以两处都做了兜底：记录画不出任何面的方块，循环结束后统一补轮廓。
+
+- 普通方块：整格线框
+- AE2 线缆：交给 `CableBusOutline`，画"芯 + 连接臂 + 部件标记"，按部件类型上色
+
+**`CableBusOutline` 靠注册名 `ae2:cable_bus` 识别，不引用 AE2 类型** —— 没装 AE2 时它就是个空壳。
+
+---
+
+## 6. 扩展点指南
+
+### 6.1 接入一种新的存储来源
+
+**适用场景**：支持某个模组的仓库、无线终端、末影箱网络等。
+
+**步骤**：
+
+1. 在 `build` 包下实现 `ItemProvider`：
+
+```java
+public class MyProvider implements ItemProvider {
+    @Override public BlockPos interactPos() { ... }        // 女仆走到哪
+    @Override public boolean hasAny(Map<Item,Integer> bill) { ... }   // 便宜地判断有没有
+    @Override public int transferInto(IItemHandler dst, Map<Item,Integer> bill, int maxKinds) { ... }
+    @Override public int acceptInto(IItemHandler src, Map<Item,Integer> filter) { ... }  // 可选（还料）
+}
+```
+
+2. 在集成包里加一个 `Compat` 门面（不引用对方类型），像 `Ae2Compat` 那样用 `ModList.get().isLoaded(...)` 把关。
+
+3. 在 `BlueprintBuildController.findProvider` 里挂上去。
+
+**`transferInto` 的契约**：
+
+- `bill` 传入的是**需求**，不是缺口 —— 实现内部应当调 `ItemProvider.missingAmounts(dst, bill)` 得到真实缺口。
+- `maxKinds` 是本次最多搬几种（调用方传的是背包空位数）。
+- **绝不能吞物品**：塞不进 `dst` 的东西要原样还回去。
+
+**`Ae2ItemProvider` 是最复杂的参考实现**，因为它面对的 ME 网络只能"模拟提取"，且提取出来就不可逆 —— 必须先确认容量再真提。
+
+### 6.2 让某个方块的材料计算正确
+
+**适用场景**：方块的 `Block.asItem()` 返回的东西不是玩家实际放上去的那个物品。
+
+**典型案例**：`ae2:cable_bus` 只是个容器方块，玩家实际放的是贴在各面的**部件**（线缆本体、终端、存储总线）。它的 `asItem()` 返回一个游戏里拿不到的方块物品 —— 于是女仆抱着错误的物品名去箱子里找，箱子里明明有也视而不见。
+
+**步骤**：
+
+1. 实现 `BlockMaterials`：
+
+```java
+public class MyMaterialResolver implements BlockMaterials {
+    @Override
+    @Nullable
+    public List<Item> resolve(BlockState state, @Nullable CompoundTag blockEntityTag) {
+        if (!(state.getBlock() instanceof MyBlock)) {
+            return null;              // 不认领 → 交给下一个
+        }
+        List<Item> items = new ArrayList<>();
+        // 从 blockEntityTag 里解析出真正的物品
+        return items;                 // 空列表 = 不需要材料
+    }
+}
+```
+
+2. 在模组初始化时注册（参考 `BlueprintMod` 里 `Ae2Compat.registerMaterialResolver()`）。
+
+**返回值语义**：`null` = 不认领；空列表 = 认领但不需要材料；非空 = 需要这些物品（**可以重复**，表示同种物品要多份）。
+
+### 6.3 让某个方块在旋转时朝向正确
+
+**适用场景**：方块把自己或子部件的朝向存在方块实体 NBT 里。
+
+**背景**：`Schematic.rotate` 转 `BlockState` 是通用的（见 §7.3），但 **NBT 是无 schema 的任意树**，引擎不知道哪个字段是朝向。
+
+**步骤**：
+
+1. 实现 `BlockEntityRotation`：
+
+```java
+public class MyRotation implements BlockEntityRotation {
+    @Override
+    @Nullable
+    public CompoundTag rotate(BlockState state, CompoundTag tag, Rotation rotation) {
+        if (!(state.getBlock() instanceof MyBlock)) {
+            return null;
+        }
+        CompoundTag result = tag.copy();       // 不要就地改传入的
+        // 用 Schematic.rotateDirection(...) 得到新方向，搬运对应的键/字段
+        return result;
+    }
+}
+```
+
+2. 在模组初始化时注册。
+
+**三个必须注意的点**：
+
+- **不要就地修改传入的 `tag`** —— 同一个结构可能被反复旋转。
+- **不要边搬边查**。如果要把 `north` 的内容搬到 `east`，必须先把"搬运计划"整个算出来，再分两批执行（先全摘除、再全写入）。否则刚搬过去的键会被后面的迭代当成源再处理一遍，**结果多转一格**。
+- 用 `Schematic.rotateDirection(dir, rotation)`，它已经处理了 `UP`/`DOWN`（`Direction.getClockWise()` 对它们会抛异常）。
+
+### 6.4 加一个网络包
+
+1. 在 `network/packet` 下新建类，提供静态的 `encode` / `decode` / `handle`。
+2. 在 `ModNetwork.register()` 里**追加**注册（用自增 id）。
+
+**注意事项**：
+
+- 所有 `handle` 都要 `context.enqueueWork(...)` 切主线程 + `context.setPacketHandled(true)`。
+- C2S 侧先判 `context.getSender() == null` 再往下走。
+- **注册顺序即协议**。改动顺序会让新旧客户端无法互通 —— 此时应该升 `PROTOCOL_VERSION`。
+- 传大数据用 `writeByteArray` 而不是字符串（字符串有 32K 上限，会被静默截断）。
+
+### 6.5 加一个新物品
+
+在 `registry/ModItems.java` 里加 `DeferredRegister` 条目，然后：
+
+- 模型放 `assets/blueprint/models/item/<name>.json`
+- 中英文案都要加（`assets/blueprint/lang/zh_cn.json` 和 `en_us.json`）
+- 配方放 `data/blueprint/recipes/<name>.json`
+- 如果是给创造模式用的，在 `BlueprintMod.addCreative` 里 `event.accept(...)`
+- **涉及软依赖模组物品的配方必须用 `forge:conditional` 包住**，否则没装那个模组的整合包会加载失败
+
+---
+
+## 7. 关键陷阱与设计决策
+
+这一节是文档里最重要的部分。下面每一条都是实际踩过的坑。
+
+### 7.1 原版交互是「方块优先」
+
+**现象**：手持绑定书右键容器 → 容器打开了，绑定没生效。手持空白蓝图点容器 → 同样打不开选区。
+
+**原因**：原版的调用顺序是**方块的 `use()` 先执行**。方块返回 `CONSUME`/`SUCCESS` 时，物品的 `useOn()` 根本不会被调用。
+
+**解法**：覆写 `Item#onItemUseFirst(ItemStack, UseOnContext)` —— Forge 的这个钩子跑在方块处理**之前**，返回非 `PASS` 就能完整接管这次右键。
+
+`BlueprintItem` 和 `BindingBookItem` 都这么做了。`BindingBookEvents` 那个 `setUseBlock(DENY)` 是兜底（在物品自身抢不到时生效）。
+
+### 7.2 软依赖的隔离方式
+
+**TLM**：类上标 `@LittleMaidExtension`，只有 TLM 存在时才会被反射实例化。事件注册（`MaidBuildTickHandler`）放在 `addMaidTask` 回调里，用静态标志防重复。
+
+**AE2**：三重隔离。
+
+1. 全部代码关在 `integration.ae2` 包。
+2. `Ae2Compat` **本身不引用任何 AE2 类型**，只用 `ModList.get().isLoaded("ae2")` 判断。JVM 是懒加载的，方法体里提到的类要等真正执行到那一行才解析 —— 所以没装 AE2 时它永远不会去解析 `Ae2ItemProvider`。
+3. `build.gradle` 里**故意只给 `compileOnly`，不加 `runtimeOnly`**。
+
+**代价**：开发环境跑不了 AE2 功能，要测需临时加 runtimeOnly。
+
+**延伸**：`CableBusOutline` 用注册名 `ae2:cable_bus` 识别线缆，也就不需要引用 AE2 类型。
+
+### 7.3 旋转的两种失效（都是引擎层面的限制）
+
+**失效一：方块状态没转**
+
+```java
+BlockState.rotate(Rotation)  →  Block.rotate(state, rotation)
+                                     ↑ 默认实现直接 return state
+```
+
+原版 `Block.rotate` 的**默认实现什么都不做**。只有主动覆写过的方块（楼梯、箱子这类继承 `HorizontalDirectionalBlock` 的）才会真的转朝向。
+
+**AE2 的机器属于没覆写的那一类**（`DriveBlock` 等继承自己的 `AEBaseEntityBlock`），所以磁盘驱动器的 `facing` 纹丝不动。
+
+**解法**：`Schematic.rotateState` 在方块自己转完之后，**按原始状态的值**把所有 `DirectionProperty` 重设一遍。用原值算目标值，所以不会出现"转了两次"。
+
+**失效二：NBT 里的朝向**
+
+有些方块的朝向**压根不在 BlockState 里**。AE2 的线缆把"部件挂在哪个面"记在 NBT 的**键名**上：
+
+```json
+{ "cable": {...}, "north": {"id": "ae2:terminal"}, "east": {...} }
+```
+
+而 `CableBusContainer.readFromNBT` 是这么读的：
+
+```
+for (Direction side : DIRECTIONS_WITH_NULL) {
+    tag.get(NBT_KEY_SIDES[getSideIndex(side)])
+    loadPart(side, compound)      // 方向完全由键名决定
+}
+```
+
+**没有别的通道** —— 想让部件跟着转，只能搬这些键。这由 `Ae2BlockEntityRotation` 负责。
+
+**为什么不能通用处理**：BlockState 有 `Property` 系统，引擎能按 `Rotation` 通用变换；而 NBT 是**没有 schema 的任意树**，引擎看到 `north: {...}` 不知道那是朝向、物品名还是自定义标签。**原版的 `StructureTemplate`（结构方块）同样做不到** —— 它旋转时也只处理 BlockState，NBT 原样搬运。
+
+### 7.4 缓存与结构的一致性
+
+`ProjectionRenderer` 用静态 `PENDING` 列表缓存"待渲染方块"，坐标是**结构内的相对坐标**。它有四个失效条件：
+
+```java
+now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
+|| !Objects.equals(id, cachedId)          // 换了蓝图
+|| !Objects.equals(origin, cachedOrigin)  // 锚点移动
+|| schematic != cachedSchematic           // ★ 结构实例变了
+```
+
+**最后一条是崩溃修复留下的**。旋转蓝图时，`ClientSchematicCache.get(id, rotation)` 会返回一个**宽长互换的新副本** —— 而 `id` 和 `origin` 都没变。沿用旧坐标去访问新结构就会 `ArrayIndexOutOfBoundsException`。
+
+渲染线程上抛异常会**直接退出游戏**（日志里表现为一次 `Unreported exception` 紧跟 `Stopping server`）。
+
+**防御**：`CableBusOutline.outlinesOf` 开头也做了 `inBounds` 检查。调用方来自渲染循环，坐标未必和传进来的结构对得上 —— 宁可少画，不能崩。
+
+### 7.5 取料的三层数量账
+
+这三个概念很容易混，改代码时务必分清：
+
+| 名字 | 含义 | 用在哪 |
+|---|---|---|
+| `bill` | **整座结构**从零建起需要多少 | 还料时判断"哪些是这次工程带来的" |
+| `pendingBill` | 跳过已建成的方块后，**还缺多少** | 传给 `transferInto`（内部再减背包） |
+| `shortfall` | 再扣掉**背包已有**，真正要去拿的 | 判断"值不值得跑一趟" |
+
+**踩过的两个坑**：
+
+**坑一：用 `bill` 取料** → 每缺一次料都把整座建筑的量搬一遍。已建好的部分会被反复要一回，女仆来回跑不说，手上的材料还越堆越多。解法是 `remainingBill`。
+
+**坑二：用 `pendingBill` 判断来源** → 容器里只有"背包早就备齐的那几种"时，`hasAny` 通过，女仆白跑一趟，然后报"背包满了"（实际背包没满、容器里也没有她缺的）。解法是用 `shortfall` 判断。
+
+**另一个相关的**：取料上限原本硬编码 `MAX_PULL_SLOTS = 8`，建筑用超过 8 种材料就永远凑不齐，装了背包升级也不会多拿。现在传的是 `countEmptySlots(backpack)`。
+
+### 7.6 数值与单位约定
+
+**所有距离比较都用平方距离**（`distanceToSqr` / `distSqr`），避免多余的 `sqrt`。常量的命名也跟着是 `XXX_SQR`。
+
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `CONTAINER_SEARCH_RADIUS` / `_HEIGHT` | 10 / 4 | 就近取料的搜索范围 |
+| 到位距离² | 4 | 到站判定的水平距离 |
+| `STAND_MARGIN` | 2 | 站位在锚点外扩多少格 |
+| 离岗距离² | 64 | 超过就重新走回站位 |
+| 导航放弃阈值² | 256 | 超过就不去了，就地取料 |
+| `PLACE_COOLDOWN` / `FETCH_COOLDOWN` | 4 / 20 | 放块、取料的间隔 tick |
+| `NO_SOURCE_COOLDOWN` | 100 | 找不到材料后的冷却 |
+| `RETURN_TIMEOUT` | 600 | 还料流程的超时兜底 |
+| `RESCAN_INTERVAL` | 100 | 施工期间重扫间隔 |
+| `MESSAGE_COOLDOWN_MS` | 30000 | 同一类提示的最小间隔 |
+| `MAX_REPORTED_MATERIALS` | 5 | 缺料提示最多列几种 |
+
+### 7.7 提示信息的几个约定
+
+- **面向玩家的文本一律走翻译键**（`Component.translatable`），不硬编码。
+- **`Schematic` 抛的 `IllegalStateException` 消息本身就是翻译键**，上层直接 `Component.translatable(e.getMessage())`。
+- **物品名用 `Component` 传递，不预先 `.getString()`** —— 否则会在服务端固定成某种语言，客户端换语言也翻不动。
+- **缺料提示不走 `notify`**：那条路径有 30 秒冷却，会被其他消息挤掉。而且同一批缺料只播报一次（比较 `shortfall` 内容），女仆每隔几秒重试也不会刷屏。
+- **`lastReportedShortfall` 要在确认有玩家在附近之后才设置** —— 否则女仆在远处缺料时会先被标记成"说过了"，等玩家走过去反而听不到。
+
+### 7.8 幂等性
+
+多处刻意做成幂等，改动时别破坏：
+
+- `BuildSession.step` 跳过已是目标状态的方块。
+- `ClientBlueprintBinder.bind` 只在 id 不同时才写入。
+- `Schematic.rotate(NONE)` 和 `BlockEntityRotationResolver.rotate(NONE)` 直接返回自身，不产生复制。
+- `ClientSchematicCache.get(id, NONE)` 返回原始实例。
+- `MaidTerminalBlockEntity.ensureNodeCreated()` 可重复调用。
+
+### 7.9 几个"看着奇怪但别改"的地方
+
+| 位置 | 说明 |
+|---|---|
+| `MaidTerminalBlockEntity` 待机功耗 `0.0` | **与 AE2 官方终端一致**，不是随手填的 |
+| `MaidItemSource.getBackpack()` 用 `getMaidInv()` | 不用 `ITEM_HANDLER` 能力 —— 那个是含主手/副手/盔甲的组合视图，往里面塞材料会让建筑方块跑到女仆装备栏里 |
+| `MaidTerminalBlock.use` 覆写的是 `@Deprecated` 方法 | 1.20.1 没提供替代重载，覆写它仍是注册右键行为的标准做法 |
+| `BlueprintBuildTask.createBrainTasks` 返回空列表 | 施工不走 Brain 调度，见 §5.3 |
+| `ClientSchematicCache` 不标 `@OnlyIn` | 它不引用客户端专属类型，保持中立可避免服务端收包时触发意外的类加载 |
+| `ItemProvider` 不用 `IItemHandler` | ME 网络这类存储根本没有槽位概念，硬套槽位接口会写出一堆假实现 |
+
+---
+
+## 8. 排查手册
+
+### 8.1 女仆不干活
+
+按顺序检查：
+
+1. **蓝图是否有锚点** —— 没锚点女仆不知道建在哪，会提示 `maid_no_anchor`。
+2. **女仆的任务是否是「蓝图施工」** —— `MaidBuildTickHandler` 只处理任务是 `BlueprintBuildTask.UID` 的女仆。
+3. **蓝图是否允许女仆施工** —— `MaidBuild` 标记。
+4. **看日志** —— `BlueprintMod.LOGGER` 会记录取料出发、取到几种、还料结果等关键节点。
+
+### 8.2 女仆取不到材料
+
+日志里搜 `女仆 ... 没取到材料`，后面会带上是"容器里有"还是"容器里没有"，以及背包空余格数。
+
+| 现象 | 可能原因 |
+|---|---|
+| "容器里没有还缺的" | 来源判断用错了清单（应查 `shortfall`），或者材料解析不对（见 §6.2） |
+| "容器里有还缺的" | 背包真的塞不下，或者 `transferInto` 的容量判断有误 |
+| 提示缺料清单但箱子里明明有 | 材料的**物品 ID** 和箱子里的不是同一个 —— 典型是 §6.2 那类方块 |
+| 一直重复搬同一种材料 | `remainingBill` 没生效，或者 `missingAmounts` 算错 |
+
+### 8.3 渲染相关
+
+**游戏直接退出，日志末尾是 `Unreported exception` + `Stopping server`** —— 渲染线程抛了异常。堆栈里找 `ProjectionRenderer` / `BlueprintScreen` / `CableBusOutline`，多半是坐标越界（见 §7.4）。
+
+**投影里某些方块看不见** —— 该方块的模型依赖 `ModelData`（AE2 线缆是典型）。检查 `CableBusOutline.isCableBus` 是否认出了它。
+
+**旋转蓝图后投影错位/残留** —— `PENDING` 的失效条件（§7.4）。
+
+### 8.4 编译/运行时错误
+
+**`NoClassDefFoundError` 指向 AE2 类型** —— 有代码在 `Ae2Compat.isLoaded()` 之外触碰了 `integration.ae2` 的类。检查调用点。
+
+**未装 TLM 时启动失败** —— 有代码在 `@LittleMaidExtension` 之外引用了 TLM 类型。
+
+**配方加载失败** —— 涉及软依赖模组物品的配方没有用 `forge:conditional` 包住。
+
+### 8.5 验证第三方 API 的正确姿势
+
+**不要凭记忆或推测写第三方模组的 API。**
+
+```bash
+# 1. 查版本与下载地址
+https://api.modrinth.com/v2/project/<id>/version?loaders=["forge"]&game_versions=["1.20.1"]
+
+# 2. 列出 jar 内的类，确认真实包路径
+python -c "import zipfile; z=zipfile.ZipFile('xxx.jar'); print([n for n in z.namelist() if 'XXX' in n])"
+
+# 3. 核实方法签名
+javap -p -c -cp xxx.jar <全限定类名>
+```
+
+**这个方法纠正过多次凭印象写下的错误** —— 例如推测的 `AECapabilities` 类实际不存在（真名是 `appeng.capabilities.Capabilities`），以及差点把 `getUpdateTag` 的覆写误判成 `saveWithoutMetadata`。看字节码还能确认调用链，比如"线缆的部件方向到底存在哪"。
+
+---
+
+## 9. 构建与发布
+
+### 构建配置要点（`build.gradle`）
+
+- `archivesBaseName = mod_name.replace(' ', '')` → `MaidConstruction`。
+- `processResources` 的 `filteringCharset = 'UTF-8'` —— 避免 Windows 下 GBK 乱码。
+- `jar.finalizedBy('reobfJar')`；**没有配置 jarJar**。
+- 编译参数带 `-Xlint:deprecation`，所以**新增的过时 API 调用会以警告形式暴露**，别忽略。
+
+### 发布流程
+
+```bash
+# 1. 升版本号
+#    gradle.properties 的 mod_version
+
+# 2. 写更新说明
+#    CHANGELOG.md 顶部加一段，格式：## [x.y.z] - YYYY-MM-DD
+
+# 3. 本地构建验证
+./gradlew build
+
+# 4. 提交并打标签
+git add -A && git commit -m "Release x.y.z"
+git tag vx.y.z && git push origin main && git push origin vx.y.z
+```
+
+推 tag 会触发 `.github/workflows/release.yml`：
+
+1. 构建，失败时把日志末尾 150 行写进 job summary 并上传 `build/reports/`。
+2. 从 `CHANGELOG.md` 用 `awk` 抽当前版本段落作为 Release 说明（**所以 CHANGELOG 的标题格式不能错**）。
+3. `softprops/action-gh-release` 发布，附上 `build/libs/*.jar`。
+
+`workflow_dispatch` 手动触发时只构建、不发版。
+
+### 版本号的语义
+
+- **补丁位**：修 bug、改文案、调数值
+- **次版本位**：行为变更、新增扩展点、换判定逻辑
+- **主版本位**：破坏存档兼容或协议兼容的改动（同时要升 `PROTOCOL_VERSION`）
+
+---
+
+## 10. 给 AI 的特别提示
+
+如果你是被要求修改这个项目的 AI，请先读这一节。
+
+### 动手前的检查清单
+
+1. **读完 [§7 关键陷阱](#7-关键陷阱与设计决策)**。那里每一条都是踩过的坑，重复踩的代价是玩家崩溃或物品丢失。
+2. **确认改动落在哪一层**。核心包（`build`/`schematic`/`item`）不能 import 模组类型；模组相关的逻辑必须走注册链或安全门面。
+3. **改动涉及第三方 API 时，先用 `javap` 验证签名**（见 §8.5）。不要凭记忆写。
+4. **改网络包要同步考虑 `PROTOCOL_VERSION`。**
+5. **改 `Schematic` / `BuildSession` 的数据语义时，检查所有调用方** —— 这两个类被多处依赖，`bill` / `remainingBill` / `shortfall` 的区分尤其容易搞混。
+
+### 容易被改错的地方
+
+| 位置 | 风险 |
+|---|---|
+| `BuildSession.bill` vs `remainingBill` | 用途不同，混用会导致反复搬运（§7.5） |
+| `shortfall` vs `pendingBill` | 前者用于判断来源，后者传给 `transferInto`（§7.5） |
+| `BlockEntityRotation` 的实现 | 边搬边查会导致"多转一格"（§6.3） |
+| `Schematic.rotateState` | 用的是**原始状态**的值，改成转换后的值会双重旋转（§7.3） |
+| `ProjectionRenderer` 的 `PENDING` 失效条件 | 少一个条件就会在世界里崩溃（§7.4） |
+| `Ae2Compat` | 加入任何 AE2 类型的引用都会破坏软依赖隔离（§7.2） |
+| 渲染循环里调 `Schematic.entries()` | 会为每方块新建对象，大结构下严重卡顿 |
+
+### 这个项目的验证现状
+
+**绝大多数改动只做过编译验证，没有实机测试。** 涉及运行时行为的改动（渲染、AI 状态机、网络同步、实际放置）都需要在游戏里验证。
+
+验证时优先覆盖这些路径：
+
+- 手持蓝图/绑定书右键**容器**（交互顺序）
+- **旋转**一个含 AE2 机器和线缆的结构，然后完整建一遍（§7.3 的两条路径）
+- 让女仆在**材料种类超过 8 种**的结构上施工（取料上限）
+- **缺少材料**时观察提示内容和频率
+- 中途打断女仆、存档重载后恢复（幂等性）
+
+### 代码风格
+
+- 注释写**为什么**，不写**是什么**。这个项目的注释密度较高，都是在解释设计取舍和历史原因 —— 保持这个风格。
+- 面向玩家的文本走翻译键，中英文都要加。
+- 日志用 `BlueprintMod.LOGGER`，区分 `warn`（可恢复）和 `error`（异常）。
+- 可空返回值标 `@Nullable`（`javax.annotation`）。

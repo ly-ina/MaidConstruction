@@ -8,6 +8,9 @@ Minecraft Forge 1.20.1 模组。参考机械动力的蓝图，做一张可以反
 
 蓝图只是图纸，**不能一键放置**，建造全部由女仆完成。
 
+> **要改代码或扩展功能？先读 [DEVELOPER.md](DEVELOPER.md)。**
+> 里面有架构说明、四条主链路的完整数据流、扩展点指南，以及一份「改这里会踩坑」的清单。
+
 ---
 
 ## 功能
@@ -212,7 +215,8 @@ Java 版本可在 `gradle.properties` 里改 `java_version`（默认 17）。
 
 - **结构存储**：存在世界存档的 `SavedData` 里（主世界），蓝图物品只存一个 UUID，避免物品 NBT 膨胀
 - **紧凑编码**：调色板 + 索引数组，不是逐方块存对象
-- **旋转**：位置重新映射，方块状态交给 `BlockState.rotate()` 处理，朝向、连接类属性自动跟着转
+- **旋转**：位置重新映射；方块状态除 `BlockState.rotate()` 外，还按**原始属性值**把所有朝向属性补转一遍
+  （原版 `Block.rotate` 的默认实现根本不转朝向，很多模组的机器没覆写它），方块实体 NBT 里的朝向由各自的解析器负责
 
 **建造**
 
@@ -225,6 +229,9 @@ Java 版本可在 `gradle.properties` 里改 `java_version`（默认 17）。
 - **待命状态**：施工期间给女仆开启待命模式，避免因离主人太远被拽走；**原始状态记在女仆自己的持久数据里**（不是控制器字段），所以女仆区块卸载重载后也能正确还原
 - **取料抽象**：`ItemProvider` 把「材料从哪来」和主流程解耦，普通容器和 ME 网络各自实现，加新存储类型只是加一个实现类
 
+> 以上只是提要。完整的架构说明、扩展点步骤（怎么接一种新存储、怎么让某个方块的材料
+> 或朝向计算正确），以及一份「现象 → 原因」的排查手册，都在 **[DEVELOPER.md](DEVELOPER.md)**。
+
 ---
 
 ## 目录结构
@@ -235,22 +242,28 @@ src/main/java/com/example/blueprint/
 ├── item/
 │   ├── BlueprintItem.java               蓝图物品与交互
 │   ├── BindingBookItem.java             绑定书
-│   └── BindingBookEvents.java           让绑定书抢到方块的右键
-├── schematic/                           结构数据与存档库
-├── build/
-│   ├── BuildSession.java                建造会话（依赖排序、幂等推进）
+│   └── BindingBookEvents.java           让绑定书抢到方块的右键（兜底）
+├── schematic/
+│   ├── Schematic.java                   结构数据（调色板 + 索引数组）
+│   └── SchematicStorage.java            存档内的结构库
+├── build/                               建造核心，不引用任何模组类型
+│   ├── BuildSession.java                建造会话（依赖排序、幂等推进、物料清单）
 │   ├── ItemProvider.java                取料来源抽象
-│   └── BlockContainerProvider.java      普通容器取料/归还
+│   ├── BlockContainerProvider.java      普通容器取料/归还
+│   ├── BlockMaterials.java              ← 扩展点：方块需要什么材料
+│   └── BlockEntityRotation.java         ← 扩展点：旋转方块实体 NBT
 ├── client/
 │   ├── ProjectionRenderer.java          投影渲染
+│   ├── CableBusOutline.java             AE2 线缆的示意轮廓
 │   ├── BoundBlockHighlighter.java       绑定位置高亮
 │   ├── ClientSchematicCache.java        客户端结构缓存
 │   ├── BlueprintTransfer.java           导入导出
+│   ├── ClientBlueprintBinder.java       收到结构数据后当场绑定
 │   └── gui/BlueprintScreen.java         蓝图面板
 ├── network/                             数据包
 └── integration/
     ├── maid/                            车万女仆联动（任务、施工控制器、绑定书饰品）
-    └── ae2/                             AE2 联动（取料、终端方块）
+    └── ae2/                             AE2 联动（取料、材料解析、部件旋转、终端方块）
 ```
 
 ## 许可
