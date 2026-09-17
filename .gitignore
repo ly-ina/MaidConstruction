@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+out/
+bin/
+
+# Forge 运行目录
+run/
+run-data/
+run-server/
+logs/
+*.log
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+.vscode/
+*.launch
+
+# 系统
+.DS_Store
+Thumbs.db

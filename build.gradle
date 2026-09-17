@@ -1,0 +1,138 @@
+plugins {
+    id 'java-library'
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle' version '6.0.+'
+}
+
+version = mod_version
+group = mod_group_id
+
+// 直接用英文 mod 名做产物名（去掉空格，避免文件名里出现空格）
+archivesBaseName = mod_name.replace(' ', '')
+
+// Forge 1.20.1 官方要求 JDK 17；如果本机只有更高版本的 JDK，
+// 可以在 gradle.properties 里把 java_version 改掉（或运行时加 -Pjava_version=21）
+java.toolchain.languageVersion = JavaLanguageVersion.of(java_version)
+
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+
+    copyIdeResources = true
+
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            property 'forge.enabledGameTestNamespaces', mod_id
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        server {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            property 'forge.enabledGameTestNamespaces', mod_id
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+
+    // 车万女仆通过 Modrinth Maven 分发（TLM 官方推荐的依赖方式）
+    maven {
+        url = "https://api.modrinth.com/maven"
+        content {
+            includeGroup "maven.modrinth"
+        }
+    }
+
+    // 兜底：CurseForge Maven
+    maven {
+        url = "https://cursemaven.com"
+        content {
+            includeGroup "curse.maven"
+        }
+    }
+}
+
+// 把 gradle.properties 里的值填进 mods.toml / pack.mcmeta。
+// 少了这一步，jar 里的 modId 会保持成字面量 "${mod_id}"，Forge 直接拒绝加载。
+processResources {
+    // Windows 平台默认编码是 GBK，不显式指定的话中文会被写成乱码
+    filteringCharset = 'UTF-8'
+
+    def replaceProperties = [
+            version                 : version,
+            mod_id                  : mod_id,
+            mod_name                : mod_name,
+            mod_license             : mod_license,
+            mod_version             : mod_version,
+            mod_authors             : mod_authors,
+            mod_description         : mod_description,
+            minecraft_version       : minecraft_version,
+            minecraft_version_range : minecraft_version_range,
+            forge_version           : forge_version,
+            forge_version_range     : forge_version_range,
+            loader_version_range    : loader_version_range
+    ]
+    inputs.properties(replaceProperties)
+
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // 车万女仆（软依赖：运行时未安装也不会崩溃，靠 @LittleMaidExtension 反射加载）
+    compileOnly fg.deobf("maven.modrinth:touhou-little-maid:${tlm_version}")
+    runtimeOnly fg.deobf("maven.modrinth:touhou-little-maid:${tlm_version}")
+}
+
+jar {
+    manifest {
+        attributes([
+                "Specification-Title"     : mod_id,
+                "Specification-Vendor"    : mod_authors,
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.jar.archiveVersion,
+                "Implementation-Vendor"   : mod_authors,
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+}
+
+jar.finalizedBy('reobfJar')
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifact jar
+        }
+    }
+    repositories {
+        maven {
+            url "file://${project.projectDir}/mcmodsrepo"
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << '-Xlint:deprecation'
+}
