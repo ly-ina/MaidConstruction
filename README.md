@@ -1,5 +1,7 @@
 # 女仆建筑 / MaidConstruction
 
+![Build and Release](https://github.com/ly-ina/MaidConstruction/actions/workflows/release.yml/badge.svg)
+
 Minecraft Forge 1.20.1 模组。参考机械动力的蓝图，做一张可以反复使用的「图纸」：
 
 **框选记录建筑 → 拿着它投影到任意位置 → 交给车万女仆按图施工。**
