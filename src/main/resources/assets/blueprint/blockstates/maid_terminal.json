@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "blueprint:block/maid_terminal"
+    }
+  }
+}

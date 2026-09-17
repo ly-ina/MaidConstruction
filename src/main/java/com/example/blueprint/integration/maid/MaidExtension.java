@@ -1,8 +1,10 @@
 package com.example.blueprint.integration.maid;
 
+import com.example.blueprint.registry.ModItems;
 import com.github.tartaricacid.touhoulittlemaid.api.ILittleMaid;
 import com.github.tartaricacid.touhoulittlemaid.api.LittleMaidExtension;
 import com.github.tartaricacid.touhoulittlemaid.entity.task.TaskManager;
+import com.github.tartaricacid.touhoulittlemaid.item.bauble.BaubleManager;
 import net.minecraftforge.common.MinecraftForge;
 
 /**
@@ -26,5 +28,17 @@ public class MaidExtension implements ILittleMaid {
             tickHandlerRegistered = true;
             MinecraftForge.EVENT_BUS.register(MaidBuildTickHandler.class);
         }
+    }
+
+    /**
+     * 把绑定书注册成女仆饰品，否则饰品栏会拒绝收纳它。
+     * <p>
+     * BaubleManager 在自己的初始化末尾会把内部表冻结成不可变集合，
+     * 冻结之后再 bind 会抛异常。这个回调正是由 TLM 在冻结前调用的，
+     * 所以不要在任何地方手动提前触发初始化。
+     */
+    @Override
+    public void bindMaidBauble(BaubleManager manager) {
+        manager.bind(ModItems.BINDING_BOOK, new BindingBookBauble());
     }
 }

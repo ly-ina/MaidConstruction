@@ -5,16 +5,15 @@ import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 
 import javax.annotation.Nullable;
 
 /**
- * 女仆的材料来源。
+ * 女仆的材料来源，同时也是取料时的搬运目的地。
  * <p>
- * 优先用女仆背包（通过 Forge 的物品栏能力获取），
- * 万一女仆模组没有暴露该能力，就退回到副手槽——一次搬一组，慢但不会失效。
+ * 只认女仆的背包，不碰主手、副手和盔甲——施工期间手上要拿蓝图，
+ * 材料挤进去会把蓝图顶掉，外观上也会变成"攥着一把石头走路"。
  */
 public class MaidItemSource implements ItemSource {
 
@@ -24,9 +23,17 @@ public class MaidItemSource implements ItemSource {
         this.maid = maid;
     }
 
+    /**
+     * 女仆的背包。
+     * <p>
+     * 这里刻意用 {@code getMaidInv()} 而不是查 ITEM_HANDLER 能力：
+     * 那个能力返回的是一个组合视图（MaidInvWrapper 继承自 CombinedInvWrapper），
+     * 把主手、副手、盔甲统统算在里面，往里塞材料就会出现
+     * "建筑材料跑到女仆装备栏里"的情况。
+     */
     @Nullable
     public IItemHandler getBackpack() {
-        return maid.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
+        return maid.getMaidInv();
     }
 
     @Override

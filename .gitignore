@@ -25,6 +25,9 @@
 .vscode/
 *.launch
 
+# 临时诊断目录：核对第三方 API 时下载的 jar，不该进仓库
+/.ae2check/
+
 # 系统
 .DS_Store
 Thumbs.db

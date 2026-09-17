@@ -38,7 +38,12 @@ public class MaidBuildTickHandler {
                 continue;
             }
             if (!isBuildTask(maid)) {
-                CONTROLLERS.remove(maid.getId());
+                BlueprintBuildController stopped = CONTROLLERS.remove(maid.getId());
+                if (stopped != null) {
+                    // 女仆中途换了工作。施工期间动过她的待命状态，得还回去，
+                    // 否则她会一直保持"不跟随"的姿势，玩家还以为女仆坏了
+                    stopped.detach(maid);
+                }
                 continue;
             }
             CONTROLLERS.computeIfAbsent(maid.getId(), id -> new BlueprintBuildController())

@@ -34,3 +34,11 @@ ${mod_description}
     versionRange = "[1.3.0,)"
     ordering = "AFTER"
     side = "BOTH"
+
+# AE2：可选软依赖，未安装时无法从 ME 网络取料，其余功能不受影响
+[[dependencies.${mod_id}]]
+    modId = "ae2"
+    mandatory = false
+    versionRange = "[15,)"
+    ordering = "AFTER"
+    side = "BOTH"

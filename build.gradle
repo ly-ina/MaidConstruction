@@ -101,6 +101,12 @@ dependencies {
     // 车万女仆（软依赖：运行时未安装也不会崩溃，靠 @LittleMaidExtension 反射加载）
     compileOnly fg.deobf("maven.modrinth:touhou-little-maid:${tlm_version}")
     runtimeOnly fg.deobf("maven.modrinth:touhou-little-maid:${tlm_version}")
+
+    // AE2 也是软依赖，但故意只进编译期、不加 runtimeOnly：
+    // 整合包装了 AE2 就能从 ME 网络取料，没装则一切照旧。
+    // 相关代码全部关在 integration.ae2 包里，运行时由 Ae2Compat 把关，
+    // 避免没装 AE2 时触发 NoClassDefFoundError。
+    compileOnly fg.deobf("maven.modrinth:ae2:${ae2_version}")
 }
 
 jar {

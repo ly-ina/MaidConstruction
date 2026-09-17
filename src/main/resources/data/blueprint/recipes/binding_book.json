@@ -1,0 +1,27 @@
+{
+  "type": "forge:conditional",
+  "recipes": [
+    {
+      "conditions": [
+        {
+          "type": "forge:mod_loaded",
+          "modid": "touhou_little_maid"
+        }
+      ],
+      "recipe": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": [
+          {
+            "item": "minecraft:writable_book"
+          },
+          {
+            "item": "touhou_little_maid:power_point"
+          }
+        ],
+        "result": {
+          "item": "blueprint:binding_book"
+        }
+      }
+    }
+  ]
+}
