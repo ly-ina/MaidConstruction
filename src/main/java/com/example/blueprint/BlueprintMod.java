@@ -28,6 +28,10 @@ public class BlueprintMod {
         // 没装的情况下触碰它就是一个 NoClassDefFoundError
         if (Ae2Compat.isLoaded()) {
             Ae2TerminalRegistry.register(modBus);
+            // ME 线缆方块的材料要按它上面的部件算，不能走 Block.asItem()
+            Ae2Compat.registerMaterialResolver();
+            // 线缆上各部件的朝向记在 NBT 键名里，结构旋转时得自己搬
+            Ae2Compat.registerBlockEntityRotation();
         }
 
         modBus.addListener(this::commonSetup);

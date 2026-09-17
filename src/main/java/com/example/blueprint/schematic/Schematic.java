@@ -1,6 +1,8 @@
 package com.example.blueprint.schematic;
 
+import com.example.blueprint.build.BlockEntityRotationResolver;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -13,6 +15,7 @@ import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -245,7 +248,7 @@ public final class Schematic {
                         }
                     }
 
-                    BlockState rotated = palette.get(blocks[oldIndex]).rotate(rotation);
+                    BlockState rotated = rotateState(palette.get(blocks[oldIndex]), rotation);
                     Integer id = paletteLookup.get(rotated);
                     if (id == null) {
                         id = newPalette.size();
@@ -258,13 +261,53 @@ public final class Schematic {
 
                     CompoundTag blockEntity = blockEntities.get(oldIndex);
                     if (blockEntity != null) {
-                        newBlockEntities.put(newIndex, blockEntity);
+                        newBlockEntities.put(newIndex,
+                                BlockEntityRotationResolver.rotate(rotated, blockEntity, rotation));
                     }
                 }
             }
         }
 
         return new Schematic(newSize, newPalette, newBlocks, newBlockEntities);
+    }
+
+    /**
+     * 旋转方块状态，连那些没覆写 {@code Block#rotate} 的方块一起转。
+     * <p>
+     * 原版 {@code BlockState#rotate} 是委托给 {@code Block#rotate} 的，而那个的默认实现
+     * 直接返回原状态——只有楼梯、箱子这类主动覆写过的方块才会真的动朝向。
+     * AE2 的机器（磁盘驱动器之类）继承的是它自己的基类，没覆写，于是朝向纹丝不动。
+     * <p>
+     * 所以这里在方块自己转完之后，再按**原始状态**的值把所有朝向属性重设一遍。
+     * 用的是原值而不是转过之后的值，因此不会出现"转了两次"。
+     */
+    @SuppressWarnings("deprecation")
+    private static BlockState rotateState(BlockState state, Rotation rotation) {
+        BlockState result = state.rotate(rotation);
+        for (Property<?> property : state.getProperties()) {
+            if (property instanceof DirectionProperty directionProperty) {
+                result = result.setValue(directionProperty,
+                        rotateDirection(state.getValue(directionProperty), rotation));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 绕 Y 轴旋转一个方向。
+     * <p>
+     * 上下不受影响，而 {@code Direction#getClockWise} 对 UP/DOWN 会直接抛异常，得先挡掉。
+     */
+    public static Direction rotateDirection(Direction direction, Rotation rotation) {
+        if (direction.getAxis() == Direction.Axis.Y) {
+            return direction;
+        }
+        return switch (rotation) {
+            case CLOCKWISE_90 -> direction.getClockWise();
+            case COUNTERCLOCKWISE_90 -> direction.getCounterClockWise();
+            case CLOCKWISE_180 -> direction.getOpposite();
+            default -> direction;
+        };
     }
 
     /**

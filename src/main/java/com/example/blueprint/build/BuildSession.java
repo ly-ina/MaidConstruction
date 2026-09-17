@@ -4,7 +4,6 @@ import com.example.blueprint.schematic.Schematic;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -77,11 +76,35 @@ public class BuildSession {
     public static Map<Item, Integer> bill(Schematic schematic) {
         Map<Item, Integer> result = new LinkedHashMap<>();
         for (Schematic.BlockEntry entry : schematic.entries()) {
-            Item item = entry.state().getBlock().asItem();
-            if (item == Items.AIR) {
+            // 一个方块可能要好几样东西（AE2 的线缆就是：线缆本体 + 贴上去的部件），
+            // 所以逐个累加，而不是只取 Block.asItem() 那一个
+            for (Item item : BlockMaterialResolver.materialsOf(entry)) {
+                result.merge(item, 1, Integer::sum);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 从现在这个进度出发，还缺哪些材料、各缺多少。
+     * <p>
+     * 和 {@link #bill} 的区别很重要：那个算的是"把整座结构从零建起来要多少"，
+     * 是个定值；这个方法会跳过工地上已经是目标状态的方块。
+     * <p>
+     * 取料必须按这个来。否则每缺一次料都照全量清单去搬，已经建好的部分会被
+     * 反复要一遍——女仆来回跑不说，手上的材料还会越堆越多。
+     */
+    public Map<Item, Integer> remainingBill(ServerLevel level, BlockPos origin) {
+        Map<Item, Integer> result = new LinkedHashMap<>();
+        for (Schematic.BlockEntry entry : schematic.entries()) {
+            BlockPos world = origin.offset(entry.pos());
+            if (level.getBlockState(world).equals(entry.state())) {
+                // 这块已经是目标状态，不需要再为它取料
                 continue;
             }
-            result.merge(item, 1, Integer::sum);
+            for (Item item : BlockMaterialResolver.materialsOf(entry)) {
+                result.merge(item, 1, Integer::sum);
+            }
         }
         return result;
     }
@@ -140,15 +163,22 @@ public class BuildSession {
                 continue;
             }
 
-            Item item = entry.state().getBlock().asItem();
-            if (item != Items.AIR) {
-                if (source.available(item) <= 0 || !source.consume(item, 1)) {
-                    // 缺料就停在这个方块上，下一轮还从这里继续。
-                    // 不能 continue 往后扫：那会一路扫到队尾，让 finished 变成 true，
-                    // 调用方就会误判成"已经建完"，从而再也不去取材料。
-                    missing++;
-                    break;
-                }
+            Map<Item, Integer> needed = new LinkedHashMap<>();
+            for (Item item : BlockMaterialResolver.materialsOf(entry)) {
+                needed.merge(item, 1, Integer::sum);
+            }
+
+            if (!hasEnough(source, needed)) {
+                // 缺料就停在这个方块上，下一轮还从这里继续。
+                // 不能 continue 往后扫：那会一路扫到队尾，让 finished 变成 true，
+                // 调用方就会误判成"已经建完"，从而再也不去取材料。
+                missing++;
+                break;
+            }
+
+            // 先确认全都够再动手：材料可能不止一种，中途失败会白扣掉前面那些
+            for (Map.Entry<Item, Integer> required : needed.entrySet()) {
+                source.consume(required.getKey(), required.getValue());
             }
 
             level.setBlock(world, entry.state(), Block.UPDATE_ALL);
@@ -167,6 +197,21 @@ public class BuildSession {
         }
 
         return new StepResult(placed, missing, finished, remaining(), lastPlaced);
+    }
+
+    /**
+     * 材料是否都够。
+     * <p>
+     * 按"需求量"而不是"有没有"来判断：同一个方块可能要两份同种材料，
+     * 只看数量是否大于零会漏判。
+     */
+    private static boolean hasEnough(ItemSource source, Map<Item, Integer> needed) {
+        for (Map.Entry<Item, Integer> required : needed.entrySet()) {
+            if (source.available(required.getKey()) < required.getValue()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

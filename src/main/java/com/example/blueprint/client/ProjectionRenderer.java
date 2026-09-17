@@ -22,6 +22,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -66,6 +67,7 @@ public class ProjectionRenderer {
     private static final List<PendingBlock> PENDING = new ArrayList<>();
     private static UUID cachedId;
     private static BlockPos cachedOrigin;
+    private static Schematic cachedSchematic;
     private static long lastScan = 0;
 
     @SubscribeEvent
@@ -113,12 +115,16 @@ public class ProjectionRenderer {
         }
 
         long now = System.currentTimeMillis();
+        // 还要比对 schematic 实例本身：旋转蓝图时 id 和 origin 都没变，
+        // 但缓存会换成一个宽长互换的旋转副本，PENDING 里的旧坐标拿去访问它就会越界
         if (now - lastScan > RESCAN_INTERVAL_MS
                 || !Objects.equals(id, cachedId)
-                || !Objects.equals(origin, cachedOrigin)) {
+                || !Objects.equals(origin, cachedOrigin)
+                || schematic != cachedSchematic) {
             rebuild(mc.level, schematic, origin);
             cachedId = id;
             cachedOrigin = origin;
+            cachedSchematic = schematic;
             lastScan = now;
         }
 
@@ -141,16 +147,30 @@ public class ProjectionRenderer {
         BlockRenderDispatcher dispatcher = mc.getBlockRenderer();
         RandomSource random = RandomSource.create(SEED);
 
+        List<PendingBlock> unrenderable = null;
         for (PendingBlock block : PENDING) {
-            renderGhost(pose, consumer, dispatcher, random, schematic, block);
+            if (!renderGhost(pose, consumer, dispatcher, random, schematic, block)) {
+                if (unrenderable == null) {
+                    unrenderable = new ArrayList<>();
+                }
+                unrenderable.add(block);
+            }
         }
 
         buffers.endBatch(GHOST);
+
+        if (unrenderable != null) {
+            renderOutlines(pose, buffers, schematic, BlueprintItem.getRotation(stack), unrenderable);
+        }
+
         pose.popPose();
     }
 
-    private static void renderGhost(PoseStack pose, VertexConsumer consumer, BlockRenderDispatcher dispatcher,
-                                    RandomSource random, Schematic schematic, PendingBlock block) {
+    /**
+     * @return 是否真的画出了东西。返回 false 表示这个方块需要由调用方补一个占位轮廓
+     */
+    private static boolean renderGhost(PoseStack pose, VertexConsumer consumer, BlockRenderDispatcher dispatcher,
+                                       RandomSource random, Schematic schematic, PendingBlock block) {
         BlockState state = block.state();
         BakedModel model = dispatcher.getBlockModel(state);
 
@@ -159,6 +179,7 @@ public class ProjectionRenderer {
         pose.translate(block.x() + 0.002D, block.y() + 0.002D, block.z() + 0.002D);
         pose.scale(0.996F, 0.996F, 0.996F);
 
+        boolean drew = false;
         for (Direction direction : Direction.values()) {
             if (isCovered(schematic, block.x() + direction.getStepX(),
                     block.y() + direction.getStepY(),
@@ -168,15 +189,61 @@ public class ProjectionRenderer {
             for (BakedQuad quad : model.getQuads(state, direction, random, ModelData.EMPTY, null)) {
                 consumer.putBulkData(pose.last(), quad, 0.45F, 0.68F, 1.0F, 0.30F,
                         LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, false);
+                drew = true;
             }
         }
         // 不属于任何朝向的面（无 cullface 的方块）
         for (BakedQuad quad : model.getQuads(state, null, random, ModelData.EMPTY, null)) {
             consumer.putBulkData(pose.last(), quad, 0.45F, 0.68F, 1.0F, 0.30F,
                     LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, false);
+            drew = true;
         }
 
         pose.popPose();
+        return drew;
+    }
+
+    /** 普通方块退回整格线框时的形状 */
+    private static final AABB UNIT_CUBE =
+            new AABB(0.0D, 0.0D, 0.0D, 1.0D, 1.0D, 1.0D).inflate(-0.004D);
+
+    /**
+     * 给"画不出模型"的方块补轮廓。
+     * <p>
+     * 有些方块的模型要靠方块实体提供的 ModelData 才算得出来，AE2 的 ME 线缆就是典型：
+     * 它的 CableBusBakedModel 一上来就去 ModelData 里取渲染状态，取不到直接返回空列表。
+     * 而投影时那个位置本来就还没有方块实体，ModelData 只能是 EMPTY，
+     * 于是整段线缆一个面都画不出来——看上去就像根本没录进蓝图。
+     * <p>
+     * 普通方块退回一格线框；线缆交给 {@link CableBusOutline}，
+     * 画成芯、连接臂和部件标记，至少能分清哪段是线缆、哪个面挂了终端。
+     */
+    private static void renderOutlines(PoseStack pose, MultiBufferSource.BufferSource buffers,
+                                       Schematic schematic, Rotation rotation,
+                                       List<PendingBlock> blocks) {
+        VertexConsumer lines = buffers.getBuffer(RenderType.LINES);
+        for (PendingBlock block : blocks) {
+            List<CableBusOutline.Outline> outlines =
+                    CableBusOutline.outlinesOf(schematic, block.x(), block.y(), block.z(), rotation);
+
+            if (outlines == null) {
+                drawOutline(pose, lines, block.x(), block.y(), block.z(),
+                        UNIT_CUBE, 0.45F, 0.68F, 1.0F);
+                continue;
+            }
+            for (CableBusOutline.Outline outline : outlines) {
+                drawOutline(pose, lines, block.x(), block.y(), block.z(),
+                        outline.box(), outline.red(), outline.green(), outline.blue());
+            }
+        }
+        buffers.endBatch(RenderType.LINES);
+    }
+
+    /** 轮廓坐标是相对结构原点的，画之前得先挪到方块自己那一格 */
+    private static void drawOutline(PoseStack pose, VertexConsumer lines,
+                                    int x, int y, int z, AABB box,
+                                    float red, float green, float blue) {
+        LevelRenderer.renderLineBox(pose, lines, box.move(x, y, z), red, green, blue, 0.9F);
     }
 
     /**

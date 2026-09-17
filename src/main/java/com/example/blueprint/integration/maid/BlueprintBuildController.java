@@ -16,6 +16,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
@@ -89,15 +90,23 @@ public class BlueprintBuildController {
     private static final int MOVE_TIMEOUT = 120;
     /** 施工期间每隔多久重扫一遍（约 5 秒），用来发现中途被拆掉的方块 */
     private static final int RESCAN_INTERVAL = 100;
-    /** 一趟最多从容器里搬多少种材料 */
-    private static final int MAX_PULL_SLOTS = 8;
     /** 容器开合动画持续多少 tick */
     private static final int CONTAINER_ANIMATION_TICKS = 30;
     /** 同一类提示的最小间隔，别把聊天栏刷满 */
     private static final long MESSAGE_COOLDOWN_MS = 30_000L;
+    /** 缺少材料时最多列出几种，免得聊天栏被刷屏 */
+    private static final int MAX_REPORTED_MATERIALS = 5;
 
     private BuildSession session;
+    /** 整座结构一共要多少材料。还料时用它判断"哪些是这次工程带来的" */
     private Map<Item, Integer> bill = Map.of();
+    /** 这一趟实际要补的材料：已建好的部分不算，取料按这个来 */
+    private Map<Item, Integer> pendingBill = Map.of();
+    /** 再扣掉背包已有的之后，真正还要从容器里拿的量。用它判断值不值得跑一趟 */
+    private Map<Item, Integer> shortfall = Map.of();
+    /** 上次已经播报过的缺料清单。内容没变就说明是同一件事，不再重复弹 */
+    @Nullable
+    private Map<Item, Integer> lastReportedShortfall;
     private UUID activeId;
     private BlockPos activeAnchor;
     private Rotation activeRotation = Rotation.NONE;
@@ -244,6 +253,9 @@ public class BlueprintBuildController {
     private void reset() {
         session = null;
         bill = Map.of();
+        pendingBill = Map.of();
+        shortfall = Map.of();
+        lastReportedShortfall = null;
         fetchProvider = null;
         returnProvider = null;
         returnFinished = false;
@@ -459,17 +471,39 @@ public class BlueprintBuildController {
             return;
         }
 
-        // 一块都没放下去，基本就是没材料了，去取料
+        // 一块都没放下去，基本就是没材料了。出发前重算一遍"还差多少"——
+        // 已经建好的部分不该再要，否则每缺一次料都会把整座建筑的量重搬一遍
+        pendingBill = session.remainingBill(level, activeAnchor);
+        if (pendingBill.isEmpty()) {
+            // 什么也不缺却一块也放不下，多半是别的原因卡住了（比如支撑还没就位）。
+            // 这种时候去取料只会白跑一趟
+            cooldown = NO_SOURCE_COOLDOWN;
+            return;
+        }
+
+        // 再扣掉背包里已经有的。这一步不能省：决定"值不值得跑一趟"的是还差多少，
+        // 不是清单上有多少——背包里躺着的那部分不该再算进去，
+        // 否则容器里只有这些已有的东西时，女仆会白跑一趟，还报告说背包满了
+        IItemHandler backpack = new MaidItemSource(maid).getBackpack();
+        shortfall = backpack == null
+                ? pendingBill
+                : ItemProvider.missingAmounts(backpack, pendingBill);
+        if (shortfall.isEmpty()) {
+            cooldown = NO_SOURCE_COOLDOWN;
+            return;
+        }
+
         ItemProvider provider = findProvider(level, maid);
         if (provider == null) {
             cooldown = NO_SOURCE_COOLDOWN;
-            notify(level, maid, "message.blueprint.maid_no_material");
+            notifyMissingMaterials(level, maid);
             return;
         }
         fetchProvider = provider;
         state = State.FETCH;
-        BlueprintMod.LOGGER.info("女仆 {} 出发去 {} 取料（来源：{}）",
-                maid.getUUID(), provider.interactPos(), provider.getClass().getSimpleName());
+        BlueprintMod.LOGGER.info("女仆 {} 出发去 {} 取料（来源：{}，缺口 {} 种）",
+                maid.getUUID(), provider.interactPos(), provider.getClass().getSimpleName(),
+                pendingBill.size());
     }
 
     private void tickFetch(ServerLevel level, EntityMaid maid) {
@@ -661,7 +695,7 @@ public class BlueprintBuildController {
         if (provider == null) {
             return null;
         }
-        if (provider.hasAny(bill)) {
+        if (provider.hasAny(shortfall)) {
             return provider;
         }
 
@@ -703,7 +737,7 @@ public class BlueprintBuildController {
     private boolean hasWantedItem(IItemHandler handler) {
         for (int i = 0; i < handler.getSlots(); i++) {
             ItemStack stack = handler.getStackInSlot(i);
-            if (!stack.isEmpty() && bill.containsKey(stack.getItem())) {
+            if (!stack.isEmpty() && shortfall.containsKey(stack.getItem())) {
                 return true;
             }
         }
@@ -733,13 +767,20 @@ public class BlueprintBuildController {
         }
         maid.swing(InteractionHand.MAIN_HAND);
 
-        int moved = provider.transferInto(backpack, bill, MAX_PULL_SLOTS);
+        // 上限按背包实际空位来，不再写死一个种类数：
+        // 背包越大（装了升级）越该一趟搬够，否则材料种类一多，
+        // 每趟只能带回固定几样，剩下的永远凑不齐
+        int moved = provider.transferInto(backpack, pendingBill, Math.max(1, countEmptySlots(backpack)));
         if (moved == 0) {
-            // 跑了一趟却两手空空，多半是背包塞满了。不提示的话，
-            // 女仆只会在容器和工地之间无限来回，玩家完全看不出问题出在哪
-            BlueprintMod.LOGGER.warn("女仆 {} 到达 {} 却没能取到任何材料，背包空余格数：{}",
-                    maid.getUUID(), pos, countEmptySlots(backpack));
-            notify(level, maid, "message.blueprint.maid_nothing_taken");
+            // 空手而归有两种原因，得分清楚：背包塞不下，或者这容器里压根没有还缺的那几样。
+            // 提示写错会让玩家顺着错的线索去翻背包，而问题其实在别处
+            boolean hasWanted = provider.hasAny(shortfall);
+            BlueprintMod.LOGGER.warn("女仆 {} 在 {} 没取到材料（{}还缺的 {} 种，背包空余 {} 格）",
+                    maid.getUUID(), pos, hasWanted ? "容器里有" : "容器里没有",
+                    shortfall.size(), countEmptySlots(backpack));
+            notify(level, maid, hasWanted
+                    ? "message.blueprint.maid_backpack_full"
+                    : "message.blueprint.maid_source_empty");
         } else {
             BlueprintMod.LOGGER.info("女仆 {} 从 {} 取到 {} 种材料", maid.getUUID(), pos, moved);
         }
@@ -1044,7 +1085,7 @@ public class BlueprintBuildController {
         return ItemStack.EMPTY;
     }
 
-    private void notify(ServerLevel level, EntityMaid maid, String translationKey) {
+    private void notify(ServerLevel level, EntityMaid maid, String translationKey, Object... args) {
         long now = System.currentTimeMillis();
         if (now - lastMessageAt < MESSAGE_COOLDOWN_MS) {
             return;
@@ -1053,7 +1094,56 @@ public class BlueprintBuildController {
 
         Player nearby = level.getNearestPlayer(maid, 16.0D);
         if (nearby != null) {
-            nearby.sendSystemMessage(Component.translatable(translationKey));
+            nearby.sendSystemMessage(Component.translatable(translationKey, args));
         }
+    }
+
+    /**
+     * 找不到材料时，把缺哪些、各缺多少讲清楚。
+     * <p>
+     * 光说一句"找不到材料"，玩家还得自己拿着蓝图去对账。物品名用
+     * {@link Component} 传而不是先转成字符串——那样会在服务端就固定成某种语言，
+     * 客户端换成别的语言也翻不动了。
+     */
+    private void notifyMissingMaterials(ServerLevel level, EntityMaid maid) {
+        // 附近没人就先不说，也别记成"已播报"——否则玩家赶回来时反而听不到
+        Player nearby = level.getNearestPlayer(maid, 16.0D);
+        if (nearby == null) {
+            return;
+        }
+
+        // 同一批缺料只说一次。女仆每隔几秒就会重试一遍，照实播报的话
+        // 聊天栏会被同一句话刷满。等清单变了（又建了一部分、或者换了蓝图）再提醒。
+        // 这里也不走 notify：那条路径有 30 秒冷却，会让这条重要提示被别的消息挤掉。
+        if (shortfall.equals(lastReportedShortfall)) {
+            return;
+        }
+        lastReportedShortfall = Map.copyOf(shortfall);
+
+        if (shortfall.isEmpty()) {
+            nearby.sendSystemMessage(Component.translatable("message.blueprint.maid_no_material"));
+            return;
+        }
+
+        MutableComponent list = Component.empty();
+        int shown = 0;
+        for (Map.Entry<Item, Integer> entry : shortfall.entrySet()) {
+            if (shown++ >= MAX_REPORTED_MATERIALS) {
+                break;
+            }
+            if (shown > 1) {
+                list.append(", ");
+            }
+            list.append(entry.getKey().getDescription())
+                    .append(" x")
+                    .append(String.valueOf(entry.getValue()));
+        }
+        if (shortfall.size() > MAX_REPORTED_MATERIALS) {
+            list.append(Component.translatable("message.blueprint.maid_missing_more",
+                    shortfall.size() - MAX_REPORTED_MATERIALS));
+        }
+
+        BlueprintMod.LOGGER.info("女仆 {} 缺少建造材料：{}", maid.getUUID(), shortfall);
+        nearby.sendSystemMessage(Component.translatable("message.blueprint.maid_missing_materials", list));
     }
 }

@@ -48,6 +48,25 @@ public class BindingBookItem extends Item {
 
     @Override
     public InteractionResult useOn(UseOnContext context) {
+        return bind(context);
+    }
+
+    /**
+     * 抢在方块之前处理右键。
+     * <p>
+     * 原版的交互顺序是**方块优先**：手持绑定书右键终端、箱子这类会自己响应右键的方块时，
+     * 方块的 use 先把界面打开并返回"已处理"，绑定书的 useOn 压根不会被调用。
+     * {@link #useOn} 只在方块"不想处理"时才轮得到。
+     * <p>
+     * Forge 的 onItemUseFirst 则跑在方块处理之前，返回非 PASS 就能把这下右键完整接管，
+     * 所以无论对方是普通箱子、ME 终端方块还是挂在缆线上的终端部件，绑定都优先。
+     */
+    @Override
+    public InteractionResult onItemUseFirst(ItemStack stack, UseOnContext context) {
+        return bind(context);
+    }
+
+    private static InteractionResult bind(UseOnContext context) {
         Level level = context.getLevel();
         BlockPos pos = context.getClickedPos();
         ItemStack stack = context.getItemInHand();

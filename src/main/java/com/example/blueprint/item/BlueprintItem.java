@@ -237,8 +237,27 @@ public class BlueprintItem extends Item {
     // 交互
     // ------------------------------------------------------------------
 
+    /**
+     * 抢在方块之前处理右键。
+     * <p>
+     * 原版是**方块优先**：拿蓝图点箱子时，箱子的 use 会先把界面打开并返回"已处理"，
+     * 蓝图的 useOn 根本轮不到——于是容器就当不成选区角点了。
+     * <p>
+     * 可容器本身也是结构的一部分（箱笼、储物桶这些边角上的东西同样要录进蓝图），
+     * 点它的时候必须是选点而不是开箱。Forge 的 onItemUseFirst 跑在方块处理之前，
+     * 返回非 PASS 就能把这下右键完整接管。
+     */
+    @Override
+    public InteractionResult onItemUseFirst(ItemStack stack, UseOnContext context) {
+        return select(context);
+    }
+
     @Override
     public InteractionResult useOn(UseOnContext context) {
+        return select(context);
+    }
+
+    private static InteractionResult select(UseOnContext context) {
         Player player = context.getPlayer();
         if (player == null) {
             return InteractionResult.PASS;

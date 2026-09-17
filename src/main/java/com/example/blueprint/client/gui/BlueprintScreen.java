@@ -1,6 +1,7 @@
 package com.example.blueprint.client.gui;
 
 import com.example.blueprint.client.BlueprintTransfer;
+import com.example.blueprint.client.CableBusOutline;
 import com.example.blueprint.client.ClientSchematicCache;
 import com.example.blueprint.item.BlueprintItem;
 import com.example.blueprint.network.ModNetwork;
@@ -12,6 +13,7 @@ import com.example.blueprint.network.packet.C2SSetNamePacket;
 import com.example.blueprint.network.packet.C2SSetRotationPacket;
 import com.example.blueprint.schematic.Schematic;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
@@ -20,24 +22,34 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.model.data.ModelData;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -208,15 +220,50 @@ public class BlueprintScreen extends Screen {
         BlockRenderDispatcher dispatcher = mc.getBlockRenderer();
 
         int drawn = 0;
+        List<Schematic.BlockEntry> unrenderable = null;
         for (Schematic.BlockEntry entry : previewEntries) {
             if (drawn++ % step != 0) {
                 continue;
             }
-            pose.pushPose();
-            pose.translate(entry.pos().getX(), entry.pos().getY(), entry.pos().getZ());
-            dispatcher.renderSingleBlock(entry.state(), pose, buffers,
-                    LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
-            pose.popPose();
+            if (canRender(entry.state(), dispatcher)) {
+                pose.pushPose();
+                pose.translate(entry.pos().getX(), entry.pos().getY(), entry.pos().getZ());
+                dispatcher.renderSingleBlock(entry.state(), pose, buffers,
+                        LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+                pose.popPose();
+            } else {
+                // 模型算不出几何体的方块（AE2 的 ME 线缆就是），退回一格线框，
+                // 免得它在预览里凭空消失，看上去像是根本没录进蓝图
+                if (unrenderable == null) {
+                    unrenderable = new ArrayList<>();
+                }
+                unrenderable.add(entry);
+            }
+        }
+
+        if (unrenderable != null) {
+            VertexConsumer lines = buffers.getBuffer(RenderType.LINES);
+            for (Schematic.BlockEntry entry : unrenderable) {
+                int x = entry.pos().getX();
+                int y = entry.pos().getY();
+                int z = entry.pos().getZ();
+                // 线缆方块画成"芯 + 连接臂 + 部件标记"，其余画不出模型的退回整格
+                List<CableBusOutline.Outline> outlines =
+                        CableBusOutline.outlinesOf(schematic, x, y, z, BlueprintItem.getRotation(getStack()));
+
+                pose.pushPose();
+                pose.translate(x, y, z);
+                if (outlines == null) {
+                    LevelRenderer.renderLineBox(pose, lines, PREVIEW_CUBE, 0.45F, 0.68F, 1.0F, 0.9F);
+                } else {
+                    for (CableBusOutline.Outline outline : outlines) {
+                        LevelRenderer.renderLineBox(pose, lines, outline.box(),
+                                outline.red(), outline.green(), outline.blue(), 0.9F);
+                    }
+                }
+                pose.popPose();
+            }
+            buffers.endBatch(RenderType.LINES);
         }
 
         buffers.endBatch();
@@ -225,6 +272,33 @@ public class BlueprintScreen extends Screen {
         graphics.drawCenteredString(this.font,
                 Component.literal(size.getX() + "×" + size.getY() + "×" + size.getZ()),
                 cx, top + WINDOW_HEIGHT - 13, 0x999999);
+    }
+
+    /** 预览里给"模型画不出来"的方块画线框用的单位立方体 */
+    private static final AABB PREVIEW_CUBE =
+            new AABB(0.0D, 0.0D, 0.0D, 1.0D, 1.0D, 1.0D).inflate(-0.004D);
+
+    /** 方块模型能不能算出几何体。按状态缓存，省得每帧重算 */
+    private static final Map<BlockState, Boolean> RENDERABLE = new HashMap<>();
+
+    /**
+     * 判断一个方块的模型在"没有方块实体数据"的前提下能不能画出几何体。
+     * <p>
+     * 投影和这里的面板预览都拿不到方块实体，只能传 {@code ModelData.EMPTY}。
+     * 多数方块无所谓，但 AE2 的 ME 线缆模型一上来就去 ModelData 里取渲染状态，
+     * 取不到直接返回空列表——一个面都画不出来。
+     */
+    private static boolean canRender(BlockState state, BlockRenderDispatcher dispatcher) {
+        return RENDERABLE.computeIfAbsent(state, s -> {
+            BakedModel model = dispatcher.getBlockModel(s);
+            RandomSource random = RandomSource.create(42L);
+            for (Direction direction : Direction.values()) {
+                if (!model.getQuads(s, direction, random, ModelData.EMPTY, null).isEmpty()) {
+                    return true;
+                }
+            }
+            return !model.getQuads(s, null, random, ModelData.EMPTY, null).isEmpty();
+        });
     }
 
     @Nullable

@@ -1,5 +1,7 @@
 package com.example.blueprint.integration.ae2;
 
+import com.example.blueprint.build.BlockEntityRotationResolver;
+import com.example.blueprint.build.BlockMaterialResolver;
 import com.example.blueprint.build.ItemProvider;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
@@ -20,6 +22,7 @@ public final class Ae2Compat {
     public static final String MOD_ID = "ae2";
 
     private static Boolean loaded;
+    private static boolean materialsRegistered;
 
     private Ae2Compat() {
     }
@@ -40,5 +43,28 @@ public final class Ae2Compat {
             return null;
         }
         return Ae2ItemProvider.create(level, pos);
+    }
+
+    /**
+     * 把 AE2 的方块材料解析器挂进核心建造逻辑，模组初始化时调用一次即可。
+     * <p>
+     * 没装 AE2 时什么都不做——核心包从头到尾不会碰到 AE2 的类。
+     */
+    public static void registerMaterialResolver() {
+        if (materialsRegistered || !isLoaded()) {
+            return;
+        }
+        materialsRegistered = true;
+        BlockMaterialResolver.register(new Ae2MaterialResolver());
+    }
+
+    /**
+     * 把 AE2 的方块实体旋转器挂进结构旋转逻辑，模组初始化时调用一次即可。
+     * <p>
+     * 方块状态里的朝向有通用逻辑兜底，但线缆把部件朝向记在 NBT 键名里，
+     * 这部分只有 AE2 自己知道怎么搬。
+     */
+    public static void registerBlockEntityRotation() {
+        BlockEntityRotationResolver.register(new Ae2BlockEntityRotation());
     }
 }
