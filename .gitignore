@@ -28,6 +28,9 @@
 # 临时诊断目录：核对第三方 API 时下载的 jar，不该进仓库
 /.ae2check/
 
+# 提交信息临时文件（Windows 下 cmd 会吞引号，只能走文件）
+/commit_msg.txt
+
 # 系统
 .DS_Store
 Thumbs.db
