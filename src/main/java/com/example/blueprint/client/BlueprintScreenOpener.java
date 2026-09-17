@@ -2,7 +2,6 @@ package com.example.blueprint.client;
 
 import com.example.blueprint.client.gui.BlueprintScreen;
 import net.minecraft.client.Minecraft;
-import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -16,7 +15,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public class BlueprintScreenOpener {
 
-    public static void open(ItemStack stack) {
-        Minecraft.getInstance().setScreen(new BlueprintScreen(stack));
+    public static void open() {
+        Minecraft.getInstance().setScreen(new BlueprintScreen());
     }
 }

@@ -13,6 +13,7 @@ import com.example.blueprint.network.packet.C2SSetRotationPacket;
 import com.example.blueprint.schematic.Schematic;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -45,8 +46,9 @@ import java.util.UUID;
  * 左上角改名字，左边是 3D 预览（可拖动旋转），中间是操作按钮，
  * 右边是 blueprints/ 目录下的文件，点一下选中再导入。
  * <p>
- * 文件列表是手写的而不是用原版的选择列表组件——原版的在这么窄的区域里
- * 命中判定一直对不上，点上去没反应，自己算行号反而简单可靠。
+ * 这里不缓存 ItemStack：服务端改完 NBT 会连槽位一起替换掉，
+ * 抓着打开界面时那个旧引用不放的话，导入完得关掉重开才看得到变化。
+ * 所以每次都从玩家手上现取。
  */
 @OnlyIn(Dist.CLIENT)
 @SuppressWarnings("deprecation") // renderSingleBlock 在 1.20.1 被标了过时，但没有等价的替代写法
@@ -71,7 +73,6 @@ public class BlueprintScreen extends Screen {
     private static final int COLOR_ROW_SELECTED = 0xFFFF55;
     private static final int COLOR_STATUS = 0x55FF55;
 
-    private final ItemStack stack;
     private EditBox nameBox;
 
     private final List<Path> files = new ArrayList<>();
@@ -81,16 +82,23 @@ public class BlueprintScreen extends Screen {
     private int fileListY;
     private int fileListHeight;
 
+    /** 记录预览对应的是哪份数据，变了才重建条目列表 */
     private Schematic previewSchematic;
+    private UUID previewId;
     private List<Schematic.BlockEntry> previewEntries = List.of();
     private float yaw = 45.0F;
     private float pitch = 30.0F;
     private long lastRequestAt = 0;
     private Component status = Component.empty();
 
-    public BlueprintScreen(ItemStack stack) {
+    public BlueprintScreen() {
         super(Component.translatable("gui.blueprint.title"));
-        this.stack = stack;
+    }
+
+    /** 现取玩家手上的蓝图，别缓存 */
+    private ItemStack getStack() {
+        LocalPlayer player = Minecraft.getInstance().player;
+        return player == null ? ItemStack.EMPTY : BlueprintItem.findHeld(player);
     }
 
     // ------------------------------------------------------------------
@@ -106,7 +114,7 @@ public class BlueprintScreen extends Screen {
         this.nameBox = new EditBox(this.font, left + 76, top + 4, 132, 14,
                 Component.translatable("gui.blueprint.name_label"));
         this.nameBox.setMaxLength(48);
-        this.nameBox.setValue(BlueprintItem.getBlueprintName(stack));
+        this.nameBox.setValue(BlueprintItem.getBlueprintName(getStack()));
         this.nameBox.setHint(Component.translatable("tooltip.blueprint.unnamed"));
         this.addRenderableWidget(this.nameBox);
 
@@ -126,6 +134,9 @@ public class BlueprintScreen extends Screen {
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.import_file"), b -> onImport())
+                .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
+        y += 22;
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.open_folder"), b -> onOpenFolder())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 30;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.close"), b -> onClose())
@@ -218,9 +229,11 @@ public class BlueprintScreen extends Screen {
 
     @Nullable
     private Schematic getPreview() {
+        ItemStack stack = getStack();
         UUID id = BlueprintItem.getSchematicId(stack);
         if (id == null) {
             previewSchematic = null;
+            previewId = null;
             previewEntries = List.of();
             return null;
         }
@@ -234,13 +247,15 @@ public class BlueprintScreen extends Screen {
                 ModNetwork.CHANNEL.sendToServer(new C2SRequestSchematicPacket(id));
             }
             previewSchematic = null;
+            previewId = null;
             previewEntries = List.of();
             return null;
         }
 
-        // 只在结构或朝向变化时重建列表，别每帧都分配一大堆对象
-        if (schematic != previewSchematic) {
+        // 结构或朝向变了才重建条目列表，别每帧都分配一大堆对象
+        if (schematic != previewSchematic || !id.equals(previewId)) {
             previewSchematic = schematic;
+            previewId = id;
             previewEntries = schematic.entries();
         }
         return schematic;
@@ -270,7 +285,7 @@ public class BlueprintScreen extends Screen {
             if (rowY + FILE_ROW_HEIGHT < fileListY || rowY > fileListY + fileListHeight) {
                 continue;
             }
-            String name = displayName(files.get(i));
+            String name = shortened(BlueprintTransfer.displayName(files.get(i)));
             graphics.drawString(this.font, name, fileListX + 2, rowY + 2,
                     i == selectedFile ? COLOR_ROW_SELECTED : COLOR_ROW, false);
         }
@@ -278,15 +293,8 @@ public class BlueprintScreen extends Screen {
         graphics.disableScissor();
     }
 
-    private String displayName(Path path) {
-        String name = path.getFileName().toString();
-        if (name.endsWith(BlueprintTransfer.FILE_EXTENSION)) {
-            name = name.substring(0, name.length() - BlueprintTransfer.FILE_EXTENSION.length());
-        }
-        if (name.length() > 20) {
-            name = name.substring(0, 19) + "…";
-        }
-        return name;
+    private String shortened(String name) {
+        return name.length() > 20 ? name.substring(0, 19) + "…" : name;
     }
 
     private boolean isOverFileList(double mouseX, double mouseY) {
@@ -338,19 +346,20 @@ public class BlueprintScreen extends Screen {
     // ------------------------------------------------------------------
 
     private void onRotate() {
+        ItemStack stack = getStack();
         Rotation next = BlueprintItem.cycleRotation(stack);
         ModNetwork.CHANNEL.sendToServer(new C2SSetRotationPacket(next));
         setStatus(Component.translatable("gui.blueprint.rotated_to", (next.ordinal() * 90) + "°"));
     }
 
     private void onClearAnchor() {
-        BlueprintItem.clearAnchor(stack);
+        BlueprintItem.clearAnchor(getStack());
         ModNetwork.CHANNEL.sendToServer(new C2SSetAnchorPacket(true));
         setStatus(Component.translatable("message.blueprint.anchor_cleared"));
     }
 
     private void onClearSchematic() {
-        BlueprintItem.clearSchematic(stack);
+        BlueprintItem.clearSchematic(getStack());
         ModNetwork.CHANNEL.sendToServer(C2SClearBlueprintPacket.INSTANCE);
         // 内容都没了，面板留着也没意义
         onClose();
@@ -389,11 +398,23 @@ public class BlueprintScreen extends Screen {
                 setStatus(Component.translatable("message.blueprint.import_too_large"));
                 return;
             }
-            String name = displayName(selected);
+            // 导入后蓝图名字跟随文件名，输入框当场同步
+            String name = BlueprintTransfer.displayName(selected);
+            nameBox.setValue(name);
             ModNetwork.CHANNEL.sendToServer(new C2SImportBlueprintPacket(data, name));
             setStatus(Component.translatable("gui.blueprint.importing"));
         } catch (IOException e) {
             setStatus(Component.translatable("message.blueprint.import_failed"));
+        }
+    }
+
+    private void onOpenFolder() {
+        Path dir = BlueprintTransfer.getExportDirectory();
+        try {
+            Util.getPlatform().openFile(dir.toFile());
+            setStatus(Component.translatable("gui.blueprint.opened_folder", dir.toString()));
+        } catch (Exception e) {
+            setStatus(Component.translatable("gui.blueprint.open_folder_failed"));
         }
     }
 
@@ -402,7 +423,7 @@ public class BlueprintScreen extends Screen {
         // 关闭时把名字同步给服务端，存进物品 NBT
         if (nameBox != null) {
             String name = nameBox.getValue().trim();
-            if (!name.equals(BlueprintItem.getBlueprintName(stack))) {
+            if (!name.equals(BlueprintItem.getBlueprintName(getStack()))) {
                 ModNetwork.CHANNEL.sendToServer(new C2SSetNamePacket(name));
             }
         }

@@ -292,7 +292,7 @@ public class BlueprintItem extends Item {
             if (player.isShiftKeyDown()) {
                 // 打开蓝图面板：预览、旋转、清空、导入导出都在里面。
                 // 用 DistExecutor 包一层，服务端不会去加载客户端的界面类。
-                DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> BlueprintScreenOpener.open(stack));
+                DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> BlueprintScreenOpener.open());
                 return InteractionResultHolder.success(stack);
             }
 
