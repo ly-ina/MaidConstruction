@@ -71,7 +71,7 @@ public class C2SImportBlueprintPacket {
                 BlueprintItem.setRotation(stack, net.minecraft.world.level.block.Rotation.NONE);
 
                 ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                        new S2CSchematicDataPacket(id, schematic.write(new CompoundTag())));
+                        new S2CSchematicDataPacket(id, msg.name, schematic.write(new CompoundTag())));
 
                 player.sendSystemMessage(Component.translatable("message.blueprint.imported",
                         schematic.getWidth(), schematic.getHeight(), schematic.getLength()));

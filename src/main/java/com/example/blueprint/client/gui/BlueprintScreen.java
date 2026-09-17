@@ -430,11 +430,8 @@ public class BlueprintScreen extends Screen {
         super.onClose();
     }
 
+    /** 只在面板内显示，不往聊天栏推——面板里的操作不该再弹一遍提示 */
     private void setStatus(Component message) {
         this.status = message;
-        LocalPlayer player = Minecraft.getInstance().player;
-        if (player != null) {
-            player.displayClientMessage(message, false);
-        }
     }
 }

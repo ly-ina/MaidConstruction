@@ -44,7 +44,7 @@ public class C2SRequestSchematicPacket {
             Schematic schematic = SchematicStorage.get(player.serverLevel()).get(msg.id);
             if (schematic != null) {
                 ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                        new S2CSchematicDataPacket(msg.id, schematic.write(new CompoundTag())));
+                        new S2CSchematicDataPacket(msg.id, "", schematic.write(new CompoundTag())));
             }
         });
         context.setPacketHandled(true);

@@ -70,7 +70,7 @@ public class C2SCapturePacket {
 
                 ModNetwork.CHANNEL.send(
                         PacketDistributor.PLAYER.with(() -> player),
-                        new S2CSchematicDataPacket(id, schematic.write(new CompoundTag())));
+                        new S2CSchematicDataPacket(id, msg.name, schematic.write(new CompoundTag())));
 
                 player.sendSystemMessage(Component.translatable("message.blueprint.captured",
                         schematic.getWidth(), schematic.getHeight(), schematic.getLength(),
