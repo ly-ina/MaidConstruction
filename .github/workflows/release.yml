@@ -32,9 +32,39 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      # Forge 要下不少依赖，第一次跑会比较慢
+      - name: Environment info
+        run: |
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+          ./gradlew --version
+
+      # Forge 要下不少依赖，第一次跑会比较慢。
+      # 失败时把末尾日志写进 job summary，免得因为是私有日志而两眼一抹黑。
       - name: Build
-        run: ./gradlew build --no-daemon --console=plain
+        run: |
+          set +e
+          ./gradlew build --no-daemon --console=plain --stacktrace 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "### Build failed (exit $status)"
+              echo '```'
+              tail -n 150 build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      # 构建挂了的时候，把 gradle 报告一并传上去，省得只能干瞪眼
+      - name: Upload build reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: |
+            build/reports/
+            build/tmp/
+          if-no-files-found: ignore
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
