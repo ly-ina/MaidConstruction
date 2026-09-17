@@ -6,7 +6,25 @@
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "blueprint:creative_maid_interface"
+          "name": "blueprint:creative_maid_interface",
+          "functions": [
+            {
+              "function": "minecraft:copy_nbt",
+              "source": "block_entity",
+              "ops": [
+                {
+                  "source": "id",
+                  "target": "BlockEntityTag.id",
+                  "op": "replace"
+                },
+                {
+                  "source": "upgrades",
+                  "target": "BlockEntityTag.upgrades",
+                  "op": "replace"
+                }
+              ]
+            }
+          ]
         }
       ],
       "conditions": [
