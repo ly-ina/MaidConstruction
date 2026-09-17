@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "blueprint:block/creative_maid_interface"
+    }
+  }
+}

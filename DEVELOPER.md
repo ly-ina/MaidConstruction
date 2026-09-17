@@ -107,7 +107,9 @@ com.example.blueprint
 ├── network/
 │   ├── ModNetwork          频道 + 8 个包的注册
 │   └── packet/             6 个 C2S + 1 个 S2C
-├── registry/ModItems       blueprint、binding_book
+├── registry/
+│   ├── ModItems            物品注册：blueprint、binding_book
+│   └── ModCreativeTabs     模组专属创造物品栏（注册名为 main）
 └── integration/
     ├── maid/               TLM 联动
     │   ├── MaidExtension        @LittleMaidExtension 入口
@@ -121,9 +123,12 @@ com.example.blueprint
         ├── Ae2ItemProvider      ME 网络取料/还料
         ├── Ae2MaterialResolver  线缆材料从部件 NBT 反推
         ├── Ae2BlockEntityRotation 线缆部件朝向
-        ├── Ae2TerminalRegistry  女仆终端方块/物品/BE
+        ├── Ae2TerminalRegistry  女仆终端 / 创造女仆接口的方块、物品、BE
         ├── MaidTerminalBlock
-        └── MaidTerminalBlockEntity
+        ├── MaidTerminalBlockEntity
+        ├── InfiniteItemStorage            ★ 取之不尽的 ME 存储
+        ├── CreativeMaidInterfaceBlock     ★ 创造女仆接口（见 §7.10）
+        └── CreativeMaidInterfaceBlockEntity
 ```
 
 ### 依赖方向（重要）
@@ -434,8 +439,10 @@ public class MyRotation implements BlockEntityRotation {
 - 模型放 `assets/blueprint/models/item/<name>.json`
 - 中英文案都要加（`assets/blueprint/lang/zh_cn.json` 和 `en_us.json`）
 - 配方放 `data/blueprint/recipes/<name>.json`
-- 如果是给创造模式用的，在 `BlueprintMod.addCreative` 里 `event.accept(...)`
+- 给创造模式用的物品，加进 `ModCreativeTabs` 的 `displayItems` 回调（模组独占一栏，不要塞原版标签页）
 - **涉及软依赖模组物品的配方必须用 `forge:conditional` 包住**，否则没装那个模组的整合包会加载失败
+
+**创造物品栏的注意点**：`ModCreativeTabs.MAIN` 的 `displayItems` 里，`ModItems` 的注册对象要 `.get()` 之后再 `accept`（`Output` 只收 `ItemLike`/`ItemStack`，不收 `RegistryObject`）。软依赖模组的物品**必须先在 `Ae2Compat.isLoaded()` 里包一层**再取 `.get()` —— 触碰 `Ae2TerminalRegistry` 的静态字段会初始化整个类，没装 AE2 时那是个 `NoClassDefFoundError`。标签页标题走 `itemGroup.blueprint.main` 这个翻译键。
 
 ---
 
@@ -585,6 +592,41 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 | `ClientSchematicCache` 不标 `@OnlyIn` | 它不引用客户端专属类型，保持中立可避免服务端收包时触发意外的类加载 |
 | `ItemProvider` 不用 `IItemHandler` | ME 网络这类存储根本没有槽位概念，硬套槽位接口会写出一堆假实现 |
 
+### 7.10 创造女仆接口：一个方块，两个存储出口，别搞混
+
+`CreativeMaidInterfaceBlockEntity` 对外的两个存储出口**故意不一样**：
+
+| 出口 | 返回什么 | 谁在用 | 为什么 |
+|---|---|---|---|
+| Forge 能力 `Capabilities.STORAGE` | **永远**是 `maidStorage`（`InfiniteItemStorage.forMaid()`） | 女仆取料与还料（`Ae2ItemProvider`） | 女仆要的保证是"什么材料都拿得到"，这个保证不该取决于方块有没有接网络、有没有通电、AE2 的挂载跑完没有 |
+| 挂到网格的 `mountInventories` | `gridStorage`（`InfiniteItemStorage.forGrid()`） | 整张 ME 网络 | 让任意终端都能取到所有物品 |
+| `ITerminalHost.getInventory()` | 接上网络就是**网络库存**，否则是 `maidStorage` | AE2 终端界面 | 上了网就该看到全网（其中已包含挂上去的创造库存）；没上网也不能是空的 |
+
+**两份 `InfiniteItemStorage` 实例，差别只在收不收东西**（`insert`）：
+
+| 实例 | `insert` | 理由 |
+|---|---|---|
+| `forMaid()` | **收下**（等于销毁） | 女仆建完房会把剩料还回来，还料的流程是"从背包取出 → 往来源里塞"。收下比让她抱着一堆材料、或者塞到别的箱子里干净——反正这里什么都是无限的 |
+| `forGrid()` | **拒收**（返回 0） | AE2 的网络库存写东西时是按优先级逐个问下来的（`NetworkStorage.insert`）。挂上去的这份一旦答"我全要"，玩家往**任意**终端里放进去的东西就会被静默销毁，而且他自己不会知道 |
+
+**别再合并回一个实例**。这两件事看着都是"收下物品"，实际完全不同：前者是我们主动清场，后者是物品蒸发。要改成全网也收下，得先想清楚玩家能不能接受往终端里放东西会消失。
+
+**为什么不能统一成一个**：如果能力也返回网络库存，就会出现一个窗口期——节点已就绪但 `mountInventories` 还没跑，女仆这时来取料会看到"没有材料"，白跑一趟再等 100 tick 冷却。反过来，如果 `getInventory` 只返回自己的库存，联网状态下右上角的搜索框就搜不到网络里别的东西了。
+
+**挂进网络的机制**：方块实体实现 `IStorageProvider`，并在构造函数里 `mainNode.addService(IStorageProvider.class, this)`。**这一句必须在节点 `create` 之前**——它是"这个节点能对外提供什么服务"的登记，等网格建起来再补登记，存储就挂不上去了。`mountInventories(IStorageMounts)` 里调 `mounts.mount(storage)` 即可。
+
+**申报数量**用 `Integer.MAX_VALUE`，与 AE2 自己的创造存储一致。别改成 `Long.MAX_VALUE`：网络库存是若干来源相加的，几张创造接口同处一网会把计数加溢出；而且那个数字会原样显示在终端里。
+
+**贴图是自己画的，没有沿用 AE2 的。** 女仆终端用的 `ae2:part/terminal` 是**部件**贴图——16×16 里只有 44 个像素不透明，画的是一个 12×12 的空心边框，连屏幕都没有。当整方块贴图（`cube_all`）用时，渲染出来是个透空的深灰框，既不是"终端"也改不成白色。所以这个方块的 `assets/blueprint/textures/block/creative_maid_interface.png` 是本 mod 唯一的自有贴图。
+
+**"发光"靠的是模型面级全亮**，不是 `lightLevel` 单独能做到的：
+
+```json
+"forge_data": { "block_light": 15, "sky_light": 15 }
+```
+
+这是 Forge 的 `ForgeFaceData`（1.20.1 有效，AE2 自己的终端屏幕也这么写）。只设 `lightLevel` 的话，方块能照亮周围，但它自己的六个面仍然按环境光照渲染，暗处看着是块灰砖。两个都设才是"发光方块"。
+
 ---
 
 ## 8. 排查手册
@@ -651,7 +693,19 @@ javap -p -c -cp xxx.jar <全限定类名>
 - `archivesBaseName = mod_name.replace(' ', '')` → `MaidConstruction`。
 - `processResources` 的 `filteringCharset = 'UTF-8'` —— 避免 Windows 下 GBK 乱码。
 - `jar.finalizedBy('reobfJar')`；**没有配置 jarJar**。
+- `jar` 会把根目录的 `LICENSE` 打进 `META-INF/LICENSE`。MIT 要求协议随「所有副本」分发，而 `mods.toml` 的 `license` 字段只是一个协议名；`reobfJar` 只重映射 `.class`，这个条目会原样留下。
 - 编译参数带 `-Xlint:deprecation`，所以**新增的过时 API 调用会以警告形式暴露**，别忽略。
+
+### 署名（`mod_authors`）的坑
+
+`gradle.properties` 的 `mod_authors` 是署名的**唯一来源**，它会同时流向：
+
+- `mods.toml` 的 `authors` → 游戏内模组列表的 Authors 行
+- jar 清单的 `Specification-Vendor` / `Implementation-Vendor`
+
+**汉字要写成 `\uXXXX` 转义**（`\u4F0A\u7EB3` = 伊纳）。`java.util.Properties` 按 ISO-8859-1 解析 `gradle.properties`，直接写 UTF-8 汉字会得到乱码。转义在两种解析方式下都成立，所以是最稳的写法。
+
+改完必须重新构建才对已发布的 jar 生效。
 
 ### 发布流程
 

@@ -110,6 +110,12 @@ dependencies {
 }
 
 jar {
+    // MIT 要求协议与版权声明随「所有副本」分发，而 mods.toml 里的 license 只是一个协议名，
+    // 所以把根目录的 LICENSE 一并打进 jar（reobfJar 只重映射 .class，这个条目会原样留下）
+    from('LICENSE') {
+        into 'META-INF'
+    }
+
     manifest {
         attributes([
                 "Specification-Title"     : mod_id,

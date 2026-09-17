@@ -3,6 +3,9 @@
   "item.blueprint.blueprint.empty": "空白蓝图",
   "item.blueprint.binding_book": "绑定书",
   "block.blueprint.maid_terminal": "女仆终端",
+  "block.blueprint.creative_maid_interface": "创造女仆接口",
+
+  "itemGroup.blueprint.main": "女仆建筑",
 
   "task.blueprint.build": "蓝图施工",
   "task.blueprint.build.desc": "手持已定位的蓝图时，女仆会优先从附近的容器取材料；附近找不到，就照绑定书跑到指定仓库去取。",
@@ -45,6 +48,7 @@
   "message.blueprint.terminal_no_network": "女仆终端没有连上任何 ME 网络",
   "message.blueprint.terminal_no_power": "ME 网络没有供电，女仆终端无法工作",
   "message.blueprint.terminal_no_channel": "ME 网络频道不足，女仆终端分不到频道",
+  "message.blueprint.creative_interface_offline": "创造女仆接口未接入 ME 网络，AE 侧暂不可用（女仆仍可直接从这里取料）",
 
   "schematic.side_too_large": "框选区域太大了",
   "schematic.volume_too_large": "框选区域太大了",

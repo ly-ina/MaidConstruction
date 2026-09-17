@@ -8,4 +8,6 @@ pluginManagement {
     }
 }
 
-rootProject.name = 'MyMod'
+// 与 gradle.properties 的 mod_name 去空格后保持一致。
+// 这个值会进 jar 清单的 Implementation-Title，也是 IDE 里的模块名。
+rootProject.name = 'MaidConstruction'
