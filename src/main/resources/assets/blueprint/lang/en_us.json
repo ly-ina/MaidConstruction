@@ -43,5 +43,25 @@
   "tooltip.blueprint.hint_rotate": "Right-click the air to rotate 90°, Shift + right-click to clear the anchor",
   "tooltip.blueprint.hint_maid_build": "Anchored — let a maid build it",
   "tooltip.blueprint.maid_on": "Maids may build with this blueprint",
-  "tooltip.blueprint.maid_off": "Maids are not allowed to build with this blueprint"
+  "tooltip.blueprint.maid_off": "Maids are not allowed to build with this blueprint",
+
+  "gui.blueprint.title": "Blueprint",
+  "gui.blueprint.file_hint": "blueprints folder",
+  "gui.blueprint.rotate": "Rotate 90°",
+  "gui.blueprint.clear_anchor": "Clear Anchor",
+  "gui.blueprint.clear_schematic": "Clear Recording",
+  "gui.blueprint.export_file": "Export To File",
+  "gui.blueprint.import_file": "Import Selected",
+  "gui.blueprint.close": "Close",
+  "gui.blueprint.no_preview": "Nothing to preview",
+  "gui.blueprint.nothing_to_export": "Nothing to export",
+  "gui.blueprint.no_file_selected": "Pick a file on the right first",
+  "gui.blueprint.exported": "Exported: %s",
+  "gui.blueprint.export_failed": "Export failed",
+  "gui.blueprint.importing": "Importing…",
+  "gui.blueprint.rotated_to": "Rotation: %s",
+
+  "message.blueprint.imported": "Imported structure: %s × %s × %s",
+  "message.blueprint.import_failed": "Import failed — the file may be corrupted",
+  "message.blueprint.import_too_large": "The file is too large to import"
 }

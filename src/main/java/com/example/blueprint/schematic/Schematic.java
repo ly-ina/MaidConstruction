@@ -268,6 +268,20 @@ public final class Schematic {
     }
 
     /**
+     * 非空气方块的数量。
+     * 单独提供这个方法是为了预览时决定降采样步长，避免为了数个数就去分配整个方块列表。
+     */
+    public int countBlocks() {
+        int count = 0;
+        for (int i = 0; i < blocks.length; i++) {
+            if (!palette.get(blocks[i]).isAir()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
      * 结构中空气方块所占的比例，用于提示玩家框选区域是否太过空旷。
      */
     public float airRatio() {

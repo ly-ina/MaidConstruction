@@ -3,6 +3,7 @@ package com.example.blueprint.network;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.network.packet.C2SCapturePacket;
 import com.example.blueprint.network.packet.C2SClearBlueprintPacket;
+import com.example.blueprint.network.packet.C2SImportBlueprintPacket;
 import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetRotationPacket;
@@ -34,6 +35,8 @@ public class ModNetwork {
                 C2SClearBlueprintPacket::encode, C2SClearBlueprintPacket::decode, C2SClearBlueprintPacket::handle);
         CHANNEL.registerMessage(id++, C2SRequestSchematicPacket.class,
                 C2SRequestSchematicPacket::encode, C2SRequestSchematicPacket::decode, C2SRequestSchematicPacket::handle);
+        CHANNEL.registerMessage(id++, C2SImportBlueprintPacket.class,
+                C2SImportBlueprintPacket::encode, C2SImportBlueprintPacket::decode, C2SImportBlueprintPacket::handle);
         CHANNEL.registerMessage(id++, S2CSchematicDataPacket.class,
                 S2CSchematicDataPacket::encode, S2CSchematicDataPacket::decode, S2CSchematicDataPacket::handle);
     }

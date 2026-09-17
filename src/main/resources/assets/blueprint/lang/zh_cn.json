@@ -43,5 +43,25 @@
   "tooltip.blueprint.hint_rotate": "右键空气旋转 90°，Shift + 右键空气取消定位",
   "tooltip.blueprint.hint_maid_build": "已定位，交给女仆按图施工",
   "tooltip.blueprint.maid_on": "允许女仆施工",
-  "tooltip.blueprint.maid_off": "已禁止女仆施工"
+  "tooltip.blueprint.maid_off": "已禁止女仆施工",
+
+  "gui.blueprint.title": "蓝图",
+  "gui.blueprint.file_hint": "blueprints 目录",
+  "gui.blueprint.rotate": "旋转 90°",
+  "gui.blueprint.clear_anchor": "清空锚点",
+  "gui.blueprint.clear_schematic": "清空录制",
+  "gui.blueprint.export_file": "导出到文件",
+  "gui.blueprint.import_file": "导入选中文件",
+  "gui.blueprint.close": "关闭",
+  "gui.blueprint.no_preview": "暂无可预览的结构",
+  "gui.blueprint.nothing_to_export": "没有可导出的结构",
+  "gui.blueprint.no_file_selected": "先在右侧选一个文件",
+  "gui.blueprint.exported": "已导出：%s",
+  "gui.blueprint.export_failed": "导出失败",
+  "gui.blueprint.importing": "正在导入…",
+  "gui.blueprint.rotated_to": "朝向：%s",
+
+  "message.blueprint.imported": "已导入结构：%s × %s × %s",
+  "message.blueprint.import_failed": "导入失败，文件可能已损坏",
+  "message.blueprint.import_too_large": "文件过大，无法导入"
 }

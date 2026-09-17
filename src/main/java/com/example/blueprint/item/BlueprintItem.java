@@ -1,8 +1,8 @@
 package com.example.blueprint.item;
 
+import com.example.blueprint.client.BlueprintScreenOpener;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.network.packet.C2SCapturePacket;
-import com.example.blueprint.network.packet.C2SClearBlueprintPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetRotationPacket;
 import net.minecraft.core.BlockPos;
@@ -19,6 +19,8 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -284,16 +286,9 @@ public class BlueprintItem extends Item {
 
         if (level.isClientSide) {
             if (player.isShiftKeyDown()) {
-                // 逐级清空：先取消定位，再抹掉内容变回空白蓝图
-                if (hasAnchor(stack)) {
-                    clearAnchor(stack);
-                    ModNetwork.CHANNEL.sendToServer(new C2SSetAnchorPacket(true));
-                    player.displayClientMessage(Component.translatable("message.blueprint.anchor_cleared"), true);
-                } else if (hasSchematic(stack)) {
-                    clearSchematic(stack);
-                    ModNetwork.CHANNEL.sendToServer(C2SClearBlueprintPacket.INSTANCE);
-                    player.displayClientMessage(Component.translatable("message.blueprint.cleared"), true);
-                }
+                // 打开蓝图面板：预览、旋转、清空、导入导出都在里面。
+                // 用 DistExecutor 包一层，服务端不会去加载客户端的界面类。
+                DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> BlueprintScreenOpener.open(stack));
                 return InteractionResultHolder.success(stack);
             }
 
