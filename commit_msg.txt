@@ -1,5 +1,0 @@
-Remove stray commit-msg file and ignore it
-
-The previous commit used `git add -A` and swept up the temporary file
-used to pass the commit message (Windows cmd swallows quotes, so the
-message has to go through a file). Delete it and add it to .gitignore.
