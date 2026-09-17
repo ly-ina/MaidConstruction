@@ -1,14 +1,17 @@
 # Gradle
-.gradle/
-build/
-out/
-bin/
+# 前面这个斜杠很重要：只忽略仓库根目录下的 build，否则会把
+# src/main/java/com/example/blueprint/build 这种同名源码包一起忽略掉，
+# 结果本地能编译、CI 上却缺文件。
+/.gradle/
+/build/
+/out/
+/bin/
 
 # Forge 运行目录
-run/
-run-data/
-run-server/
-logs/
+/run/
+/run-data/
+/run-server/
+/logs/
 *.log
 
 # IDE
