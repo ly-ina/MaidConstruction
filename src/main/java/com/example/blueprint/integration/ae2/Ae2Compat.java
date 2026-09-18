@@ -4,7 +4,10 @@ import com.example.blueprint.build.BlockEntityRotationResolver;
 import com.example.blueprint.build.BlockMaterialResolver;
 import com.example.blueprint.build.ItemProvider;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
@@ -43,6 +46,53 @@ public final class Ae2Compat {
             return null;
         }
         return Ae2ItemProvider.create(level, pos);
+    }
+
+    /**
+     * 如果女仆身上带着一台绑好了的无线女仆终端，返回由它接入的取料源。
+     * <p>
+     * 这个来源不需要女仆走到任何地方，控制器会就地取料。
+     *
+     * @param candidates 候选物品：主手、副手、饰品栏、背包
+     * @param userPos    使用者位置，用来判定有没有处在无线接入点的射程里
+     * @return AE2 未加载、没有可用的终端、或者不在覆盖范围内时返回 null
+     */
+    @Nullable
+    public static ItemProvider createWirelessProvider(Level level, Iterable<ItemStack> candidates, @Nullable Vec3 userPos) {
+        if (!isLoaded()) {
+            return null;
+        }
+        return Ae2WirelessProvider.create(level, candidates, userPos);
+    }
+
+    /**
+     * 无线女仆终端这个物品；没装 AE2 时返回 {@code null}。
+     * <p>
+     * 返回 {@link Item} 而不是 {@code RegistryObject}，是为了让调用方
+     * （女仆饰品注册）不必触碰 {@link Ae2TerminalRegistry}——那个类的静态字段
+     * 会引用 AE2 的类型。
+     */
+    @Nullable
+    public static Item wirelessTerminalItem() {
+        return isLoaded() ? Ae2TerminalRegistry.WIRELESS_MAID_TERMINAL.get() : null;
+    }
+
+    /** 女仆绑定卡这个物品；没装 AE2 时返回 {@code null}。理由同上。 */
+    @Nullable
+    public static Item maidBindingCardItem() {
+        return isLoaded() ? Ae2TerminalRegistry.MAID_BINDING_CARD.get() : null;
+    }
+
+    /**
+     * 把物品接进 AE2 的机制：升级卡关联、无线访问点的链接登记。
+     * <p>
+     * 必须在物品注册完成之后再调，所以调用点是 commonSetup 而不是构造函数。
+     */
+    public static void registerItemHooks() {
+        if (!isLoaded()) {
+            return;
+        }
+        Ae2TerminalRegistry.registerItemHooks();
     }
 
     /**

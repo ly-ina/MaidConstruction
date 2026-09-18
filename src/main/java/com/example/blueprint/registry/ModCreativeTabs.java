@@ -32,6 +32,8 @@ public final class ModCreativeTabs {
                         if (Ae2Compat.isLoaded()) {
                             output.accept(Ae2TerminalRegistry.MAID_TERMINAL_ITEM.get());
                             output.accept(Ae2TerminalRegistry.CREATIVE_MAID_INTERFACE_ITEM.get());
+                            output.accept(Ae2TerminalRegistry.WIRELESS_MAID_TERMINAL.get());
+                            output.accept(Ae2TerminalRegistry.MAID_BINDING_CARD.get());
                         }
                     })
                     .build());

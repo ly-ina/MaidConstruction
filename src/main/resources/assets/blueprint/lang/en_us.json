@@ -4,6 +4,8 @@
   "item.blueprint.binding_book": "Binding Book",
   "block.blueprint.maid_terminal": "Maid Terminal",
   "block.blueprint.creative_maid_interface": "Creative Maid Interface",
+  "item.blueprint.wireless_maid_terminal": "Wireless Maid Terminal",
+  "item.blueprint.maid_binding_card": "Maid Binding Card",
 
   "itemGroup.blueprint.main": "Maid Construction",
 
@@ -49,6 +51,7 @@
   "message.blueprint.terminal_no_power": "The ME network has no power — the Maid Terminal cannot run",
   "message.blueprint.terminal_no_channel": "The ME network is out of channels for the Maid Terminal",
   "message.blueprint.creative_interface_offline": "The Creative Maid Interface is not on an ME network, so its AE side is inactive — maids can still take items from it directly",
+  "message.blueprint.wireless_unbound": "Link cleared",
 
   "schematic.side_too_large": "The selected area is too large",
   "schematic.volume_too_large": "The selected area is too large",
@@ -80,6 +83,14 @@
   "tooltip.blueprint.binding_book_hint_highlight": "Shift + right-click the air to highlight it",
   "tooltip.blueprint.binding_book_hint_clear": "Shift + right-click a block to unbind",
   "tooltip.blueprint.binding_book_bauble": "Fits in a maid's bauble slot as a backup warehouse",
+  "tooltip.blueprint.wireless_hint_open": "Right-click air to open the ME terminal",
+  "tooltip.blueprint.wireless_hint_bind": "Place it in an ME Wireless Access Point to link",
+  "tooltip.blueprint.wireless_hint_unbind": "Shift + right-click air to clear the link",
+  "tooltip.blueprint.wireless_unbound": "Not linked to any ME Wireless Access Point",
+  "tooltip.blueprint.wireless_bound": "Linked to: %s (%s, %s, %s)",
+  "tooltip.blueprint.wireless_card_installed": "Maid Binding Card installed: ignores range and dimension",
+  "tooltip.blueprint.wireless_maid": "Give it to a maid (bauble slot or backpack) and she will pull materials straight from the network",
+  "tooltip.blueprint.maid_binding_card": "Insert into a Wireless Maid Terminal to ignore range and dimension",
 
   "gui.blueprint.title": "Blueprint",
   "gui.blueprint.name_label": "Name",

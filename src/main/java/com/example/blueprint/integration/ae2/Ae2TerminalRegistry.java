@@ -1,5 +1,8 @@
 package com.example.blueprint.integration.ae2;
 
+import appeng.api.features.GridLinkables;
+import appeng.api.upgrades.Upgrades;
+import appeng.items.tools.powered.WirelessTerminalItem;
 import com.example.blueprint.BlueprintMod;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -63,6 +66,26 @@ public final class Ae2TerminalRegistry {
                             .of(CreativeMaidInterfaceBlockEntity::new, CREATIVE_MAID_INTERFACE.get())
                             .build(null));
 
+    /**
+     * 女仆绑定卡：一张 AE2 升级卡，插在无线女仆终端里才有意义。
+     * <p>
+     * 用 AE2 自己的工厂造，不要自己写一个 Item 子类——升级槽的过滤器只看
+     * "这种卡在这个物品上最多能装几张"，而那个数字是靠 {@link Upgrades#add}
+     * 登记出来的，跟物品类型毫无关系（见 {@link #registerUpgrades()}）。
+     */
+    public static final RegistryObject<Item> MAID_BINDING_CARD =
+            ITEMS.register("maid_binding_card",
+                    () -> Upgrades.createUpgradeCardItem(new Item.Properties().stacksTo(1)));
+
+    /**
+     * 无线女仆终端：女仆饰品形态的 ME 终端。
+     * <p>
+     * 不堆叠——一台终端只对应一个绑定，堆叠会让各自的 NBT 互相覆盖。
+     */
+    public static final RegistryObject<Item> WIRELESS_MAID_TERMINAL =
+            ITEMS.register("wireless_maid_terminal",
+                    () -> new WirelessMaidTerminalItem(new Item.Properties().stacksTo(1)));
+
     private Ae2TerminalRegistry() {
     }
 
@@ -70,5 +93,33 @@ public final class Ae2TerminalRegistry {
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
         BLOCK_ENTITIES.register(modBus);
+    }
+
+    /**
+     * 把两件物品接进 AE2 的机制里。
+     * <p>
+     * <b>必须在物品注册完成之后调用</b>（所以放在 commonSetup 而不是构造函数里）：
+     * 这里要取 {@code RegistryObject.get()}，注册事件还没发的话取不到。
+     * <p>
+     * 两处登记缺一不可，而且**缺了的后果都是静默的**：
+     * <ul>
+     *   <li>{@code Upgrades.add}：卡照样能合成、能拿在手上，但往终端的升级槽里放会被
+     *       默默拒绝——AE2 的 {@code allowInsert} 只比较"已装数量"和"最多可装数量"，
+     *       后者没登记就是 0，它不会告诉你原因；</li>
+     *   <li>{@code GridLinkables.register}：ME 无线访问点的链接槽位是按注册表放行的
+     *       （{@code RestrictedInputSlot$PlacableItemType.GRID_LINKABLE_ITEM}），
+     *       没登记的话终端根本放不进访问点，也就没法像官方终端那样链接。</li>
+     * </ul>
+     */
+    public static void registerItemHooks() {
+        // 第四个参数是这张卡在工具提示里显示的那句话，由 AE2 自己拼进卡片的
+        // 说明列表（跟着卡片走，所以写在卡上而不是终端上）
+        Upgrades.add(MAID_BINDING_CARD.get(), WIRELESS_MAID_TERMINAL.get(), 1,
+                "tooltip.blueprint.maid_binding_card");
+
+        // 直接复用官方那个链接处理器：它的 canLink 就是 instanceof WirelessTerminalItem
+        // （我们的终端本来就是子类），link/unlink 读写的也是官方终端那套 NBT 键。
+        // 这样"访问点里链接"和"终端自己解析链接"共用同一份数据，不会分叉
+        GridLinkables.register(WIRELESS_MAID_TERMINAL.get(), WirelessTerminalItem.LINKABLE_HANDLER);
     }
 }

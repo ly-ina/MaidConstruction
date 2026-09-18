@@ -41,5 +41,8 @@ public class BlueprintMod {
 
     private void commonSetup(FMLCommonSetupEvent event) {
         ModNetwork.register();
+        // 升级卡关联、无线访问点的链接登记都要等物品都注册完了才能做，
+        // 所以放这儿而不是构造函数里。内部自带 AE2 缺失保护
+        Ae2Compat.registerItemHooks();
     }
 }

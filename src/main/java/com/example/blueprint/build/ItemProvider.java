@@ -30,6 +30,18 @@ public interface ItemProvider {
     BlockPos interactPos();
 
     /**
+     * 女仆是否必须走到 {@link #interactPos()} 才能取料。
+     * <p>
+     * 容器和绑定书指定的仓库都要走过去，所以默认是 {@code true}。
+     * 但"女仆自己身上带着的无线终端"这种来源没有可走的地方——她已经站在终端旁边了，
+     * 再照着绑定坐标一路跑过去只会跑到别的维度或者地图另一头。
+     * 这类来源覆写成 {@code false}，控制器的取料和还料都会就地完成。
+     */
+    default boolean requiresTravel() {
+        return true;
+    }
+
+    /**
      * 这个来源目前是否还有建造所需的材料。
      * <p>
      * 用于"值不值得跑这一趟"的判断，因此应当尽量便宜。

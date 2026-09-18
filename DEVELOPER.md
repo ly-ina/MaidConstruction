@@ -128,7 +128,11 @@ com.example.blueprint
         ├── MaidTerminalBlockEntity
         ├── InfiniteItemStorage            ★ 取之不尽的 ME 存储
         ├── CreativeMaidInterfaceBlock     ★ 创造女仆接口（见 §7.10）
-        └── CreativeMaidInterfaceBlockEntity
+        ├── CreativeMaidInterfaceBlockEntity
+        ├── Ae2StorageTransfer            ME 存储搬运动作（方块来源与无线来源共用）
+        ├── WirelessMaidLink              无线终端的绑定/解析/距离/取电
+        ├── WirelessMaidTerminalItem      ★ 无线女仆终端（见 §7.11）
+        └── Ae2WirelessProvider           女仆用的无线取料源
 ```
 
 ### 依赖方向（重要）
@@ -626,6 +630,162 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 ```
 
 这是 Forge 的 `ForgeFaceData`（1.20.1 有效，AE2 自己的终端屏幕也这么写）。只设 `lightLevel` 的话，方块能照亮周围，但它自己的六个面仍然按环境光照渲染，暗处看着是块灰砖。两个都设才是"发光方块"。
+
+### 7.11 无线女仆终端：只覆写取电、跨维度耗电与断开，其余照抄官方
+
+**必须继承 `WirelessTerminalItem`，不能自己写一个物品。** `WirelessTerminalMenuHost` 的构造函数里写死了：
+
+```java
+if (item instanceof WirelessTerminalItem terminal) { ... }
+else throw new IllegalArgumentException("Can only use this class with subclasses of WirelessTerminalItem");
+```
+
+不继承就拿不到 AE2 的终端界面。继承过来之后，面板、升级槽、"在物品栏里直接打开"的入口全是现成的。
+
+| 覆写 | 作用 |
+|---|---|
+| `use` | Shift + 右键空气断开链接，其余交给父类去开面板 |
+| `getAECurrentPower` | 插卡后对外声明满电（见下面"供电路径"） |
+| `hasPower` / `usePower` | 插卡后从网络取电 |
+| `getMenuHost` | **只为压住跨维度耗电**，且只在插卡时用自己的宿主（见下），判定逻辑全留在官方那边 |
+
+**其余一律不覆写。** 这一节最值钱的就是这句话，它是踩完坑之后的结论：
+原先为了让"没链接也能开面板"，把 `getLinkedGrid` / `checkPreconditions` /
+`getMenuHost` 三处都换成了自己那套，结果整台终端**右键没反应，而且没有任何提示**。
+逐个说清楚为什么不能碰：
+
+**`getLinkedGrid`：提示就写在它里面。** 官方实现（javap 逐条读过）的分支是：
+
+```
+level 不是 ServerLevel          → 返回 null（客户端本来就不解析）
+没有链接                        → 提示 DeviceNotLinked（"设备未链接"）→ null
+链接的维度/方块找不到            → 提示 LinkedNetworkNotFound → null
+那台访问点的网格为 null          → 提示 LinkedNetworkNotFound → null
+```
+
+把它换成"自己的解析"，等于把这些提示全部吞掉——玩家右键之后什么都没发生，
+连知道这个模组的人都只会以为坏了。**要加自己的判定，就加在它返回 null 之后**，
+不要在它前面截断。
+
+**`checkPreconditions`：能不能开面板的判定归官方。** 官方实现（同样 javap 读过）：
+
+```
+物品对不上                   → false（不吭声）
+getLinkedGrid(...) == null   → false（提示在 getLinkedGrid 里已经发过了）
+hasPower(player, 0.5, …) 不过 → 提示 DeviceNotPowered（"设备未通电"）→ false
+```
+
+"没链接"和"没电"两种提示是**分工**的，覆写任何一个都会让对应的提示消失。
+
+**`getMenuHost`：官方宿主并没有射程上限。** 一度以为"官方宿主会按射程把面板关掉"，
+才换成了自己的宿主。读过字节码发现不是这样：`WirelessTerminalMenuHost.rangeCheck()`
+只做两件事——`targetGrid` 是否为 null、以及**网格里还找不找得到一台
+`WirelessAccessPointBlockEntity`**；它把最近的那台存进 `myWap`、把距离算出来给耗电速率用，
+**没有任何"超出射程就拒绝"的比较**。AE2 的无线终端本来就不限距离，真正的限制是
+"目标区块得加载着"（`Platform.getTickingBlockEntity` 取不到方块实体就当没网络）。
+自己换宿主，反而把官方的耗电与失效逻辑一起换掉了。
+
+**唯一的例外：跨维度耗电必须压住，这只能靠换宿主。** 所以后来还是加回了 `getMenuHost`，
+但它只做一件事——覆写 `setPowerDrainPerTick(double)`，而且**只在插了女仆绑定卡时**才用自己的宿主。
+起因是 AE2 自己算不出跨维度的距离：
+
+```
+getWapSqDistance(wap):
+    访问点跟玩家不同维度   → 返回 Double.MAX_VALUE
+    访问点没在工作         → 返回 Double.MAX_VALUE
+```
+
+于是 `currentDistanceFromGrid = sqrt(MAX) ≈ 1.3e154`，`checkWirelessRange` 再拿它去
+`AEConfig.wireless_getDrainRate(...)`（实现就是 `wirelessTerminalDrainMultiplier * 距离`）
+——速率变成 1e154 量级，**一 tick 就能把整张网络抽干**，跨维度实际上没法用。
+
+**取值直接照抄 AE2WTLib 的量子桥卡：`22.5` AE/tick。** 它补的正是同一个洞，做法也一样——
+覆写 `setPowerDrainPerTick`，判定过不去时就不接受 AE2 给的速率。区别只在触发条件：
+它是"射程判定没过"（那边是靠量子网络桥连着的），我们是"距离算不出来"
+（跨维度，或者链接的那台访问点不在工作）。
+
+`setPowerDrainPerTick` 在 `ItemMenuHost` 里是 `protected`，跨包覆写没问题。
+**但这一个宿主只覆写这一个方法**：`rangeCheck()` / `onBroadcastChanges()` 一律不碰——
+"判定与失效逻辑留在官方那边"是上一轮刚换回来的教训（见上）。
+
+**`onBroadcastChanges` 的极性（万一以后真要覆写）。** 它返回的是"菜单还算有效吗"，
+`AEBaseMenu.broadcastChanges` 里是 `if (!host.onBroadcastChanges(this)) setValidMenu(false);`
+——**`true` 才是继续开着**，返回 `false` 是当场关掉，表现就是"面板一闪而过"。
+跟 `rangeCheck()`、`ItemProvider.requiresTravel()` 那种"返回 true 表示有问题"的直觉正好相反。
+
+**`onItemUseFirst` / `useOn` 都不要碰，方块上的右键一律让给方块。** 这里踩过一次：
+为了让"对着方块右键也能开面板"，覆写了 `onItemUseFirst`，结果这台终端
+**再也放不进 AE2 的充能器**，也放不进无线访问点去链接。原因很实在：
+
+- **充能器没有界面**（整个 AE2 里没有 `ChargerMenu` 这个类），它只有一个
+  `ChargerBlock.onActivated(...)`，**右键把物品收进去是唯一入口**；
+- **无线访问点是自己开面板的**（`WirelessAccessPointBlock.m_6227_` 里直接
+  `MenuOpener.open(WirelessAccessPointMenu.TYPE, …)`），只在玩家**潜行**时让位——
+  `InteractionUtil.isInAlternateUseMode(player)` 就是 `isSecondaryUseActive()`，
+  跟手里拿什么无关。
+
+结论：面板只从**右键空气**进（官方终端就是这么做的），方块上的右键一律让给方块。
+想验证"是不是物品抢了右键"，把 `onItemUseFirst` 注释掉、空手右键同一个方块对比即可。
+
+**链接必须走 AE2 原生的那套，而且要记得登记。** 链接是把终端放进 **ME 无线访问点**的槽位里完成的，
+槽位按 `RestrictedInputSlot$PlacableItemType.GRID_LINKABLE_ITEM` 放行，而它查的是
+`GridLinkables.get(item)` —— **每个物品都要显式登记处理器**：
+
+```java
+GridLinkables.register(WIRELESS_MAID_TERMINAL.get(), WirelessTerminalItem.LINKABLE_HANDLER);
+```
+
+直接用官方那个处理器就行：它的 `canLink` 是 `instanceof WirelessTerminalItem`（我们的终端本来就是子类），
+`link`/`unlink` 读写的也是官方终端那套 NBT 键。**没登记的表现是"终端根本放不进访问点"**，
+而且同样没有任何提示。登记和升级卡关联一起放在 `registerItemHooks()`（`commonSetup` 里调）。
+
+**供电路径要看仔细。** 链路是
+`ItemMenuHost.drainPower() → WirelessTerminalMenuHost.extractAEPower() → WirelessTerminalItem.usePower(player, amount, stack)`，
+而 `extractAEPower` 里先用 `Math.min(amount, getAECurrentPower(stack))` 夹了一次上限。
+所以"插卡后从网络取电"必须**同时**覆写两个方法：只覆写 `usePower` 是不够的——
+电池空的时候，宿主算出来的上限就是 0，它压根不会来问 `usePower`。
+
+两个容易写错的地方：
+
+- **`hasPower` 不能无条件返回 true。** 官方只是先问它，得到 true 就照常去 `drainPower()`，
+  扣不到照样把菜单判为失效——表现是**面板一闪而过**。插卡时拿网络 SIMULATE 一次如实回答，
+  没电就会走到官方那条"设备未通电"的提示上。
+- **`usePower` 必须"先 SIMULATE 再 MODULATE"。** `extractAEPower` 是能抽多少抽多少，
+  抽不满时我们会转去用内置电池，而**那半截已经被从网络里扣掉了**——等于凭空烧掉。
+  先用 `Actionable.SIMULATE` 确认能给够，再真扣。
+
+**升级槽能不能插一张卡，不看物品类型。** AE2 的过滤器只有一行：
+
+```java
+return getInstalledUpgrades(item) < getMaxInstalled(item);
+```
+
+`getMaxInstalled` 来自 `Upgrades.add(卡, 机器, 张数)` 的登记。**没登记就是 0，
+卡会被默默拒绝**，而且不会有任何提示。`Upgrades.add` 的第一个参数是卡、第二个是机器
+（map 的键取的是 `Association.upgradeCard()`，也就是第一个参数）。
+登记必须放在**物品注册完成之后**（本项目的调用点是 `commonSetup`），因为要取 `RegistryObject.get()`。
+
+**无线来源不能让女仆走动。** `ItemProvider.requiresTravel()` 默认 `true`，无线终端返回 `false`，
+控制器的 `tickFetch` / `tickReturn` 据此跳过寻路和开箱动画。
+不这么做的话，女仆会照着绑定坐标一路跑过去——那个坐标可能在地图另一头，甚至在别的维度。
+
+**"没电就不给开面板"这条原生规则保留了，代价是刚做出来要先去充一次电。**
+`AEBasePoweredItem.getAECurrentPower` 读的是 NBT 里的 `internalCurrentPower`，
+**没有 NBT 就是 0**（javap 读过），所以合成出来的终端和官方无线终端一样是空的：
+右键会提示「设备未通电」，在**充能器**里充一次就能开面板插卡了。别为了跳过这一步
+再去覆写 `checkPreconditions` —— 那正是让所有提示一起消失的原因（见上）。
+真要跳过，正确做法是给合成产物直接充满（覆写 `onCraftedBy`），
+而不是放宽"能不能开面板"的判定。
+
+**充能器本身没问题**，别去改物品的可充能性：`ChargerBlockEntity$ChargerInvFilter.allowInsert`
+的判据是 `Platform.isChargeable(stack)`，也就是
+`instanceof IAEItemPowerStorage && getAEMaxPower(stack) > 0` —— 继承 `AEBasePoweredItem`
+就自动满足。充能器显示"供能不足"是**它自己没接电**（它是网络设备，手边没网时可以用 AE2 的手摇曲柄）。
+
+**跨维度有一条解不开的限制。** `resolveGrid` 会去对应的 `ServerLevel` 找节点宿主，
+但**区块没加载就拿不到网格**。绑定卡放开的是"距离"和"维度"两条，放开不了"区块加载"——
+ME 网络只存在于已加载的区块里，AE2 自己也做不到隔空访问。要长时间远程取料，
+得靠区块加载器撑着那边。
 
 ---
 

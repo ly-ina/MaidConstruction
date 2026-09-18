@@ -4,6 +4,8 @@
   "item.blueprint.binding_book": "绑定书",
   "block.blueprint.maid_terminal": "女仆终端",
   "block.blueprint.creative_maid_interface": "创造女仆接口",
+  "item.blueprint.wireless_maid_terminal": "无线女仆终端",
+  "item.blueprint.maid_binding_card": "女仆绑定卡",
 
   "itemGroup.blueprint.main": "女仆建筑",
 
@@ -49,6 +51,7 @@
   "message.blueprint.terminal_no_power": "ME 网络没有供电，女仆终端无法工作",
   "message.blueprint.terminal_no_channel": "ME 网络频道不足，女仆终端分不到频道",
   "message.blueprint.creative_interface_offline": "创造女仆接口未接入 ME 网络，AE 侧暂不可用（女仆仍可直接从这里取料）",
+  "message.blueprint.wireless_unbound": "已断开链接",
 
   "schematic.side_too_large": "框选区域太大了",
   "schematic.volume_too_large": "框选区域太大了",
@@ -80,6 +83,14 @@
   "tooltip.blueprint.binding_book_hint_highlight": "Shift + 右键空气可高亮位置",
   "tooltip.blueprint.binding_book_hint_clear": "Shift + 右键方块解除绑定",
   "tooltip.blueprint.binding_book_bauble": "可放入女仆饰品栏，作为备用仓库",
+  "tooltip.blueprint.wireless_hint_open": "右键空气打开 ME 终端面板",
+  "tooltip.blueprint.wireless_hint_bind": "放进 ME 无线访问点的槽位里链接",
+  "tooltip.blueprint.wireless_hint_unbind": "Shift + 右键空气断开链接",
+  "tooltip.blueprint.wireless_unbound": "尚未链接任何 ME 无线访问点",
+  "tooltip.blueprint.wireless_bound": "已链接：%s（%s, %s, %s）",
+  "tooltip.blueprint.wireless_card_installed": "已装入女仆绑定卡：无视距离与维度",
+  "tooltip.blueprint.wireless_maid": "交给女仆（饰品栏或背包），她缺料时会直接从网络取",
+  "tooltip.blueprint.maid_binding_card": "装入无线女仆终端后，无视距离与维度连接 ME 网络",
 
   "gui.blueprint.title": "蓝图",
   "gui.blueprint.name_label": "名称",

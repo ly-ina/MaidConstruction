@@ -512,6 +512,16 @@ public class BlueprintBuildController {
             return;
         }
 
+        // 不需要走动的来源（女仆身上带着的无线终端）就地取料。
+        // 照着它的 interactPos 寻路会把她往地图另一头、甚至别的维度带
+        if (!fetchProvider.requiresTravel()) {
+            pullFromProvider(level, maid, fetchProvider);
+            fetchProvider = null;
+            state = State.MOVE_TO_SPOT;
+            cooldown = FETCH_COOLDOWN;
+            return;
+        }
+
         BlockPos container = fetchProvider.interactPos();
         double cx = container.getX() + 0.5D;
         double cz = container.getZ() + 0.5D;
@@ -636,11 +646,28 @@ public class BlueprintBuildController {
             BlueprintMod.LOGGER.info("女仆 {} 就近取材：{}", maid.getUUID(), nearby.interactPos());
             return nearby;
         }
+        // 无线终端排在绑定书前面：它接的是整张网络，而且不用走动
+        ItemProvider wireless = findWirelessProvider(level, maid);
+        if (wireless != null) {
+            BlueprintMod.LOGGER.info("女仆 {} 改用身上的无线女仆终端取料", maid.getUUID());
+            return wireless;
+        }
         ItemProvider bound = findBoundProvider(level, maid);
         if (bound != null) {
             BlueprintMod.LOGGER.info("女仆 {} 改用绑定书指定的目标：{}", maid.getUUID(), bound.interactPos());
         }
         return bound;
+    }
+
+    /**
+     * 女仆身上带着的无线女仆终端所连的网络。
+     * <p>
+     * 认物品类型这件事交给 {@link Ae2Compat} 去做——它本身不引用 AE2 的类型，
+     * 没装 AE2 时这里直接返回 null，不会把 AE2 的类拽进加载器。
+     */
+    @Nullable
+    private ItemProvider findWirelessProvider(ServerLevel level, EntityMaid maid) {
+        return Ae2Compat.createWirelessProvider(level, collectHeldStacks(maid), maid.position());
     }
 
     /** 扫一圈身边的普通容器，返回最近的那个装着所需材料的 */
@@ -758,7 +785,8 @@ public class BlueprintBuildController {
         }
 
         BlockPos pos = provider.interactPos();
-        if (level.getBlockEntity(pos) != null) {
+        // 不用走动的来源没有"面前那个容器"，别去 0,0,0 找方块实体放动画
+        if (provider.requiresTravel() && level.getBlockEntity(pos) != null) {
             // 开合动画走原版 blockEvent 通道，只有箱子这类容器会响应；
             // ME 网络的机器对 id=1 没反应，调用它也无害。
             setContainerOpen(level, pos, true);
@@ -834,25 +862,32 @@ public class BlueprintBuildController {
             }
         }
 
-        BlockPos container = returnProvider.interactPos();
-        double cx = container.getX() + 0.5D;
-        double cz = container.getZ() + 0.5D;
-        double horizontalSqr = maid.distanceToSqr(cx, maid.getY() + 0.5D, cz);
+        // 不需要走动的来源（女仆身上的无线终端）就地还料，理由同 tickFetch。
+        // 容器坐标取她脚下的位置，只是为了让日志里那行字不至于是个 0,0,0
+        BlockPos container = returnProvider.requiresTravel()
+                ? returnProvider.interactPos()
+                : maid.blockPosition();
 
-        if (horizontalSqr > CONTAINER_DISTANCE_SQR) {
-            if (moveTowardsContainer(level, maid, container)) {
-                return true;
+        if (returnProvider.requiresTravel()) {
+            double cx = container.getX() + 0.5D;
+            double cz = container.getZ() + 0.5D;
+            double horizontalSqr = maid.distanceToSqr(cx, maid.getY() + 0.5D, cz);
+
+            if (horizontalSqr > CONTAINER_DISTANCE_SQR) {
+                if (moveTowardsContainer(level, maid, container)) {
+                    return true;
+                }
+                if (horizontalSqr > ABORT_DISTANCE_SQR) {
+                    notify(level, maid, "message.blueprint.maid_return_unreachable");
+                    returnProvider = null;
+                    returnFinished = true;
+                    return false;
+                }
             }
-            if (horizontalSqr > ABORT_DISTANCE_SQR) {
-                notify(level, maid, "message.blueprint.maid_return_unreachable");
-                returnProvider = null;
-                returnFinished = true;
-                return false;
-            }
+
+            // 站定之后停掉导航，别让她继续往容器里钻
+            maid.getNavigation().stop();
         }
-
-        // 站定之后停掉导航，别让她继续往容器里钻
-        maid.getNavigation().stop();
 
         IItemHandler backpack = new MaidItemSource(maid).getBackpack();
         if (backpack == null) {
@@ -1053,36 +1088,41 @@ public class BlueprintBuildController {
      * 因为那才是这本书该待的地方，塞进背包只是权宜之计。
      */
     private static ItemStack findBindingBook(EntityMaid maid) {
-        ItemStack mainHand = maid.getMainHandItem();
-        if (mainHand.getItem() instanceof BindingBookItem) {
-            return mainHand;
+        for (ItemStack stack : collectHeldStacks(maid)) {
+            if (stack.getItem() instanceof BindingBookItem) {
+                return stack;
+            }
         }
-        ItemStack offHand = maid.getOffhandItem();
-        if (offHand.getItem() instanceof BindingBookItem) {
-            return offHand;
-        }
+        return ItemStack.EMPTY;
+    }
+
+    /**
+     * 女仆身上所有可能装着东西的地方，按"更该待的地方排前面"的顺序：
+     * 主手、副手、饰品栏、背包。
+     * <p>
+     * 绑定书和无线终端都按这个顺序找。饰品栏排在背包前面，因为那才是
+     * 这两样东西该待的地方，塞进背包只是权宜之计。
+     */
+    private static List<ItemStack> collectHeldStacks(EntityMaid maid) {
+        List<ItemStack> stacks = new ArrayList<>(8);
+        stacks.add(maid.getMainHandItem());
+        stacks.add(maid.getOffhandItem());
 
         // 饰品栏本身就是个 ItemStackHandler，可以直接按槽位遍历
         BaubleItemHandler baubles = maid.getMaidBauble();
         if (baubles != null) {
             for (int i = 0; i < baubles.getSlots(); i++) {
-                ItemStack stack = baubles.getStackInSlot(i);
-                if (stack.getItem() instanceof BindingBookItem) {
-                    return stack;
-                }
+                stacks.add(baubles.getStackInSlot(i));
             }
         }
 
         IItemHandler backpack = maid.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
         if (backpack != null) {
             for (int i = 0; i < backpack.getSlots(); i++) {
-                ItemStack stack = backpack.getStackInSlot(i);
-                if (stack.getItem() instanceof BindingBookItem) {
-                    return stack;
-                }
+                stacks.add(backpack.getStackInSlot(i));
             }
         }
-        return ItemStack.EMPTY;
+        return stacks;
     }
 
     private void notify(ServerLevel level, EntityMaid maid, String translationKey, Object... args) {

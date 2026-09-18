@@ -1,10 +1,12 @@
 package com.example.blueprint.integration.maid;
 
+import com.example.blueprint.integration.ae2.Ae2Compat;
 import com.example.blueprint.registry.ModItems;
 import com.github.tartaricacid.touhoulittlemaid.api.ILittleMaid;
 import com.github.tartaricacid.touhoulittlemaid.api.LittleMaidExtension;
 import com.github.tartaricacid.touhoulittlemaid.entity.task.TaskManager;
 import com.github.tartaricacid.touhoulittlemaid.item.bauble.BaubleManager;
+import net.minecraft.world.item.Item;
 import net.minecraftforge.common.MinecraftForge;
 
 /**
@@ -40,5 +42,12 @@ public class MaidExtension implements ILittleMaid {
     @Override
     public void bindMaidBauble(BaubleManager manager) {
         manager.bind(ModItems.BINDING_BOOK, new BindingBookBauble());
+
+        // 无线女仆终端也做成饰品，否则饰品栏会拒绝收纳它。
+        // 它只有装了 AE2 才存在，没装时 Ae2Compat 返回 null，跳过即可
+        Item wirelessTerminal = Ae2Compat.wirelessTerminalItem();
+        if (wirelessTerminal != null) {
+            manager.bind(wirelessTerminal, new MaidWirelessBauble());
+        }
     }
 }
