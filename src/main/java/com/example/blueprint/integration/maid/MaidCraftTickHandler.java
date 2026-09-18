@@ -260,6 +260,13 @@ public class MaidCraftTickHandler {
                 continue;
             }
             MaidStudyPool.Recipe preferred = learned.preferred();
+            if (preferred == null && !learned.recipes().isEmpty()) {
+                // 这条产物的做法**全被停用**了，可这张单是在停用之前就挂着的——
+                // 让她照第一条做法把它做完（"已在合成的不用管"）。新的单早在下单那一步
+                // 就被挡下来了（MaidCraftOrder.order 不接停用的产物，界面那颗按钮也是灰的），
+                // 所以这里放行不会让"停用"失效。
+                preferred = learned.recipes().get(0);
+            }
             if (preferred == null || preferred.id() == null) {
                 return null;
             }

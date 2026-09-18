@@ -3,8 +3,10 @@ package com.example.blueprint.client.gui;
 import com.example.blueprint.integration.maid.MaidCraftOrder;
 import com.example.blueprint.integration.maid.MaidStudyPool;
 import com.example.blueprint.network.ModNetwork;
+import com.example.blueprint.network.packet.C2SForgetStudyPacket;
 import com.example.blueprint.network.packet.C2SMaidCraftOrderPacket;
 import com.example.blueprint.network.packet.C2SSetStudyPriorityPacket;
+import com.example.blueprint.network.packet.C2SToggleStudyUsePacket;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -13,12 +15,7 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.crafting.Recipe;
-import net.minecraft.world.item.crafting.RecipeType;
-import net.minecraft.world.level.Level;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -60,8 +57,12 @@ public class MaidStudyScreen extends Screen {
     private static final int RECIPE_ROW_HEIGHT = 12;
     /** 右边最多列几条配方，再多的靠"点产物轮换" */
     private static final int MAX_RECIPE_ROWS = 7;
-    /** 用途列表最多查这么多条：一样基础材料（木板之类）的用途可能有几十种 */
-    private static final int MAX_USES = 32;
+    /** 用途页一行列几个图标：面板宽只有 88，18 一格正好 4 列 */
+    private static final int USES_COLUMNS = 4;
+    /** 用途页的图标格子 */
+    private static final int USES_CELL = 18;
+    /** 用途页一屏几行（剩下的地方留给"点一下跳过去"那句提示） */
+    private static final int USES_ROWS = 5;
     private static final int MINI_CELL = 18;
 
     private static final int COLOR_PANEL = 0xE8100014;
@@ -71,6 +72,12 @@ public class MaidStudyScreen extends Screen {
     private static final int COLOR_ROW = 0xBBBBBB;
     private static final int COLOR_PRIORITY = 0xFFFF55;
     private static final int COLOR_SELECTED = 0x55FFFF;
+    /** 停用：灰（被按了暂停的东西） */
+    private static final int COLOR_DISABLED = 0xFF808080;
+    /** 按下去会**停用**：红 */
+    private static final int COLOR_WILL_DISABLE = 0xFFFF5555;
+    /** 按下去会**启用**：绿 */
+    private static final int COLOR_WILL_ENABLE = 0xFF55FF55;
 
     private final int maidEntityId;
     /**
@@ -82,6 +89,14 @@ public class MaidStudyScreen extends Screen {
     private int selected = -1;
     /** 产物列表滚到第几行（按过滤后的列表算） */
     private int scrollRow = 0;
+    /** 用途列表滚到第几行 */
+    private int usesScrollRow = 0;
+    /**
+     * 用途列表的缓存：**配方表整表遍历一遍不便宜**，而绘制、点击、滚轮每帧都要问一次，
+     * 不缓存就是一帧三遍全表扫描。键是"查的是哪个产物"，换了产物才重算。
+     */
+    private ItemStack usesKey = ItemStack.EMPTY;
+    private List<ItemStack> usesValue = List.of();
 
     /** 数量框里起手放的数字，主人自己改 */
     private static final String DEFAULT_ORDER_COUNT = "1";
@@ -276,8 +291,15 @@ public class MaidStudyScreen extends Screen {
                             totalRows - ROWS + 1),
                     left + 256, top + 7, COLOR_LABEL, false);
         }
-        graphics.drawString(this.font, queueText(), left + 10, top + 206, COLOR_LABEL, false);
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.study.footer"),
+        // 底下这两行都按窗口宽度截断：产物名一长（或换成英文更长）就会捅出面板外，
+        // 操作指南那句尤其是——写全了永远超宽，所以既缩短文案、又在这里兜一道。
+        Component queue = queueText();
+        graphics.drawString(this.font,
+                this.font.plainSubstrByWidth(queue.getString(), WINDOW_WIDTH - 20),
+                left + 10, top + 206, COLOR_LABEL, false);
+        Component footer = Component.translatable("gui.blueprint.study.footer");
+        graphics.drawString(this.font,
+                this.font.plainSubstrByWidth(footer.getString(), WINDOW_WIDTH - 16),
                 left + 8, top + WINDOW_HEIGHT - 12, COLOR_LABEL, false);
     }
 
@@ -289,10 +311,14 @@ public class MaidStudyScreen extends Screen {
      */
     private void refreshOrderControls(List<MaidStudyPool.Learned> pool) {
         if (orderButton != null) {
-            MaidStudyPool.Recipe preferred = selected >= 0 && selected < pool.size()
-                    ? pool.get(selected).preferred() : null;
-            // 数量没填（或者填了 0）也变灰：协议里 0 是"撤单"，别让点一下变成撤掉全部
-            orderButton.active = preferred != null && preferred.id() != null && typedCount() > 0;
+            MaidStudyPool.Learned picked = selected >= 0 && selected < pool.size()
+                    ? pool.get(selected) : null;
+            // preferred() 已经跳过停用的配方，所以"所有做法都被停用"也会落到这里变灰
+            MaidStudyPool.Recipe preferred = picked == null ? null : picked.preferred();
+            // 停用的产物不接新单；数量没填（或者填了 0）也变灰：协议里 0 是"撤单"，
+            // 别让点一下变成撤掉全部
+            orderButton.active = picked != null && !picked.disabled()
+                    && preferred != null && preferred.id() != null && typedCount() > 0;
         }
         EntityMaid maid = maid();
         if (cancelButton != null) {
@@ -335,13 +361,30 @@ public class MaidStudyScreen extends Screen {
             MaidStudyPool.Learned learned = pool.get(index);
             int x = left + GRID_X + (i % COLUMNS) * CELL;
             int y = top + GRID_Y + (i / COLUMNS) * CELL;
+            boolean hovered = mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16;
+            boolean shift = hasShiftDown();
+            // Shift 按下时把鼠标所在产物描出来，颜色就是"点下去会变成什么"：
+            // 红 = 将被停用，绿 = 将被启用
+            int actionColor = learned.disabled() ? COLOR_WILL_ENABLE : COLOR_WILL_DISABLE;
+            if (hovered && shift) {
+                graphics.fill(x, y, x + CELL, y + CELL, actionColor & 0x40FFFFFF);
+            }
             graphics.renderItem(learned.product(), x, y);
+            // 停用的产物压一层灰：一眼看出"这个她不做"
+            if (learned.disabled()) {
+                graphics.fill(x, y, x + CELL, y + CELL, 0x80000000);
+            }
 
             if (index == selected) {
                 graphics.renderOutline(x - 1, y - 1, CELL, CELL, COLOR_SELECTED);
+            } else if (learned.disabled()) {
+                graphics.renderOutline(x - 1, y - 1, CELL, CELL, COLOR_DISABLED);
             } else if (learned.hasMultipleRecipes()) {
                 // 多配方：金框提示"这个能挑做法"
                 graphics.renderOutline(x - 1, y - 1, CELL, CELL, COLOR_PRIORITY);
+            }
+            if (hovered && shift) {
+                graphics.renderOutline(x - 1, y - 1, CELL, CELL, actionColor);
             }
             if (learned.hasMultipleRecipes()) {
                 graphics.drawString(this.font, String.valueOf(learned.recipes().size()),
@@ -375,12 +418,15 @@ public class MaidStudyScreen extends Screen {
         }
 
         int rows = Math.min(learned.recipes().size(), MAX_RECIPE_ROWS);
+        // "优先"标在**第一条启用的**那条上：被停用的那条她并不会照着做
+        int preferredIndex = learned.preferredIndex();
         for (int i = 0; i < rows; i++) {
             MaidStudyPool.Recipe recipe = learned.recipes().get(i);
             int rowY = y + 26 + i * RECIPE_ROW_HEIGHT;
-            boolean priority = i == 0;
-            String label = (i + 1) + ". " + describe(recipe);
-            int color = priority ? COLOR_PRIORITY : COLOR_ROW;
+            boolean priority = i == preferredIndex;
+            boolean off = recipe.disabled();
+            String label = (i + 1) + ". " + describe(recipe) + (off ? " ✕" : "");
+            int color = off ? COLOR_DISABLED : (priority ? COLOR_PRIORITY : COLOR_ROW);
             boolean hovered = mouseX >= x && mouseX < x + PANEL_WIDTH
                     && mouseY >= rowY && mouseY < rowY + RECIPE_ROW_HEIGHT;
             if (hovered) {
@@ -388,7 +434,7 @@ public class MaidStudyScreen extends Screen {
                         0x30FFFFFF);
             }
             graphics.drawString(this.font,
-                    this.font.plainSubstrByWidth(label, PANEL_WIDTH - (priority ? 28 : 2)),
+                    this.font.plainSubstrByWidth(label, PANEL_WIDTH - (off ? 10 : priority ? 28 : 2)),
                     x, rowY, color, false);
             if (priority) {
                 graphics.drawString(this.font, Component.translatable("gui.blueprint.study.priority"),
@@ -426,8 +472,9 @@ public class MaidStudyScreen extends Screen {
     /**
      * 右边：这东西能**用来做什么**（右键产物切到这一页）。
      * <p>
-     * 查的是配方表里所有把它当材料的合成配方——就是它的"用途"。规划下一步很省事：
-     * 想做个箱子，先看看它要什么，再照着去下料。
+     * 列的是"她会做的东西里，哪些用到它"（见 {@link #learnedUsesOf}）——
+     * 不是全世界的配方，是**她学过的**。想让她往下做点什么，翻这一页比翻配方表快：
+     * 每一条都点得过去、都能直接下单。
      */
     private void drawUsesPanel(GuiGraphics graphics, MaidStudyPool.Learned learned,
                                int mouseX, int mouseY) {
@@ -438,7 +485,7 @@ public class MaidStudyScreen extends Screen {
                         PANEL_WIDTH - 4),
                 x, y, COLOR_TEXT, false);
 
-        List<Recipe<CraftingContainer>> uses = usesOf(learned.product());
+        List<ItemStack> uses = learnedUsesOf(learned.product());
         graphics.drawString(this.font,
                 Component.translatable("gui.blueprint.study.uses_count", uses.size()),
                 x, y + 12, COLOR_LABEL, false);
@@ -448,53 +495,88 @@ public class MaidStudyScreen extends Screen {
             return;
         }
 
-        int rows = Math.min(uses.size(), MAX_RECIPE_ROWS);
-        for (int i = 0; i < rows; i++) {
-            ItemStack result = resultOf(uses.get(i));
-            int rowY = y + 26 + i * RECIPE_ROW_HEIGHT;
-            boolean hovered = mouseX >= x && mouseX < x + PANEL_WIDTH
-                    && mouseY >= rowY && mouseY < rowY + RECIPE_ROW_HEIGHT;
-            if (hovered) {
-                graphics.fill(x - 1, rowY - 1, x + PANEL_WIDTH, rowY + RECIPE_ROW_HEIGHT - 1,
-                        0x30FFFFFF);
-            }
-            String label = (i + 1) + ". " + result.getHoverName().getString()
-                    + (result.getCount() > 1 ? " ×" + result.getCount() : "");
-            // 她池子里有的话画亮一点：点一下能直接跳过去看那个产物
-            boolean known = poolIndexOf(pool(), result) >= 0;
-            graphics.drawString(this.font,
-                    this.font.plainSubstrByWidth(label, PANEL_WIDTH - 2),
-                    x, rowY, known ? COLOR_ROW : COLOR_LABEL, false);
-        }
-        if (uses.size() > rows) {
-            graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.study.more_uses", uses.size() - rows),
-                    x, y + 26 + rows * RECIPE_ROW_HEIGHT, COLOR_LABEL, false);
-        }
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.study.uses_hint"),
-                x, top + WINDOW_HEIGHT - MINI_CELL * 3 - 31, COLOR_LABEL, false);
-    }
+        // 用**图标**而不是名字：面板只有 88 宽，一行中文名字塞不下三个字就得截断，
+        // 反而不如直接看图（而且看图标才知道"这东西长什么样"）。
+        // 一格一样产物，跟左边那片格子一个规矩；多了就滚轮翻页。
+        int totalRows = (uses.size() + USES_COLUMNS - 1) / USES_COLUMNS;
+        usesScrollRow = Math.max(0, Math.min(Math.max(0, totalRows - USES_ROWS), usesScrollRow));
 
-    /** 配方表里所有把这个产物当材料的合成配方（就是它的"用途"） */
-    private List<Recipe<CraftingContainer>> usesOf(ItemStack product) {
-        Level level = Minecraft.getInstance().level;
-        if (level == null || product.isEmpty()) {
-            return List.of();
-        }
-        List<Recipe<CraftingContainer>> uses = new ArrayList<>();
-        for (Recipe<CraftingContainer> recipe : level.getRecipeManager()
-                .getAllRecipesFor(RecipeType.CRAFTING)) {
-            for (Ingredient ingredient : recipe.getIngredients()) {
-                if (ingredient.test(product)) {
-                    uses.add(recipe);
-                    break;
-                }
-            }
-            if (uses.size() >= MAX_USES) {
+        int listY = y + 26;
+        for (int i = 0; i < USES_COLUMNS * USES_ROWS; i++) {
+            int position = usesScrollRow * USES_COLUMNS + i;
+            if (position >= uses.size()) {
                 break;
             }
+            ItemStack result = uses.get(position);
+            int cellX = x + (i % USES_COLUMNS) * USES_CELL;
+            int cellY = listY + (i / USES_COLUMNS) * USES_CELL;
+            graphics.renderItem(result, cellX, cellY);
+            if (mouseX >= cellX && mouseX < cellX + 16 && mouseY >= cellY && mouseY < cellY + 16) {
+                graphics.renderTooltip(this.font, result, mouseX, mouseY);
+            }
         }
-        return uses;
+        if (totalRows > USES_ROWS) {
+            graphics.drawString(this.font,
+                    Component.translatable("gui.blueprint.study.scroll", usesScrollRow + 1,
+                            totalRows - USES_ROWS + 1),
+                    x, listY + USES_ROWS * USES_CELL + 2, COLOR_LABEL, false);
+        }
+        graphics.drawString(this.font, this.font.plainSubstrByWidth(
+                        Component.translatable("gui.blueprint.study.uses_hint").getString(),
+                        PANEL_WIDTH),
+                x, listY + USES_ROWS * USES_CELL + 14, COLOR_LABEL, false);
+    }
+
+    /**
+     * 这东西**能用来做什么**：只列她**已经学会的**、配方摆法里用到它的那些产物。
+     * <p>
+     * 为什么不扫配方表：那样列出来的是"全世界所有配方"，木板之类能有几百条，
+     * 其中她会做的就那么几样，主人点过去多半撞上"她不会做"——对
+     * "接下来让她做什么"这件事没有帮助，看着还以为丢了好多。
+     * 反过来从池子查，列出来的**每一条都点得过去、都能直接下单**，这才是有用的清单。
+     * <p>
+     * 顺带也绕开了原来那个坑：扫全表必须自己设上限（不然爆表），设了就必然截断、
+     * 必然"缺失严重"。这里查的是她已经学会的东西，**有多少条就给多少条，不必砍**。
+     */
+    private List<ItemStack> learnedUsesOf(ItemStack material) {
+        if (material.isEmpty()) {
+            return List.of();
+        }
+        if (ItemStack.matches(usesKey, material)) {
+            return usesValue;
+        }
+        List<ItemStack> uses = new ArrayList<>();
+        for (MaidStudyPool.Learned learned : pool()) {
+            // 自己不算自己的用途
+            if (ItemStack.matches(learned.product(), material)) {
+                continue;
+            }
+            for (MaidStudyPool.Recipe recipe : learned.recipes()) {
+                if (usesMaterial(recipe.grid(), material)) {
+                    uses.add(learned.product());
+                    break; // 同一样产物只列一次（它可能好几条配方都用到这个）
+                }
+            }
+        }
+        usesKey = material.copyWithCount(1);
+        usesValue = List.copyOf(uses);
+        return usesValue;
+    }
+
+    /**
+     * 这套摆法里有没有用到这个材料。
+     * <p>
+     * 只比**物品种类**（{@code isSameItem}），不比数量也不比 NBT：
+     * 池子里存的摆法每格本来就只有 1 个，而"半耐久的工具也能当材料"这类
+     * NBT 差异不该让一条用途凭空消失。
+     */
+    private static boolean usesMaterial(List<ItemStack> grid, ItemStack material) {
+        for (ItemStack slot : grid) {
+            if (!slot.isEmpty() && ItemStack.isSameItem(slot, material)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 这个产物在她池子里的下标；她不会做返回 -1 */
@@ -505,12 +587,6 @@ public class MaidStudyScreen extends Screen {
             }
         }
         return -1;
-    }
-
-    /** 一条配方做出来的是什么（用途列表里显示的就是它） */
-    private static ItemStack resultOf(Recipe<CraftingContainer> recipe) {
-        Level level = Minecraft.getInstance().level;
-        return level == null ? ItemStack.EMPTY : recipe.getResultItem(level.registryAccess());
     }
 
     /**
@@ -565,12 +641,27 @@ public class MaidStudyScreen extends Screen {
         List<Integer> matches = matchingIndices(pool);
         int productIndex = productIndexAt(matches, mouseX, mouseY);
 
-        // 右键产物 = 看它能用来做什么；左键才是"看她的配方、设优先级"
+        // 右键产物 = 看它能用来做什么；左键才是"看她的配方、设优先级"。
+        // Shift 按下时右键另有含义——**按暂停**，而且分两级：
+        // 点产物是整样停用/启用，点右边某一条配方是只停用那一条做法
+        // （产物管"做不做"，配方管"用哪个做法"，正好跟两列的层次对上）。
         if (button == 1) {
             if (productIndex >= 0) {
+                if (hasShiftDown()) {
+                    toggleUse(productIndex, -1);
+                    return true;
+                }
                 selected = productIndex;
                 showUses = true;
+                usesScrollRow = 0; // 换了产物就从头看，别停在上一页的位置上
                 return true;
+            }
+            if (hasShiftDown()) {
+                int recipeIndex = recipeRowAt(pool, mouseX, mouseY);
+                if (recipeIndex >= 0) {
+                    toggleUse(selected, recipeIndex);
+                    return true;
+                }
             }
             return super.mouseClicked(mouseX, mouseY, button);
         }
@@ -579,6 +670,12 @@ public class MaidStudyScreen extends Screen {
         }
 
         if (productIndex >= 0) {
+            // Shift+左键 = 忘掉这个产物（连同它的配方）。不做二次确认：删了只是暂时不会做，
+            // 主人再演示一次就补回来了，丢得起；要的就是"随手清掉记歪的东西"。
+            if (hasShiftDown()) {
+                sendForget(productIndex);
+                return true;
+            }
             showUses = false;
             if (productIndex == selected && pool.get(productIndex).hasMultipleRecipes()) {
                 // 同一个产物再点一下：把下一条配方轮换到最前（多条时不用去点右边的小字）
@@ -593,19 +690,18 @@ public class MaidStudyScreen extends Screen {
                 && mouseX >= left + PANEL_X && mouseX < left + PANEL_X + PANEL_WIDTH) {
             int rowY = top + GRID_Y + 26;
             if (showUses) {
-                // 用途模式：点一条就跳到那个产物（她池子里有才跳得过去）
-                List<Recipe<CraftingContainer>> uses = usesOf(pool.get(selected).product());
-                int rows = Math.min(uses.size(), MAX_RECIPE_ROWS);
-                for (int i = 0; i < rows; i++) {
-                    int y = rowY + i * RECIPE_ROW_HEIGHT;
-                    if (mouseY >= y && mouseY < y + RECIPE_ROW_HEIGHT) {
-                        int target = poolIndexOf(pool, resultOf(uses.get(i)));
-                        if (target >= 0) {
-                            selected = target;
-                            showUses = false;
-                        }
-                        return true;
+                // 用途模式：点一个图标就跳到那个产物（列表本来就是从池子里查出来的，
+                // 每一条都点得过去；这里再查一次下标是为了拿到它当下的位置）
+                List<ItemStack> uses = learnedUsesOf(pool.get(selected).product());
+                int index = useIndexAt(uses, mouseX, mouseY);
+                if (index >= 0) {
+                    int target = poolIndexOf(pool, uses.get(index));
+                    if (target >= 0) {
+                        selected = target;
+                        showUses = false;
+                        usesScrollRow = 0;
                     }
+                    return true;
                 }
             } else {
                 int recipeRows = Math.min(pool.get(selected).recipes().size(), MAX_RECIPE_ROWS);
@@ -623,7 +719,18 @@ public class MaidStudyScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int totalRows = (matchingIndices(pool()).size() + COLUMNS - 1) / COLUMNS;
+        // 用途页、鼠标又在右边面板上：滚用途那一列，别去动左边的产物网格
+        List<MaidStudyPool.Learned> pool = pool();
+        if (showUses && selected >= 0 && selected < pool.size()
+                && mouseX >= left + PANEL_X && mouseX < left + PANEL_X + PANEL_WIDTH) {
+            int totalRows = (learnedUsesOf(pool.get(selected).product()).size() + USES_COLUMNS - 1)
+                    / USES_COLUMNS;
+            int maxScroll = Math.max(0, totalRows - USES_ROWS);
+            usesScrollRow = Math.max(0,
+                    Math.min(maxScroll, usesScrollRow + (delta < 0 ? 1 : -1)));
+            return true;
+        }
+        int totalRows = (matchingIndices(pool).size() + COLUMNS - 1) / COLUMNS;
         int maxScroll = Math.max(0, totalRows - ROWS);
         int next = scrollRow + (delta < 0 ? 1 : -1);
         scrollRow = Math.max(0, Math.min(maxScroll, next));
@@ -652,6 +759,76 @@ public class MaidStudyScreen extends Screen {
     }
 
     /**
+     * 鼠标底下是第几条配方（右边配方面板里，**仅"她的配方"那一页**）；不在任何一行上返回 -1。
+     * <p>
+     * 用途那一页不参与：那一页列的是"配方表里谁拿它当材料"，不是她会做的做法，停不停用无关。
+     */
+    private int recipeRowAt(List<MaidStudyPool.Learned> pool, double mouseX, double mouseY) {
+        if (showUses || selected < 0 || selected >= pool.size()) {
+            return -1;
+        }
+        if (mouseX < left + PANEL_X || mouseX >= left + PANEL_X + PANEL_WIDTH) {
+            return -1;
+        }
+        int rows = Math.min(pool.get(selected).recipes().size(), MAX_RECIPE_ROWS);
+        int rowY = top + GRID_Y + 26;
+        for (int i = 0; i < rows; i++) {
+            int y = rowY + i * RECIPE_ROW_HEIGHT;
+            if (mouseY >= y && mouseY < y + RECIPE_ROW_HEIGHT) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 鼠标底下是第几条**用途**（右边用途页的图标格子上）；不在格子上返回 -1。
+     * <p>
+     * 返回的是**列表下标**（含滚动偏移），跟画的时候用的 {@code usesScrollRow} 同一套算法，
+     * 否则滚过一页之后点中的会是另一样东西。
+     */
+    private int useIndexAt(List<ItemStack> uses, double mouseX, double mouseY) {
+        int listY = top + GRID_Y + 26;
+        for (int i = 0; i < USES_COLUMNS * USES_ROWS; i++) {
+            int position = usesScrollRow * USES_COLUMNS + i;
+            if (position >= uses.size()) {
+                return -1;
+            }
+            int cellX = left + PANEL_X + (i % USES_COLUMNS) * USES_CELL;
+            int cellY = listY + (i / USES_COLUMNS) * USES_CELL;
+            if (mouseX >= cellX && mouseX < cellX + 16 && mouseY >= cellY && mouseY < cellY + 16) {
+                return position;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 按下/解除暂停键：{@code recipeIndex < 0} 是整样产物，否则是那号产物的第几条配方。
+     * <p>
+     * 发的是**目标状态**而不是"翻转一下"：界面这份池子是同步过来的，可能比服务端旧一拍，
+     * 让服务端去翻就可能翻错方向；把"我现在看到的是什么"一并告诉它就没这个窗口。
+     */
+    private void toggleUse(int productIndex, int recipeIndex) {
+        List<MaidStudyPool.Learned> pool = pool();
+        if (productIndex < 0 || productIndex >= pool.size()) {
+            return;
+        }
+        boolean currentlyDisabled;
+        if (recipeIndex < 0) {
+            currentlyDisabled = pool.get(productIndex).disabled();
+        } else {
+            List<MaidStudyPool.Recipe> recipes = pool.get(productIndex).recipes();
+            if (recipeIndex >= recipes.size()) {
+                return;
+            }
+            currentlyDisabled = recipes.get(recipeIndex).disabled();
+        }
+        ModNetwork.CHANNEL.sendToServer(new C2SToggleStudyUsePacket(
+                maidEntityId, productIndex, recipeIndex, !currentlyDisabled));
+    }
+
+    /**
      * 下单 / 撤单。
      * <p>
      * {@code count <= 0} 表示撤掉全部待做（{@code productIndex} 那时没有意义），
@@ -672,5 +849,13 @@ public class MaidStudyScreen extends Screen {
         }
         ModNetwork.CHANNEL.sendToServer(
                 new C2SSetStudyPriorityPacket(maidEntityId, productIndex, recipeIndex));
+    }
+
+    /** 忘掉一样产物（连同它的配方）。删完池子会经同步刷新，先把选中清掉给个即时反馈 */
+    private void sendForget(int productIndex) {
+        ModNetwork.CHANNEL.sendToServer(new C2SForgetStudyPacket(maidEntityId, productIndex));
+        selected = -1;
+        showUses = false;
+        usesScrollRow = 0;
     }
 }

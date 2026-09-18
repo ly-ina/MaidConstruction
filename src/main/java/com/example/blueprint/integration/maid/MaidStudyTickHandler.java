@@ -185,7 +185,19 @@ public class MaidStudyTickHandler {
                 .orElse(null);
     }
 
-    /** 事件里那把格子的摆法，一律补成 3×3 存（2×2 的摆在左上角） */
+    /**
+     * 事件里那把格子的摆法，一律补成 3×3 存（2×2 的摆在左上角）。
+     * <p>
+     * <b>每格必须复制一份</b>（{@code copyWithCount(1)}），不能直接把 {@code container.getItem()}
+     * 返回的那个 ItemStack 存进去：那是合成格里**那件物品本身**，而客户端下一步就是
+     * "逐格扣减材料"——摆法里的格子会跟着一起被扣成空。表现就是刚学的配方，
+     * 摆法那一片（以及界面上"她照这个摆法做"那 3×3）过一会儿全空了，
+     * 只剩下配方 id 还能读出来；id 也没认出来的那些则整条配方等于没记上。
+     * 每种材料只记 1 个：池子存的是"怎么摆"，不是留了多少料。
+     * <p>
+     * 顺带一提，{@link StudyRecipeCapture#layout} 那边一开始就复制了，所以走 AE2 终端
+     * 与兜底反查的配方从来没这个问题——只有"在工作台/背包格子里手搓"这一条路会丢。
+     */
     private static List<ItemStack> gridOf(CraftingContainer container) {
         ItemStack[] slots = new ItemStack[MaidStudyPool.GRID_SIZE];
         Arrays.fill(slots, ItemStack.EMPTY);
@@ -197,7 +209,8 @@ public class MaidStudyTickHandler {
                 if (index >= MaidStudyPool.GRID_SIZE) {
                     continue;
                 }
-                slots[index] = container.getItem(row * width + col);
+                ItemStack stack = container.getItem(row * width + col);
+                slots[index] = stack.isEmpty() ? ItemStack.EMPTY : stack.copyWithCount(1);
             }
         }
         return List.of(slots);

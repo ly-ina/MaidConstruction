@@ -9,7 +9,9 @@ import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetNamePacket;
 import com.example.blueprint.network.packet.C2SSetRotationPacket;
+import com.example.blueprint.network.packet.C2SForgetStudyPacket;
 import com.example.blueprint.network.packet.C2SSetStudyPriorityPacket;
+import com.example.blueprint.network.packet.C2SToggleStudyUsePacket;
 import com.example.blueprint.network.packet.S2CSchematicDataPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkRegistry;
@@ -50,5 +52,11 @@ public class ModNetwork {
         CHANNEL.registerMessage(id++, C2SMaidCraftOrderPacket.class,
                 C2SMaidCraftOrderPacket::encode, C2SMaidCraftOrderPacket::decode,
                 C2SMaidCraftOrderPacket::handle);
+        CHANNEL.registerMessage(id++, C2SForgetStudyPacket.class,
+                C2SForgetStudyPacket::encode, C2SForgetStudyPacket::decode,
+                C2SForgetStudyPacket::handle);
+        CHANNEL.registerMessage(id++, C2SToggleStudyUsePacket.class,
+                C2SToggleStudyUsePacket::encode, C2SToggleStudyUsePacket::decode,
+                C2SToggleStudyUsePacket::handle);
     }
 }

@@ -35,8 +35,18 @@ public class MaidStudyInteractHandler {
         if (maid.getOwner() != player) {
             return;
         }
-        // 取消 = 女仆那边直接 SUCCESS 收场：不开它自己的界面，也不动手里那件东西
+        // 取消 = 女仆那边直接 SUCCESS 收场：不开它自己的界面，也不动手里那件东西。
+        // 这一步两端都要做：服务端不取消，TLM 那边照样开它自己的界面。
         event.setCanceled(true);
+        // 开界面只认**逻辑客户端**，而且必须在这一份上开。
+        // 单人游戏里这个事件要走两遍：客户端线程一遍、集成服务端线程一遍。
+        // DistExecutor 只认**物理端**（单人游戏的物理端就是 CLIENT），认不出线程，
+        // 于是服务端线程那一份也会跑来开界面——Minecraft.getInstance().setScreen()
+        // 撞上 RenderSystem 的线程断言，报 "Rendersystem called from wrong thread"，直接闪退。
+        // （专用服务端物理端是 DEDICATED_SERVER，压根不执行，所以这坑只在单人游戏里炸。）
+        if (!player.level().isClientSide()) {
+            return;
+        }
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> () -> MaidStudyScreenOpener.open(maid.getId()));
     }
