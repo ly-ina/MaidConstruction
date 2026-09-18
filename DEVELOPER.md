@@ -948,9 +948,80 @@ insertFirst(零件, 数量, 来路):
 代价是来路要跟着单一起存（`Order.lineage`，NBT 里一串物品）。它有界：链条上不会出现重复产物，
 所以长度天然受"不同产物个数"限制，不会无限膨胀。
 
-**"用途"视图纯粹是客户端查配方表。** 右键产物列出所有把它当材料的合成配方
-（`ingredient.test(产物)`），点一条就跳到那个产物——**前提是她池子里有它**（跳过去才有意义，
-否则那一页只会是"只见过产物，没见过做法"）。配方表在客户端是同步好的，所以这个视图不用发任何包。
+**"用途"视图查的是她自己的池子，不是配方表。** 右键产物列出**她会做的、用到这个产物的东西**
+（`MaidStudyScreen#learnedUsesOf`：遍历池子，看哪样产物的配方摆法里含它），点一条就跳过去。
+
+最初的实现是扫配方表（`ingredient.test(产物)`），后来改成反查池子，两个原因：
+
+1. **扫全表必须自己设上限**，木板这类几百条只能砍到 32 条，主人看着就是"缺失特别严重"；
+   而池子本来就有界，反查可以不砍条数、完整给全。
+2. 扫全表列出来的**绝大多数她根本不会做**，点过去只撞上"她不会做"，
+   对"接下来让她做什么"这件事没有帮助。反查池子则**每一条都点得过去、都能直接下单**。
+
+代价是：她还没学过用它做的东西时，这一页是空的。这是**口径本身的取舍，不是丢数据**——
+真要"全世界还有哪些做法"（用来决定接下来教她什么），那是接 JEI 那条路。
+
+### 7.14 录入配方必须先复制：合成格里取到的是活引用
+
+`ItemCraftedEvent` 是在 `ResultSlot#onTake` 的**第一步**发出来的，所以事件里读合成格，
+格子还是满的——**读的时机没问题，坑在"存"**：
+
+```java
+slots[index] = container.getItem(row * width + col);   // ← 存的是那件物品本身
+```
+
+`container.getItem()` 返回的是合成格里**那件 ItemStack 自己**，不是副本。而主人的下一步操作
+就是"逐格扣减材料"，于是我们刚记下来的摆法跟着一起被扣空。
+
+**表现**（很容易被误判成"数据没存上"）：
+
+- 刚学会的做法，摆法那一片过后全空、只剩配方 id；
+- id 也没反查到的那些，`MaidStudyPool.isEmpty()` 判定为"什么都没看出来"，
+  **整条做法等于压根没记上**；
+- 而且它**只在"每格正好放 1 个"时才丢干净**（配方书自动填充、或材料正好够），
+  每格有剩料时反而侥幸留着——同一个 bug 看起来时好时坏，特别难查。
+
+**规矩：凡是从别人的容器里取出来的 ItemStack，要存进自己的数据结构就先 `copyWithCount(1)`。**
+
+顺带说一句它为什么藏得住：`StudyRecipeCapture#layout` 一开始就复制了
+（`chosen.copyWithCount(1)`），所以走 AE2 合成终端与"按产物反查"兜底的配方从来没有这个问题，
+只有"工作台 / 背包格子手搓"这一条路会丢。**同一个概念两条写入路径、写法不一致**，
+正是这类 bug 的温床。
+
+### 7.15 开界面要判逻辑端：`DistExecutor` 只认物理端
+
+```java
+DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> MaidStudyScreenOpener.open(maid.getId()));
+```
+
+看着"已经限定客户端了"，其实**只挡住了专用服务端**。`DistExecutor` 判断的是**物理端**，
+而**单人游戏的物理端就是 `CLIENT`**。像 `InteractMaidEvent`（以及 Forge 的
+`PlayerInteractEvent`）这类事件**两端都会走一遍**——客户端线程一遍、集成服务端线程一遍——
+于是服务端线程上那一份也会执行，跑去调 `Minecraft.getInstance().setScreen()`，
+撞上 `RenderSystem` 的线程断言：
+
+```
+[Server thread/ERROR] Exception caught during firing event: Rendersystem called from wrong thread
+[Render thread/ERROR] Reported exception thrown!
+```
+
+所以**"物理端是客户端" ≠ "可以碰客户端 API"**，还差一个"当前线程是不是客户端线程"。
+
+正确写法是分成两件事：
+
+- **取消事件**这类逻辑，两端都要做（服务端不取消，TLM 那边照样开它自己的界面）；
+- **开界面**只能在这一份是**逻辑客户端**时做：
+
+```java
+event.setCanceled(true);                  // 两端都要
+if (!player.level().isClientSide()) {     // 逻辑端：服务端线程那份到此为止
+    return;
+}
+DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> MaidStudyScreenOpener.open(maid.getId()));
+```
+
+外层那个 `DistExecutor` 仍然要留着：它保证在**专用服务端**上不会去加载 `client` 包里的类
+（否则 `NoClassDefFoundError`）。两层各管一件事，不能互相替代。
 
 ---
 
@@ -991,6 +1062,13 @@ insertFirst(零件, 数量, 来路):
 **未装 TLM 时启动失败** —— 有代码在 `@LittleMaidExtension` 之外引用了 TLM 类型。
 
 **配方加载失败** —— 涉及软依赖模组物品的配方没有用 `forge:conditional` 包住。
+
+**`Rendersystem called from wrong thread`（出现在 `Server thread`），随后 `Render thread` 报
+`Reported exception thrown!`** —— 有代码在非渲染线程上碰了客户端 API，多半是开界面。
+典型是只按**物理端**判断、没判逻辑端，见 §7.15。
+
+**刚学会的做法"摆法"是空的、只剩配方 id**（时好时坏，每格正好 1 个时才必现） ——
+录入时存了合成格的活引用，材料被扣减后摆法跟着空了，见 §7.14。
 
 ### 8.5 验证第三方 API 的正确姿势
 
@@ -1056,6 +1134,18 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 3. `softprops/action-gh-release` 发布，附上 `build/libs/*.jar`。
 
 `workflow_dispatch` 手动触发时只构建、不发版。
+
+两个容易踩的点：
+
+- **标签要用附注标签**（`git tag -a vx.y.z -m "..."`）。`git push --follow-tags`
+  **只推附注标签**，轻量标签会被静默留下——结果只推了 `main`、Release 压根不触发，
+  而命令行看起来是"推送成功了"。上面那行是显式 `git push origin vx.y.z`，没有这个问题。
+  可以用 `git ls-remote --tags origin` 确认标签是否真的到了远端（附注标签会多出一条
+  `refs/tags/vx.y.z^{}`）。
+- **CHANGELOG 的标题必须严格是 `## [x.y.z]` 开头**。抽说明的 `awk` 用的是
+  `index($0, "## [" ver "]") == 1` 前缀匹配，多一个空格都抽不到，会退化成兜底文案
+  "CHANGELOG.md 里没有 x.y.z 的条目"。本机没有 Git Bash 时，可以用等价的 Python 逻辑
+  先验证一遍再打标签：按行找 `startswith("## [" + ver + "]")` 起抄，遇到下一个 `## [` 停。
 
 ### 版本号的语义
 
