@@ -4,10 +4,12 @@ import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.network.packet.C2SCapturePacket;
 import com.example.blueprint.network.packet.C2SClearBlueprintPacket;
 import com.example.blueprint.network.packet.C2SImportBlueprintPacket;
+import com.example.blueprint.network.packet.C2SMaidCraftOrderPacket;
 import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetNamePacket;
 import com.example.blueprint.network.packet.C2SSetRotationPacket;
+import com.example.blueprint.network.packet.C2SSetStudyPriorityPacket;
 import com.example.blueprint.network.packet.S2CSchematicDataPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkRegistry;
@@ -42,5 +44,11 @@ public class ModNetwork {
                 C2SSetNamePacket::encode, C2SSetNamePacket::decode, C2SSetNamePacket::handle);
         CHANNEL.registerMessage(id++, S2CSchematicDataPacket.class,
                 S2CSchematicDataPacket::encode, S2CSchematicDataPacket::decode, S2CSchematicDataPacket::handle);
+        CHANNEL.registerMessage(id++, C2SSetStudyPriorityPacket.class,
+                C2SSetStudyPriorityPacket::encode, C2SSetStudyPriorityPacket::decode,
+                C2SSetStudyPriorityPacket::handle);
+        CHANNEL.registerMessage(id++, C2SMaidCraftOrderPacket.class,
+                C2SMaidCraftOrderPacket::encode, C2SMaidCraftOrderPacket::decode,
+                C2SMaidCraftOrderPacket::handle);
     }
 }

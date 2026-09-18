@@ -641,7 +641,7 @@ public class BlueprintBuildController {
      */
     @Nullable
     private ItemProvider findProvider(ServerLevel level, EntityMaid maid) {
-        ItemProvider nearby = findNearbyContainer(level, maid);
+        ItemProvider nearby = findNearbyContainer(level, maid, shortfall);
         if (nearby != null) {
             BlueprintMod.LOGGER.info("女仆 {} 就近取材：{}", maid.getUUID(), nearby.interactPos());
             return nearby;
@@ -666,13 +666,18 @@ public class BlueprintBuildController {
      * 没装 AE2 时这里直接返回 null，不会把 AE2 的类拽进加载器。
      */
     @Nullable
-    private ItemProvider findWirelessProvider(ServerLevel level, EntityMaid maid) {
+    static ItemProvider findWirelessProvider(ServerLevel level, EntityMaid maid) {
         return Ae2Compat.createWirelessProvider(level, collectHeldStacks(maid), maid.position());
     }
 
-    /** 扫一圈身边的普通容器，返回最近的那个装着所需材料的 */
+    /**
+     * 扫一圈身边的普通容器，返回最近的那个装着所需材料的。
+     * <p>
+     * 清单（{@code bill}）当参数传进来而不是读实例上的 {@code shortfall}：
+     * 手搓那边也要找容器，但它的清单是"这一次合成要的材料"，跟施工那份完全是两回事。
+     */
     @Nullable
-    private ItemProvider findNearbyContainer(ServerLevel level, EntityMaid maid) {
+    static ItemProvider findNearbyContainer(ServerLevel level, EntityMaid maid, Map<Item, Integer> bill) {
         BlockPos center = maid.blockPosition();
         int minY = Math.max(level.getMinBuildHeight(), center.getY() - CONTAINER_SEARCH_HEIGHT);
         int maxY = Math.min(level.getMaxBuildHeight() - 1, center.getY() + CONTAINER_SEARCH_HEIGHT);
@@ -689,7 +694,7 @@ public class BlueprintBuildController {
                 continue;
             }
             IItemHandler handler = blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
-            if (handler == null || !hasWantedItem(handler)) {
+            if (handler == null || !hasWantedItem(handler, bill)) {
                 continue;
             }
             double distance = pos.distSqr(center);
@@ -761,10 +766,10 @@ public class BlueprintBuildController {
         return ae2 != null ? ae2 : new BlockContainerProvider(level, pos);
     }
 
-    private boolean hasWantedItem(IItemHandler handler) {
+    static boolean hasWantedItem(IItemHandler handler, Map<Item, Integer> bill) {
         for (int i = 0; i < handler.getSlots(); i++) {
             ItemStack stack = handler.getStackInSlot(i);
-            if (!stack.isEmpty() && shortfall.containsKey(stack.getItem())) {
+            if (!stack.isEmpty() && bill.containsKey(stack.getItem())) {
                 return true;
             }
         }
@@ -1087,7 +1092,7 @@ public class BlueprintBuildController {
      * 顺序是主手、副手、饰品栏、背包。饰品栏排在背包前面，
      * 因为那才是这本书该待的地方，塞进背包只是权宜之计。
      */
-    private static ItemStack findBindingBook(EntityMaid maid) {
+    static ItemStack findBindingBook(EntityMaid maid) {
         for (ItemStack stack : collectHeldStacks(maid)) {
             if (stack.getItem() instanceof BindingBookItem) {
                 return stack;

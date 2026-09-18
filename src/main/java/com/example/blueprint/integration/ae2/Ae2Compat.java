@@ -3,7 +3,9 @@ package com.example.blueprint.integration.ae2;
 import com.example.blueprint.build.BlockEntityRotationResolver;
 import com.example.blueprint.build.BlockMaterialResolver;
 import com.example.blueprint.build.ItemProvider;
+import com.example.blueprint.integration.maid.MaidStudyPool;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -81,6 +83,21 @@ public final class Ae2Compat {
     @Nullable
     public static Item maidBindingCardItem() {
         return isLoaded() ? Ae2TerminalRegistry.MAID_BINDING_CARD.get() : null;
+    }
+
+    /**
+     * 如果玩家正开着 AE2 的合成终端，返回它当前匹配到的那个配方（学习池要记"她看到了什么做法"）。
+     * <p>
+     * 为什么别处那种"读事件里的合成容器"的办法对它不灵，见 {@link Ae2CraftingCapture}。
+     *
+     * @return 没装 AE2、不是合成终端、或者格子里还没凑成配方时返回 {@code null}
+     */
+    @Nullable
+    public static MaidStudyPool.Recipe captureCraftingRecipe(AbstractContainerMenu menu) {
+        if (!isLoaded() || menu == null) {
+            return null;
+        }
+        return Ae2CraftingCapture.capture(menu);
     }
 
     /**
