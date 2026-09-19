@@ -6,8 +6,11 @@ import com.example.blueprint.integration.ae2.Ae2TerminalRegistry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.CreativeModeTab;
+import net.minecraft.world.item.Item;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.RegistryObject;
+
+import java.util.List;
 
 /**
  * 模组专属的创造物品栏。
@@ -30,13 +33,36 @@ public final class ModCreativeTabs {
                         // 终端物品只在 AE2 存在时才有注册对象：访问这个字段会初始化
                         // Ae2TerminalRegistry 的静态字段，未装 AE2 时那是个 NoClassDefFoundError
                         if (Ae2Compat.isLoaded()) {
-                            output.accept(Ae2TerminalRegistry.MAID_TERMINAL_ITEM.get());
-                            output.accept(Ae2TerminalRegistry.CREATIVE_MAID_INTERFACE_ITEM.get());
-                            output.accept(Ae2TerminalRegistry.WIRELESS_MAID_TERMINAL.get());
-                            output.accept(Ae2TerminalRegistry.MAID_BINDING_CARD.get());
+                            addAe2Items(output);
                         }
                     })
                     .build());
+
+    /** "缺了哪些 AE2 注册项"这件事只报一次（创造栏每被构建一次都会走一遍这里） */
+    private static boolean ae2Warned = false;
+
+    /**
+     * 把 AE2 那几件物品摆进创造栏。
+     * <p>
+     * <b>一件一件问"在不在"再摆，绝不直接 {@code .get()}。</b>
+     * 整合包里第三方改写注册表是真实存在的（见 {@link Ae2TerminalRegistry#notRegistered()}），
+     * 而这里一句 {@code .get()} 就是 {@code NullPointerException}——
+     * <b>玩家一打开创造物品栏客户端就崩</b>，而且报错落在我们头上。
+     * 少显示一件东西，总好过崩一次。
+     */
+    private static void addAe2Items(CreativeModeTab.Output output) {
+        if (!ae2Warned) {
+            List<String> missing = Ae2TerminalRegistry.notRegistered();
+            if (!missing.isEmpty()) {
+                ae2Warned = true;
+                BlueprintMod.LOGGER.warn("这些 AE2 相关的注册项没落地，创造栏里会缺：{}（多半是别的模组改写了注册表）",
+                        missing);
+            }
+        }
+        for (RegistryObject<Item> object : Ae2TerminalRegistry.CREATIVE_ITEMS) {
+            object.ifPresent(output::accept);
+        }
+    }
 
     private ModCreativeTabs() {
     }

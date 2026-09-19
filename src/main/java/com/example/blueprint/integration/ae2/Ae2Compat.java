@@ -76,13 +76,15 @@ public final class Ae2Compat {
      */
     @Nullable
     public static Item wirelessTerminalItem() {
-        return isLoaded() ? Ae2TerminalRegistry.WIRELESS_MAID_TERMINAL.get() : null;
+        // orElse 而不是 get：注册项被第三方弄没了的整合包里，get() 就是一句 NPE，
+        // 而这里返回 null 只是"这件东西不提供"，调用方本来就是按可空处理的
+        return isLoaded() ? Ae2TerminalRegistry.WIRELESS_MAID_TERMINAL.orElse(null) : null;
     }
 
     /** 女仆绑定卡这个物品；没装 AE2 时返回 {@code null}。理由同上。 */
     @Nullable
     public static Item maidBindingCardItem() {
-        return isLoaded() ? Ae2TerminalRegistry.MAID_BINDING_CARD.get() : null;
+        return isLoaded() ? Ae2TerminalRegistry.MAID_BINDING_CARD.orElse(null) : null;
     }
 
     /**

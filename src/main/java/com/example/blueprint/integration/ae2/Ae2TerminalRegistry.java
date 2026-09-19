@@ -16,6 +16,9 @@ import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * AE2 方块（女仆终端、创造女仆接口）的注册入口。
  * <p>
@@ -86,6 +89,20 @@ public final class Ae2TerminalRegistry {
             ITEMS.register("wireless_maid_terminal",
                     () -> new WirelessMaidTerminalItem(new Item.Properties().stacksTo(1)));
 
+    /**
+     * 创造栏要摆的那几件物品，按显示顺序。
+     * <p>
+     * 调用方要**一件一件问"在不在"**再摆，不能直接 {@code .get()}——理由见 {@link #notRegistered()}。
+     */
+    public static final List<RegistryObject<Item>> CREATIVE_ITEMS =
+            List.of(MAID_TERMINAL_ITEM, CREATIVE_MAID_INTERFACE_ITEM,
+                    WIRELESS_MAID_TERMINAL, MAID_BINDING_CARD);
+
+    /** 全部注册对象，用来一次性查"有没有谁没落地" */
+    private static final List<RegistryObject<?>> ALL_OBJECTS =
+            List.of(MAID_TERMINAL, MAID_TERMINAL_ITEM, CREATIVE_MAID_INTERFACE,
+                    CREATIVE_MAID_INTERFACE_ITEM, WIRELESS_MAID_TERMINAL, MAID_BINDING_CARD);
+
     private Ae2TerminalRegistry() {
     }
 
@@ -93,6 +110,29 @@ public final class Ae2TerminalRegistry {
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
         BLOCK_ENTITIES.register(modBus);
+    }
+
+    /**
+     * 这些注册对象里，现在还有谁没落在注册表里。
+     * <p>
+     * 为什么要专门有这么一个方法：玩家的整合包里真出现过"同一个注册器里两件物品在、
+     * 第三件不在"的情况（第三方改写注册表，或者注册阶段被谁动了手脚——那一项在启动时
+     * 还好好地在，之后就查不到了）。这种时候调用方只要有一句 {@code .get()}，
+     * 换来的就是一句 {@code NullPointerException: Registry Object not present: blueprint:xxx}
+     * ——<b>打开创造栏客户端直接崩</b>，而且报错落在我们头上。
+     * <p>
+     * 所以下结论之前先问一句"在不在"：不在就跳过，只留一行日志。
+     *
+     * @return 缺掉的名字（形如 {@code blueprint:xxx}）；空列表表示全都正常
+     */
+    public static List<String> notRegistered() {
+        List<String> missing = new ArrayList<>();
+        for (RegistryObject<?> object : ALL_OBJECTS) {
+            if (!object.isPresent()) {
+                missing.add(object.getId().toString());
+            }
+        }
+        return missing;
     }
 
     /**
@@ -112,6 +152,19 @@ public final class Ae2TerminalRegistry {
      * </ul>
      */
     public static void registerItemHooks() {
+        // 启动阶段先记一笔"缺了谁"：将来再遇到"某项不见了"，
+        // 一看这条日志就能分清**本来就没注册**和**启动之后被别的模组拿掉**——
+        // 后者正是"启动时好好的、打开创造栏才崩"那种情况的特征
+        List<String> missing = notRegistered();
+        if (!missing.isEmpty()) {
+            BlueprintMod.LOGGER.warn("有 AE2 相关的注册项没落地：{}", missing);
+        }
+        if (!MAID_BINDING_CARD.isPresent() || !WIRELESS_MAID_TERMINAL.isPresent()) {
+            // 这两件没落地就接不进 AE2 的机制。缺了就跳过并说一声：
+            // 直接 .get() 会抛 NPE，而它发生在启动阶段——报出来的样子比"这功能没生效"难懂得多
+            BlueprintMod.LOGGER.warn("AE2 的绑定卡/无线终端没注册上，跳过升级卡与链接登记");
+            return;
+        }
         // 第四个参数是这张卡在工具提示里显示的那句话，由 AE2 自己拼进卡片的
         // 说明列表（跟着卡片走，所以写在卡上而不是终端上）
         Upgrades.add(MAID_BINDING_CARD.get(), WIRELESS_MAID_TERMINAL.get(), 1,
