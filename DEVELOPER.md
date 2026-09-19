@@ -105,8 +105,8 @@ com.example.blueprint
 │   ├── BlueprintScreenOpener
 │   └── gui/BlueprintScreen 蓝图面板
 ├── network/
-│   ├── ModNetwork          频道 + 8 个包的注册
-│   └── packet/             6 个 C2S + 1 个 S2C
+│   ├── ModNetwork          频道 + 11 个包的注册
+│   └── packet/             10 个 C2S + 1 个 S2C
 ├── registry/
 │   ├── ModItems            物品注册：blueprint、binding_book
 │   └── ModCreativeTabs     模组专属创造物品栏（注册名为 main）
@@ -114,6 +114,9 @@ com.example.blueprint
     ├── maid/               TLM 联动
     │   ├── MaidExtension        @LittleMaidExtension 入口
     │   ├── BlueprintBuildTask   女仆的"蓝图施工"工作模式
+    │   ├── MaidStudyTask        "学习模式"：跟在主人身边记录演示
+    │   ├── MaidIndustryTask     "工业模式"：照学习池里的单开工（见 §7.16）
+    │   ├── MaidSpeech           她开口的格式统一在「名字：……」
     │   ├── MaidBuildTickHandler 服务端 tick 驱动器
     │   ├── BlueprintBuildController ★ 施工状态机（最大文件）
     │   ├── MaidItemSource       女仆背包的 ItemSource
@@ -593,6 +596,8 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 | `MaidItemSource.getBackpack()` 用 `getMaidInv()` | 不用 `ITEM_HANDLER` 能力 —— 那个是含主手/副手/盔甲的组合视图，往里面塞材料会让建筑方块跑到女仆装备栏里 |
 | `MaidTerminalBlock.use` 覆写的是 `@Deprecated` 方法 | 1.20.1 没提供替代重载，覆写它仍是注册右键行为的标准做法 |
 | `BlueprintBuildTask.createBrainTasks` 返回空列表 | 施工不走 Brain 调度，见 §5.3 |
+| `MaidIndustryTask.createBrainTasks` 返回空列表 | 做单同样走服务端 tick，而且**干活时不能跟人**：跟随和取料共用一套导航，见 §7.16 |
+| 学习池界面的提示自己画（`MaidStudyScreen.flashAt`） | 开着界面时游戏那一层整个不画，`displayClientMessage` 发出去没人看得见，见 §7.17 |
 | `ClientSchematicCache` 不标 `@OnlyIn` | 它不引用客户端专属类型，保持中立可避免服务端收包时触发意外的类加载 |
 | `ItemProvider` 不用 `IItemHandler` | ME 网络这类存储根本没有槽位概念，硬套槽位接口会写出一堆假实现 |
 
@@ -795,7 +800,7 @@ ME 网络只存在于已加载的区块里，AE2 自己也做不到隔空访问�
 主人想指定也没处可指。现在的结构是：
 
 ```java
-Learned(ItemStack product, List<Recipe> recipes)   // recipes 的顺序就是优先级，第 0 个是她会照做的
+Learned(ItemStack product, List<Recipe> recipes, int selected)   // selected = 主人点名的那条做法
 Recipe(@Nullable ResourceLocation id, List<ItemStack> grid)   // 配方身份 + 演示时那 3×3 的摆法
 ```
 
@@ -807,8 +812,11 @@ Recipe(@Nullable ResourceLocation id, List<ItemStack> grid)   // 配方身份 + 
 （原版自己就常常 `Ingredient` 吃 tag，橡木换云杉还是同一个 `minecraft:stick`）；
 但真换个做法（这一步配方表里有两条不同记录）就该是新的一条，排在后面。
 
-**优先级 = 列表顺序，不是标记位。** `promote` 把第 N 个挪到最前。用标记位的话会多出
-"标了优先的那个配方被删了，优先指向空气"这类要另外兜底的状态；只存一个顺序就没有这种状态。
+**做法是"选"出来的，不是"排"出来的。** `Learned.selected` 记一个下标，`select` 只改它，
+列表顺序（学会的先后）稳定不动，界面把选中的那条高亮出来。早先那版是 `promote` 把选中的挪到最前、
+拿"第 0 个"当优先——看着省了一个字段，代价是**每次改选择都重排一次列表**：
+顺序一直在动，主人反而记不住自己选的到底是哪条，"取消优先"更是没有对应的操作。
+（没有做法、或者下标越界时 `chosenIndex()` 退回 0，所以"她照第 1 条做"这个默认是稳的。）
 
 **"能读到配方"这件事全靠事件时机。** `ItemCraftedEvent` 是在 `ResultSlot#onTake` 的
 **第一步**（`checkTakeAchievements`）发出来的，之后才轮到"按 `getRemainingItemsFor` 逐格扣减材料"。
@@ -830,7 +838,7 @@ Recipe(@Nullable ResourceLocation id, List<ItemStack> grid)   // 配方身份 + 
 确认加载了才碰 `Ae2CraftingCapture`）。
 
 **还有一条兜底：按产物反查，且只认唯一一条匹配。** 多条匹配时那正是"一个产物有好几种做法"
-本身——该由主人定优先级，不是我们随便挑一条塞进池子。
+本身——该由主人自己挑，不是我们随便选一条塞进池子。
 
 **认不出配方就只记产物，别塞假配方。** "没有 id、摆法全空"的记录在界面上就是一行
 "认不出的配方"，占着位置还挡着主人重演示一遍；只记产物的话，界面会老实说
@@ -855,13 +863,13 @@ Recipe(@Nullable ResourceLocation id, List<ItemStack> grid)   // 配方身份 + 
 不需要额外发一个"打开界面"的包。
 
 **界面不用请求数据。** 池子是 `TaskDataKey`，TLM 的 `TASK_DATA_SYNC` 已经把女仆身上那份同步到
-客户端了，界面直接 `MaidStudyPool.known(maid)` 就行；只有**改优先级**要发 C2S 包，
-服务端 `setAndSyncData` 之后新顺序会顺着同一条同步链路推回来，界面自己就变了。
+客户端了，界面直接 `MaidStudyPool.known(maid)` 就行；只有**换做法**要发 C2S 包，
+服务端 `setAndSyncData` 之后新选择会顺着同一条同步链路推回来，界面自己就变了。
 
 ### 7.13 学习池下单：单子只记产物，配方每次现查
 
-**订单里不存配方，只存"做什么、还剩几个"。** 配方每次从她的学习池里取那条**优先**的。
-理由跟池子那边一致：主人在界面上改一次优先级，就该立刻作用于还没做完的单；
+**订单里不存配方，只存"做什么、还剩几个"。** 配方每次从她的学习池里取那条**选中的**。
+理由跟池子那边一致：主人在界面上换一次做法，就该立刻作用于还没做完的单；
 下单时抄一份配方，等于多出一份要同步的旧数据，而且两份一旦不一致，谁也说不清她该照哪份做。
 
 **取料那套是借来的，但清单得传进去。** 就近容器 → 无线终端 → 绑定书仓库这个顺序、
@@ -1025,6 +1033,40 @@ DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> MaidStudyScreenOpener.open
 
 ---
 
+### 7.16 工业模式：下单即上工，做完把模式还回去
+
+`MaidIndustryTask` 是照学习池的单子干活的工作模式，骨架与「蓝图施工」一致
+（`createBrainTasks` 返回空列表 + 服务端 tick 驱动），差在两点：
+
+- **下单自动切换**：`employ` 先记下她**原来**的模式（`RETURN_TO`，只在内存里），再切到工业模式；
+  已经在工业模式时什么都不做 —— 否则连着下几单会把"原来是什么模式"覆盖成工业模式本身。
+- **待做清单空了才还回去**：`MaidCraftTickHandler.onLevelTick` 里，先让她把"做好了"那句说完
+  （`REPORTS` 里还有她的账就再等一拍），**说完了才 `release`** —— 顺序反了的话，一还回去她就不归
+  那段代码管了，那句话永远没机会说。
+- **只在工作时间干活**：判据用 TLM 自己的作息（`Activity.WORK.equals(maid.getScheduleDetail())`），
+  **别自己按 `dayTime` 算时段** —— 那等于把 TLM 的三张作息表在本模组里抄一遍，它一改我们就错。
+  查不出来时**放行**（返回 true）：宁可她在休息时段多干一点，也好过"下了单她一动不动还不报错"。
+
+### 7.17 界面里的反馈必须在界面里画
+
+**开着任何 GUI 时，游戏那一层（HUD、聊天栏、动作栏）整个不画。** 所以
+
+```java
+player.displayClientMessage(component, true);   // 动作栏：界面开着时看不见
+owner.sendSystemMessage(component);              // 聊天栏：同上
+```
+
+**在界面里点出来的反馈等于没发**。学习池界面的做法是自己在界面上飘一句
+（`MaidStudyScreen.flashAt` / `drawFlash`），并且把这句话占的方块记下来（`flashOverlaps`），
+让跟它重叠的悬停提示让开 —— 她说的话优先级最高。
+
+同理，界面里的操作**不再由服务端回话**：换做法、忘掉、下单失败都在客户端就地反馈；
+下单上限也在客户端先算一遍（`canFitInQueue`），**规矩必须与服务端 `MaidCraftOrder.order`
+一模一样**，否则会出现"界面说能下、服务端不收"这种最难查的错位。
+
+> 服务端那些提示（施工缺料、做单卡住、做好了）仍然走聊天栏 —— 它们发生在女仆干活的时候，
+> 那时界面通常是关着的。
+
 ## 8. 排查手册
 
 ### 8.1 女仆不干活
@@ -1035,6 +1077,11 @@ DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> MaidStudyScreenOpener.open
 2. **女仆的任务是否是「蓝图施工」** —— `MaidBuildTickHandler` 只处理任务是 `BlueprintBuildTask.UID` 的女仆。
 3. **蓝图是否允许女仆施工** —— `MaidBuild` 标记。
 4. **看日志** —— `BlueprintMod.LOGGER` 会记录取料出发、取到几种、还料结果等关键节点。
+
+> **「下单了不干活」是另一条链路**：`MaidCraftTickHandler` 只处理**在「工业模式」**、
+> 且**正处于工作时间**的女仆。模式由下单自动切换（`MaidIndustryTask.employ`），
+> 所以先查作息：`Activity.WORK.equals(maid.getScheduleDetail())` ——
+> 不在工作时间她整段都不动，单子排队等着是**预期行为**，不是坏了。
 
 ### 8.2 女仆取不到材料
 

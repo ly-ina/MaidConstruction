@@ -16,7 +16,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -37,15 +36,19 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 「学习池下单」的服务端执行：女仆照**她自己那条优先配方**手搓，材料从容器里取。
+ * 「工业模式」的服务端执行：女仆照**主人在学习池里点名的那条做法**手搓，材料从容器里取。
+ * <p>
+ * 开工的条件有两条，缺一条都不动（见 {@link #onLevelTick}）：她在**工业模式**、
+ * 且此刻是她的**工作时间**。下单会自动把她切到工业模式，主人不必手动拨模式；
+ * 不在工作时间她照旧歇着，单子排着队不会跑。
  * <p>
  * 一段流程分几步走，每 {@value #ACTION_INTERVAL_TICKS} tick 只推进一小步：
  * 认配方 → 找来源 → （要走路就先走过去）→ 搬料 → 料齐了摆一遍手搓。
  * 一步一步来是有必要的：女仆赶路要时间，搬料可能一趟搬不完，
  * 全塞在一个 tick 里做就只能成功一次。
  * <p>
- * <b>配方每次都现查</b>（她的池子里那条优先配方），不在下单时抄一份：
- * 主人在界面上改一次优先级，就该立刻作用于还没做完的单。
+ * <b>配方每次都现查</b>（她在池子里点名的那条做法），不在下单时抄一份：
+ * 主人在界面上改一次用哪条，就该立刻作用于还没做完的单。
  * <p>
  * 素材与"缺材料"提示都照着施工那边的口径来：先确认全都够再动手，
  * 缺料只提醒一次（同一张单不烦主人第二遍）。
@@ -94,21 +97,31 @@ public class MaidCraftTickHandler {
             return;
         }
         for (Entity entity : level.getAllEntities()) {
-            if (entity instanceof EntityMaid maid && MaidStudyTickHandler.isStudyTask(maid)) {
-                tickMaid(level, maid);
-                // 汇报单独走一步：她手头没活了才回来报，跟"还有没有单要做"不是一回事
-                tickReport(level, maid);
+            if (!(entity instanceof EntityMaid maid) || !MaidIndustryTask.isIndustry(maid)) {
+                continue;
+            }
+            if (MaidCraftOrder.first(maid) != null) {
+                // 有活：只在**上班时间**干。不在就让她等着——单子排着队不会跑，
+                // 到点了自己会开工
+                if (MaidIndustryTask.isWorkingTime(maid)) {
+                    tickMaid(level, maid);
+                }
+                continue;
+            }
+            // 没活了，两件事：
+            // 1）她可能还有一句"做好了"没当面说（做单时她跑不回来）；先把这句说完
+            // 2）说完了（或者没人听、等过期了）就把模式**还回下单之前的那个**
+            // 顺序不能反：一还回去她就不归这一段管了，那句"做好了"就永远没机会说
+            tickReport(level, maid);
+            if (!REPORTS.containsKey(maid.getUUID())) {
+                COOLDOWN.remove(maid.getUUID()); // 下次下单不用再等上好几秒
+                MaidIndustryTask.release(maid);
             }
         }
     }
 
     private static void tickMaid(ServerLevel level, EntityMaid maid) {
         UUID uuid = maid.getUUID();
-        if (MaidCraftOrder.first(maid) == null) {
-            // 没单可做就把节拍清掉，免得下次下单还要等上好几秒
-            COOLDOWN.remove(uuid);
-            return;
-        }
         int remaining = COOLDOWN.getOrDefault(uuid, 0);
         if (remaining > 0) {
             COOLDOWN.put(uuid, remaining - 1);
@@ -266,18 +279,12 @@ public class MaidCraftTickHandler {
             if (!ItemStack.matches(learned.product(), product)) {
                 continue;
             }
-            MaidStudyPool.Recipe preferred = learned.preferred();
-            if (preferred == null && !learned.recipes().isEmpty()) {
-                // 这条产物的做法**全被停用**了，可这张单是在停用之前就挂着的——
-                // 让她照第一条做法把它做完（"已在合成的不用管"）。新的单早在下单那一步
-                // 就被挡下来了（MaidCraftOrder.order 不接停用的产物，界面那颗按钮也是灰的），
-                // 所以这里放行不会让"停用"失效。
-                preferred = learned.recipes().get(0);
-            }
-            if (preferred == null || preferred.id() == null) {
+            // 照主人**点名的那条**做法做（选择法：没选中的做法她不用，所以不需要再顺位）
+            MaidStudyPool.Recipe chosen = learned.chosen();
+            if (chosen == null || chosen.id() == null) {
                 return null;
             }
-            return level.getRecipeManager().byKey(preferred.id())
+            return level.getRecipeManager().byKey(chosen.id())
                     .filter(found -> found.getType() == RecipeType.CRAFTING)
                     .map(found -> (Recipe<CraftingContainer>) found)
                     .orElse(null);
@@ -364,6 +371,7 @@ public class MaidCraftTickHandler {
      */
     private static boolean tryNest(ServerLevel level, EntityMaid maid, MaidCraftOrder.Order order,
                                    Map<Item, Integer> shortfall) {
+        ItemStack looped = ItemStack.EMPTY; // 撞上循环的那个零件（用来写提示）
         for (Map.Entry<Item, Integer> entry : shortfall.entrySet()) {
             ItemStack part = new ItemStack(entry.getKey());
             Recipe<CraftingContainer> recipe = resolve(level, maid, part);
@@ -377,9 +385,35 @@ public class MaidCraftTickHandler {
             // 把"来路"接上去：这张零件单的来路 = 原单的来路 + 原单自己
             List<ItemStack> lineage = new ArrayList<>(order.lineage());
             lineage.add(order.product().copyWithCount(1));
-            // 插进去了才算数：没插进去（这号产物已经有单在排、绕回了来路、队满）
-            // 就换下一样缺的接着试——一样被挡住不该把整条嵌套都否掉
+            // 绕回了来路 = 死循环（A 要用 B、B 又要用回 A）。这里自己判一次，
+            // 因为 insertFirst 只回一个 boolean，分不清"绕回去了"还是"这号产物已经有单在排"——
+            // 而这两件事对主人来说完全不一样：前者没救，后者等一会儿就好
+            if (containsItem(lineage, part)) {
+                if (looped.isEmpty()) {
+                    looped = part;
+                }
+                continue; // 换下一样缺的接着试：一样绕回去不代表别的也绕
+            }
+            // 插进去了才算数：没插进去（已经有单在排、队满）就换下一样缺的接着试，
+            // 一样被挡住不该把整条嵌套都否掉
             if (MaidCraftOrder.insertFirst(maid, part, crafts, List.copyOf(lineage))) {
+                return true;
+            }
+        }
+        if (!looped.isEmpty()) {
+            // 说清是"绕回来了"，别落进"还缺材料"那一句：那会把主人支去再塞点材料，
+            // 而这条路塞多少材料都走不通
+            warn(level, maid, false, "message.blueprint.craft.recipe_loop",
+                    order.product().getHoverName(), looped.getHoverName());
+            return true; // 这一步有交代了，别再叠一句"还缺材料"
+        }
+        return false;
+    }
+
+    /** 这套"来路"里出现过这样东西没有（比法跟 {@code insertFirst} 里一致） */
+    private static boolean containsItem(List<ItemStack> lineage, ItemStack part) {
+        for (ItemStack ancestor : lineage) {
+            if (ItemStack.matches(ancestor, part)) {
                 return true;
             }
         }
@@ -513,7 +547,7 @@ public class MaidCraftTickHandler {
             return;
         }
         LivingEntity owner = maid.getOwner();
-        if (!(owner instanceof ServerPlayer player) || owner.level() != maid.level() || !owner.isAlive()) {
+        if (!(owner instanceof ServerPlayer) || owner.level() != maid.level() || !owner.isAlive()) {
             return;
         }
         if (maid.distanceToSqr(owner) > REPORT_DISTANCE_SQR) {
@@ -523,9 +557,7 @@ public class MaidCraftTickHandler {
         }
         maid.getNavigation().stop();
         maid.getLookControl().setLookAt(owner, 30.0F, 30.0F);
-        player.displayClientMessage(
-                Component.translatable("message.blueprint.craft.finished", describeProducts(finished)),
-                false);
+        MaidSpeech.say(maid, "message.blueprint.craft.finished", describeProducts(finished));
         // 报告的同时高兴一下：她也是跑过来的
         maid.tryPlayMaidPickupSound();
         forgetReport(uuid);
@@ -644,11 +676,8 @@ public class MaidCraftTickHandler {
         if (order != null) {
             MaidCraftOrder.updateFirst(maid, order.withWarned());
         }
-        // 主人是 LivingEntity 形态出现的，能说话的只有玩家那一种
-        LivingEntity owner = maid.getOwner();
-        if (owner instanceof Player player) {
-            player.displayClientMessage(Component.translatable(key, args), false);
-        }
+        // 用她的口吻说（"<名字>：……"）：卡住的是她，汇报的也该是她
+        MaidSpeech.say(maid, key, args);
         BlueprintMod.LOGGER.info("女仆 {} 手搓卡住：{}", maid.getUUID(), key);
     }
 }

@@ -56,7 +56,8 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
     private static final String RECIPES_TAG = "recipes";
     private static final String RECIPE_ID_TAG = "id";
     private static final String GRID_TAG = "grid";
-    private static final String DISABLED_TAG = "disabled";
+    /** 主人点名的那条做法的下标 */
+    private static final String SELECTED_TAG = "selected";
 
     private MaidStudyPool() {
     }
@@ -68,17 +69,10 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
     /**
      * 她见过的一个配方。
      *
-     * @param id       配方身份；为 null 表示当时没能反查到（少见，多数是模组自己处理的合成）
-     * @param grid     演示时的 3×3 摆法（固定 9 格，空格用空栈占位）
-     * @param disabled 主人按下的"暂停键"：停用的配方她**照样记得**，只是不拿它来做——
-     *                 她会顺位改照下一条启用的配方做。全停用了才等于"这东西暂时做不了"。
+     * @param id   配方身份；为 null 表示当时没能反查到（少见，多数是模组自己处理的合成）
+     * @param grid 演示时的 3×3 摆法（固定 9 格，空格用空栈占位）
      */
-    public record Recipe(@Nullable ResourceLocation id, List<ItemStack> grid, boolean disabled) {
-
-        /** 录入时用：刚学会的配方当然是启用的 */
-        public Recipe(@Nullable ResourceLocation id, List<ItemStack> grid) {
-            this(id, grid, false);
-        }
+    public record Recipe(@Nullable ResourceLocation id, List<ItemStack> grid) {
 
         /** 界面上给主人看的一行字：优先认配方 id，没有 id 就退回按摆法描述 */
         public String displayId() {
@@ -89,38 +83,36 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
     /**
      * 一样产物 + 她会做的几个配方。
      * <p>
-     * {@code recipes} 的顺序**就是优先级**：第 0 个是她手搓时会照做的那个。
-     * {@code disabled} 是主人按下的"暂停键"：停用的产物她**依然记得怎么做**，
-     * 只是不再接新的单（已经挂着的单照常做完）。跟"忘掉"是两回事——忘掉是彻底移除。
+     * <b>做法是"选"出来的，不是"排"出来的。</b> {@code selected} 就是主人点名的那一条，
+     * 她手搓时只照它做；其余的做法只是备选，点一下就换过来，不存在"自动顺位"。
+     * <p>
+     * 早先那版是"把选中的挪到最前，第 0 个就是优先"——那等于每次改选择都重排一次列表，
+     * 顺序一直在动，主人反而记不住自己选的到底是哪条。改成一个显式下标之后，
+     * 列表顺序（学会的先后）稳定不动，选中的那条在界面上高亮出来。
      */
-    public record Learned(ItemStack product, List<Recipe> recipes, boolean disabled) {
+    public record Learned(ItemStack product, List<Recipe> recipes, int selected) {
 
         public boolean hasMultipleRecipes() {
             return recipes.size() > 1;
         }
 
         /**
-         * 她真会照做的那条配方在表里的位置：**跳过停用的**。
-         * 全被停用、或者一条配方都没有（老数据）返回 -1。
+         * 她真会照做的那条配方在表里的位置；一条配方都没有（老数据）返回 -1。
+         * <p>
+         * 下标越界就退回 0：老存档里没有 {@code selected} 这个字段，读回来正是 0；
+         * 万一是坏数据写了个离谱的数，也不能让她空手站着。
          */
-        public int preferredIndex() {
-            for (int i = 0; i < recipes.size(); i++) {
-                if (!recipes.get(i).disabled()) {
-                    return i;
-                }
+        public int chosenIndex() {
+            if (recipes.isEmpty()) {
+                return -1;
             }
-            return -1;
+            return selected >= 0 && selected < recipes.size() ? selected : 0;
         }
 
-        /**
-         * 她真会照做的那条配方；没有可做的返回 null。
-         * <p>
-         * 特意不取"第 0 个"：主人把优先那条停用了，就该自动顺位到下一条启用的——
-         * 否则她会照着一条被停用的配方做，那这标记就没意义了。
-         */
+        /** 她真会照做的那条配方；一条配方都没有返回 null */
         @Nullable
-        public Recipe preferred() {
-            int index = preferredIndex();
+        public Recipe chosen() {
+            int index = chosenIndex();
             return index < 0 ? null : recipes.get(index);
         }
     }
@@ -154,11 +146,10 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
                     grid.add(stack.isEmpty() ? new CompoundTag() : stack.copyWithCount(1).save(new CompoundTag()));
                 }
                 recipeTag.put(GRID_TAG, grid);
-                recipeTag.putBoolean(DISABLED_TAG, recipe.disabled());
                 recipes.add(recipeTag);
             }
             entry.put(RECIPES_TAG, recipes);
-            entry.putBoolean(DISABLED_TAG, learned.disabled());
+            entry.putInt(SELECTED_TAG, learned.selected());
             list.add(entry);
         }
         tag.put(ITEMS_TAG, list);
@@ -182,8 +173,9 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
             for (int j = 0; j < recipeList.size(); j++) {
                 recipes.add(readRecipe(recipeList.getCompound(j)));
             }
+            // 老存档没有 selected：读回来是 0，正好等于"她一直照第 1 条做"的旧行为
             result.add(new Learned(product.copyWithCount(1), List.copyOf(recipes),
-                    entry.getBoolean(DISABLED_TAG)));
+                    entry.getInt(SELECTED_TAG)));
         }
         return result;
     }
@@ -196,7 +188,7 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
         for (int i = 0; i < gridTag.size(); i++) {
             grid.add(ItemStack.of(gridTag.getCompound(i)));
         }
-        return new Recipe(id, normalizeGrid(grid), tag.getBoolean(DISABLED_TAG));
+        return new Recipe(id, normalizeGrid(grid));
     }
 
     // ------------------------------------------------------------------
@@ -267,12 +259,13 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
             }
             List<Recipe> recipes = new ArrayList<>(learned.recipes());
             recipes.add(usable);
-            current.set(i, new Learned(learned.product(), List.copyOf(recipes), learned.disabled()));
+            // 学到"新做法"不动主人已有的选择：做法是加在列表后面的，下标不会错位
+            current.set(i, new Learned(learned.product(), List.copyOf(recipes), learned.selected()));
             maid.setAndSyncData(KEY, current);
             return true;
         }
 
-        current.add(new Learned(normalized, usable == null ? List.of() : List.of(usable), false));
+        current.add(new Learned(normalized, usable == null ? List.of() : List.of(usable), 0));
         maid.setAndSyncData(KEY, current);
         return true;
     }
@@ -291,26 +284,26 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
     }
 
     /**
-     * 把一样产物的第 {@code recipeIndex} 个配方挪到最前，也就是**设成优先**。
+     * 点名一样产物该用**哪一条**做法（这就是"选择法"：不重排列表，只记一个下标）。
      * <p>
-     * 用"挪到最前"而不是加个标记位：池子里只存一个顺序，不存在
-     * "标了优先的那个被删了、优先指向空气"这种要另外兜底的状态。
+     * 早先那版是"把选中的挪到最前"——不用额外兜底状态是它的好处，代价是列表顺序
+     * 一直在变，主人反而记不住自己选的到底是哪条。现在列表顺序固定（学会的先后），
+     * 选中的下标单独存，界面上直接高亮那一条。
      *
-     * @return 真的换了顺序才返回 true（已经在最前、或者下标越界都返回 false）
+     * @return 真的换了选择才返回 true（选的是同一条、或者下标越界都返回 false）
      */
-    public static boolean promote(EntityMaid maid, int productIndex, int recipeIndex) {
+    public static boolean select(EntityMaid maid, int productIndex, int recipeIndex) {
         List<Learned> current = new ArrayList<>(known(maid));
         if (productIndex < 0 || productIndex >= current.size()) {
             return false;
         }
         Learned learned = current.get(productIndex);
-        if (recipeIndex <= 0 || recipeIndex >= learned.recipes().size()) {
+        if (recipeIndex < 0 || recipeIndex >= learned.recipes().size()
+                || learned.chosenIndex() == recipeIndex) {
             return false;
         }
-        List<Recipe> recipes = new ArrayList<>(learned.recipes());
-        recipes.add(0, recipes.remove(recipeIndex));
         current.set(productIndex,
-                new Learned(learned.product(), List.copyOf(recipes), learned.disabled()));
+                new Learned(learned.product(), learned.recipes(), recipeIndex));
         maid.setAndSyncData(KEY, current);
         return true;
     }
@@ -323,79 +316,6 @@ public final class MaidStudyPool implements TaskDataKey<List<MaidStudyPool.Learn
             maid.setAndSyncData(KEY, current);
         }
         return removed;
-    }
-
-    /**
-     * 按下/解除一对产物的"暂停键"（停用标记）。
-     * <p>
-     * 停用的产物她**依然记得怎么做**，只是不再接新的单；已经挂着的单照常做完。
-     * 跟 {@link #forget} 是两回事：那个是彻底移除，这个是"先别做、配方留着"。
-     *
-     * @return 真的改了状态才返回 true（本来就是想要的状态、或者池子里没有这号产物都返回 false）
-     */
-    public static boolean setDisabled(EntityMaid maid, ItemStack product, boolean disabled) {
-        ItemStack normalized = product.copyWithCount(1);
-        List<Learned> current = new ArrayList<>(known(maid));
-        boolean changed = false;
-        for (int i = 0; i < current.size(); i++) {
-            Learned learned = current.get(i);
-            if (!ItemStack.matches(learned.product(), normalized)) {
-                continue;
-            }
-            if (learned.disabled() == disabled) {
-                return changed; // 已经是想要的状态：没改
-            }
-            current.set(i, new Learned(learned.product(), learned.recipes(), disabled));
-            changed = true;
-        }
-        if (changed) {
-            maid.setAndSyncData(KEY, current);
-        }
-        return changed;
-    }
-
-    /**
-     * 按下/解除**某一条配方**的停用标记（产物照旧留在池子里）。
-     * <p>
-     * 用在哪儿：一样产物有好几种做法时，主人只想禁掉其中一种（比如那种做法要的
-     * 材料他不想让她碰），其余做法照常。她做这东西时会跳过停用的那条，顺位用下一条。
-     *
-     * @param recipeIndex 这号产物的第几个配方
-     * @return 真的改了状态才返回 true
-     */
-    public static boolean setRecipeDisabled(EntityMaid maid, ItemStack product, int recipeIndex,
-                                           boolean disabled) {
-        ItemStack normalized = product.copyWithCount(1);
-        List<Learned> current = new ArrayList<>(known(maid));
-        for (int i = 0; i < current.size(); i++) {
-            Learned learned = current.get(i);
-            if (!ItemStack.matches(learned.product(), normalized)) {
-                continue;
-            }
-            if (recipeIndex < 0 || recipeIndex >= learned.recipes().size()) {
-                return false;
-            }
-            Recipe recipe = learned.recipes().get(recipeIndex);
-            if (recipe.disabled() == disabled) {
-                return false; // 已经是想要的状态
-            }
-            List<Recipe> recipes = new ArrayList<>(learned.recipes());
-            recipes.set(recipeIndex, new Recipe(recipe.id(), recipe.grid(), disabled));
-            current.set(i, new Learned(learned.product(), List.copyOf(recipes), learned.disabled()));
-            maid.setAndSyncData(KEY, current);
-            return true;
-        }
-        return false;
-    }
-
-    /** 这个产物是不是被停用了（不去查下标，直接按产物比） */
-    public static boolean isDisabled(EntityMaid maid, ItemStack product) {
-        for (Learned learned : known(maid)) {
-            if (ItemStack.matches(learned.product(), product)) {
-                return learned.disabled();
-            }
-        }
-        return false;
     }
 
     // ------------------------------------------------------------------

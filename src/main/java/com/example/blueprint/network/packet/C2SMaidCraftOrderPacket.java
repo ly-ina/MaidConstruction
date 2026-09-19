@@ -1,10 +1,11 @@
 package com.example.blueprint.network.packet;
 
+import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.integration.maid.MaidCraftOrder;
+import com.example.blueprint.integration.maid.MaidIndustryTask;
 import com.example.blueprint.integration.maid.MaidStudyPool;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -21,7 +22,7 @@ import java.util.function.Supplier;
  * 两者都是"主人对这张清单的一次操作"，分成两个包只会多一份几乎一样的编解码样板。
  * <p>
  * 传的是产物**在池子里的下标**，跟设优先级那个包一个约定（见
- * {@link C2SSetStudyPriorityPacket}）；服务端拿到的是她当下那份池子，
+ * {@link C2SSelectStudyRecipePacket}）；服务端拿到的是她当下那份池子，
  * 所以下标必须按池子算，不能按界面过滤后的顺序。
  */
 public class C2SMaidCraftOrderPacket {
@@ -61,8 +62,6 @@ public class C2SMaidCraftOrderPacket {
 
             if (msg.count <= 0) {
                 MaidCraftOrder.clearAll(maid);
-                player.displayClientMessage(
-                        Component.translatable("message.blueprint.craft.cleared"), true);
                 return;
             }
 
@@ -72,11 +71,16 @@ public class C2SMaidCraftOrderPacket {
             }
             ItemStack product = pool.get(msg.productIndex).product();
             int ordered = MaidCraftOrder.order(maid, product, msg.count);
-            player.displayClientMessage(ordered > 0
-                            ? Component.translatable("message.blueprint.craft.ordered",
-                                    product.getHoverName(), ordered, MaidCraftOrder.pendingAmount(maid))
-                            : Component.translatable("message.blueprint.craft.order_full"),
-                    true);
+            if (ordered <= 0) {
+                // 排不上（到上限了）本该告诉主人，但**不在这儿说**：界面开着的时候聊天栏
+                // 是不画的。界面会自己先按同样的规矩算一遍、就地飘一句（见 MaidStudyScreen）
+                BlueprintMod.LOGGER.info("女仆 {} 的单没排上：{} 到上限了", maid.getUUID(), product);
+                return;
+            }
+            // 下单成功就**不吭声**了：主人刚自己点的按钮，"已下单"这种回声纯属噪音。
+            // 切模式同理——她要是在别的模式（比如学习模式）站着，单子只会一直搁着，
+            // 所以顺手把她拨到工业模式，但这事不值得播报一句（做完会自动还回去）
+            MaidIndustryTask.employ(maid);
         });
         context.setPacketHandled(true);
     }

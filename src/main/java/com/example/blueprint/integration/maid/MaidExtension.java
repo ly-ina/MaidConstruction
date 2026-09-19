@@ -26,8 +26,10 @@ public class MaidExtension implements ILittleMaid {
         manager.add(new BlueprintBuildTask());
         // 学习模式：跟在主人身边，把主人亲手做的东西记进她的学习池
         manager.add(new MaidStudyTask());
+        // 工业模式：照学习池里下的单开工（下单时会自动切过去，见 MaidIndustryTask）
+        manager.add(new MaidIndustryTask());
 
-        // 施工与学习都靠自己的 tick 驱动，在这里挂上 Forge 事件总线。
+        // 施工、学习、做单都靠自己的 tick 驱动，在这里挂上 Forge 事件总线。
         // 放在这个方法里注册，可以保证只有女仆模组真的加载了才会执行。
         if (!tickHandlerRegistered) {
             tickHandlerRegistered = true;

@@ -3,11 +3,9 @@ package com.example.blueprint.network.packet;
 import com.example.blueprint.integration.maid.MaidStudyPool;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.List;
@@ -55,12 +53,9 @@ public class C2SForgetStudyPacket {
             if (msg.productIndex < 0 || msg.productIndex >= pool.size()) {
                 return;
             }
-            ItemStack product = pool.get(msg.productIndex).product();
-            if (MaidStudyPool.forget(maid, product)) {
-                player.displayClientMessage(
-                        Component.translatable("message.blueprint.study.forgotten",
-                                product.getHoverName()), true);
-            }
+            // 删完不吭声，理由同换做法那个包：主人开着界面，聊天栏根本不画，
+            // 发了也是白发。界面自己会飘一句（见 MaidStudyScreen.toast）
+            MaidStudyPool.forget(maid, pool.get(msg.productIndex).product());
         });
         context.setPacketHandled(true);
     }

@@ -10,8 +10,7 @@ import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetNamePacket;
 import com.example.blueprint.network.packet.C2SSetRotationPacket;
 import com.example.blueprint.network.packet.C2SForgetStudyPacket;
-import com.example.blueprint.network.packet.C2SSetStudyPriorityPacket;
-import com.example.blueprint.network.packet.C2SToggleStudyUsePacket;
+import com.example.blueprint.network.packet.C2SSelectStudyRecipePacket;
 import com.example.blueprint.network.packet.S2CSchematicDataPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkRegistry;
@@ -19,7 +18,9 @@ import net.minecraftforge.network.simple.SimpleChannel;
 
 public class ModNetwork {
 
-    private static final String PROTOCOL_VERSION = "1";
+    // 1.5.3 改了学习池的包（设优先级 → 选做法；停用包整个删掉），
+    // 协议不兼容了，按约定升版本号：新旧客户端/服务端不能混连
+    private static final String PROTOCOL_VERSION = "2";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(BlueprintMod.MOD_ID, "main"),
@@ -46,17 +47,14 @@ public class ModNetwork {
                 C2SSetNamePacket::encode, C2SSetNamePacket::decode, C2SSetNamePacket::handle);
         CHANNEL.registerMessage(id++, S2CSchematicDataPacket.class,
                 S2CSchematicDataPacket::encode, S2CSchematicDataPacket::decode, S2CSchematicDataPacket::handle);
-        CHANNEL.registerMessage(id++, C2SSetStudyPriorityPacket.class,
-                C2SSetStudyPriorityPacket::encode, C2SSetStudyPriorityPacket::decode,
-                C2SSetStudyPriorityPacket::handle);
+        CHANNEL.registerMessage(id++, C2SSelectStudyRecipePacket.class,
+                C2SSelectStudyRecipePacket::encode, C2SSelectStudyRecipePacket::decode,
+                C2SSelectStudyRecipePacket::handle);
         CHANNEL.registerMessage(id++, C2SMaidCraftOrderPacket.class,
                 C2SMaidCraftOrderPacket::encode, C2SMaidCraftOrderPacket::decode,
                 C2SMaidCraftOrderPacket::handle);
         CHANNEL.registerMessage(id++, C2SForgetStudyPacket.class,
                 C2SForgetStudyPacket::encode, C2SForgetStudyPacket::decode,
                 C2SForgetStudyPacket::handle);
-        CHANNEL.registerMessage(id++, C2SToggleStudyUsePacket.class,
-                C2SToggleStudyUsePacket::encode, C2SToggleStudyUsePacket::decode,
-                C2SToggleStudyUsePacket::handle);
     }
 }

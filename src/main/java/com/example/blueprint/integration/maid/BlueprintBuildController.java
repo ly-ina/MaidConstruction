@@ -732,7 +732,7 @@ public class BlueprintBuildController {
         }
 
         // 坐标还在，但里面已经没有需要的材料了
-        notify(level, maid, "message.blueprint.maid_bound_empty");
+        notify(level, maid, "message.blueprint.maid_bound_empty", describeShortfall());
         return null;
     }
 
@@ -812,8 +812,9 @@ public class BlueprintBuildController {
                     maid.getUUID(), pos, hasWanted ? "容器里有" : "容器里没有",
                     shortfall.size(), countEmptySlots(backpack));
             notify(level, maid, hasWanted
-                    ? "message.blueprint.maid_backpack_full"
-                    : "message.blueprint.maid_source_empty");
+                            ? "message.blueprint.maid_backpack_full"
+                            : "message.blueprint.maid_source_empty",
+                    describeShortfall());
         } else {
             BlueprintMod.LOGGER.info("女仆 {} 从 {} 取到 {} 种材料", maid.getUUID(), pos, moved);
         }
@@ -1139,7 +1140,7 @@ public class BlueprintBuildController {
 
         Player nearby = level.getNearestPlayer(maid, 16.0D);
         if (nearby != null) {
-            nearby.sendSystemMessage(Component.translatable(translationKey, args));
+            nearby.sendSystemMessage(MaidSpeech.speak(maid, Component.translatable(translationKey, args)));
         }
     }
 
@@ -1166,10 +1167,27 @@ public class BlueprintBuildController {
         lastReportedShortfall = Map.copyOf(shortfall);
 
         if (shortfall.isEmpty()) {
-            nearby.sendSystemMessage(Component.translatable("message.blueprint.maid_no_material"));
+            nearby.sendSystemMessage(MaidSpeech.speak(maid,
+                    Component.translatable("message.blueprint.maid_no_material")));
             return;
         }
 
+        BlueprintMod.LOGGER.info("女仆 {} 缺少建造材料：{}", maid.getUUID(), shortfall);
+        nearby.sendSystemMessage(MaidSpeech.speak(maid,
+                Component.translatable("message.blueprint.maid_missing_materials", describeShortfall())));
+    }
+
+    /**
+     * 把"还缺哪些材料、各缺多少"拼成一行字（{@code shortfall} 为空时返回空组件）。
+     * <p>
+     * <b>凡是"缺料"的提示都要带上它</b>：光说一句"这里没有她缺的材料"，
+     * 玩家只能拿着蓝图自己对账——而真正会卡住的往往是**一样意想不到的东西**
+     * （AE2 线缆方块要的是贴在面上的部件，不是那个方块本身；一个位置可能要两样）。
+     * 不把名字说出来，玩家根本不知道去哪儿找。
+     * <p>
+     * 名字用 {@link Component} 传而不是先转成字符串——那样会在服务端就固定成某种语言。
+     */
+    private MutableComponent describeShortfall() {
         MutableComponent list = Component.empty();
         int shown = 0;
         for (Map.Entry<Item, Integer> entry : shortfall.entrySet()) {
@@ -1187,8 +1205,6 @@ public class BlueprintBuildController {
             list.append(Component.translatable("message.blueprint.maid_missing_more",
                     shortfall.size() - MAX_REPORTED_MATERIALS));
         }
-
-        BlueprintMod.LOGGER.info("女仆 {} 缺少建造材料：{}", maid.getUUID(), shortfall);
-        nearby.sendSystemMessage(Component.translatable("message.blueprint.maid_missing_materials", list));
+        return list;
     }
 }

@@ -162,11 +162,6 @@ public final class MaidCraftOrder implements TaskDataKey<List<MaidCraftOrder.Ord
         if (product.isEmpty() || count <= 0) {
             return 0;
         }
-        // 停用的产物不接新单：她记得怎么做，但主人按了"先别做"。已经挂着的单不在这管，
-        // 照常做完（见 MaidStudyPool.setDisabled 的说明）——"已在合成的不用管"。
-        if (MaidStudyPool.isDisabled(maid, product)) {
-            return 0;
-        }
         ItemStack normalized = product.copyWithCount(1);
         List<Order> current = new ArrayList<>(pending(maid));
         for (int i = 0; i < current.size(); i++) {
