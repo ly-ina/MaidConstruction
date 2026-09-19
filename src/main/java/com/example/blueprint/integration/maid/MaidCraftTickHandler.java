@@ -166,8 +166,7 @@ public class MaidCraftTickHandler {
             if (BlueprintBuildController.findBindingBook(maid).isEmpty()) {
                 warn(level, maid, false, "message.blueprint.craft.no_book");
             } else {
-                warn(level, maid, false, "message.blueprint.craft.missing",
-                        order.product().getHoverName(), describe(shortfall));
+                warnWholeChain(level, maid, self);
             }
             return;
         }
@@ -186,10 +185,13 @@ public class MaidCraftTickHandler {
             if (!hasWanted && tryNest(level, maid, order, shortfall)) {
                 return;
             }
-            warn(level, maid, false, hasWanted
-                            ? "message.blueprint.craft.backpack_full"
-                            : "message.blueprint.craft.missing",
-                    order.product().getHoverName(), describe(shortfall));
+            if (hasWanted) {
+                // 背包塞不下说的是"这一趟搬运"的事，照排头那张单说就够准
+                warn(level, maid, false, "message.blueprint.craft.backpack_full",
+                        order.product().getHoverName());
+            } else {
+                warnWholeChain(level, maid, self);
+            }
         }
     }
 
@@ -223,10 +225,15 @@ public class MaidCraftTickHandler {
 
         ItemStack result = recipe.assemble(grid, level.registryAccess());
         NonNullList<ItemStack> remaining = recipe.getRemainingItems(grid);
+        List<ItemStack> produced = new ArrayList<>(remaining.size() + 1);
+        produced.add(result);
         give(level, maid, backpack, result);
         for (ItemStack stack : remaining) {
             give(level, maid, backpack, stack);
+            produced.add(stack);
         }
+        // 她带着无线女仆终端的话，把刚做好的直接送进终端连的网络，别在她背包里堆着
+        storeIntoTerminal(level, maid, backpack, produced);
 
         MaidCraftOrder.Order order = MaidCraftOrder.first(maid);
         if (order != null) {
@@ -370,9 +377,73 @@ public class MaidCraftTickHandler {
             // 把"来路"接上去：这张零件单的来路 = 原单的来路 + 原单自己
             List<ItemStack> lineage = new ArrayList<>(order.lineage());
             lineage.add(order.product().copyWithCount(1));
-            return MaidCraftOrder.insertFirst(maid, part, crafts, List.copyOf(lineage));
+            // 插进去了才算数：没插进去（这号产物已经有单在排、绕回了来路、队满）
+            // 就换下一样缺的接着试——一样被挡住不该把整条嵌套都否掉
+            if (MaidCraftOrder.insertFirst(maid, part, crafts, List.copyOf(lineage))) {
+                return true;
+            }
         }
         return false;
+    }
+
+    /**
+     * 报**根单**还缺哪些材料——按主人要的那样东西的**直接用料**算，不往零件方向摊。
+     * <p>
+     * 另外两种口径都不对：
+     * <ul>
+     *   <li>只报排头：嵌套时排头永远是零件单，主人看到的是"做木棍 还缺材料：木板 ×2"，
+     *       不知道整件事要什么；料只够做零件时，做完零件又冒一条，像是永远填不满。</li>
+     *   <li>把零件的用料也摊进来：报出来是"木板 ×4"——可多出来的那 2 个是**她自己做零件**
+     *       要用的，主人只知道"木剑要 2 木板 1 木棍"，照这个备料就行；零件的料，
+     *       她到了容器跟前自己会拿，摊进来只会吓人。</li>
+     * </ul>
+     * 所以这里只算**根单**（主人亲自下的那张，来路为空）：直接用料 × 剩余数量 − 背包已有。
+     */
+    private static void warnWholeChain(ServerLevel level, EntityMaid maid, MaidItemSource self) {
+        MaidCraftOrder.Order root = rootOrder(maid);
+        if (root == null) {
+            return;
+        }
+        Map<Item, Integer> missing = rootShortfall(level, maid, self, root);
+        if (missing.isEmpty()) {
+            return;
+        }
+        warn(level, maid, false, "message.blueprint.craft.missing",
+                root.product().getHoverName(), describe(missing));
+    }
+
+    /** 主人亲自下的那张单（来路为空）。队列里没有就返回 null */
+    @Nullable
+    private static MaidCraftOrder.Order rootOrder(EntityMaid maid) {
+        for (MaidCraftOrder.Order order : MaidCraftOrder.pending(maid)) {
+            if (order.lineage().isEmpty()) {
+                return order;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 根单的直接用料缺口：用料 × 剩余数量 − 背包已有。
+     * <p>
+     * 材料变体按"她背包里有什么"挑（{@code realBill} 的 provider 传 null），
+     * 所以这是个**估算**，够主人知道"去凑哪些、大概多少"就行。
+     */
+    private static Map<Item, Integer> rootShortfall(ServerLevel level, EntityMaid maid,
+                                                    MaidItemSource self, MaidCraftOrder.Order root) {
+        Recipe<CraftingContainer> recipe = resolve(level, maid, root.product());
+        if (recipe == null) {
+            return Map.of();
+        }
+        int times = Math.max(1, root.remaining());
+        Map<Item, Integer> shortfall = new HashMap<>();
+        for (Map.Entry<Item, Integer> entry : realBill(recipe, self, null).entrySet()) {
+            int missing = entry.getValue() * times - self.available(entry.getKey());
+            if (missing > 0) {
+                shortfall.put(entry.getKey(), missing);
+            }
+        }
+        return shortfall;
     }
 
     /**
@@ -489,6 +560,39 @@ public class MaidCraftTickHandler {
 
     private static boolean near(EntityMaid maid, BlockPos pos) {
         return maid.blockPosition().distSqr(pos) <= REACH_SQR;
+    }
+
+    /**
+     * 产物去向：她身上带着**无线女仆终端**时，把刚做好的东西送进终端连的 ME 网络，
+     * 而不是留在背包里占地。
+     * <p>
+     * 做法是"先进背包、再从这儿扫回网络"，而不是直接往网络里插：网络可能满、
+     * 终端可能刚好失效，走背包这一步能保证**东西不会凭空消失**——
+     * 扫不动就留在她背包里，主人还能从她身上拿。搬运与兜底都复用
+     * {@link ItemProvider#acceptInto} 那套（施工时归还余料用的就是它）。
+     * <p>
+     * 只扫刚做出来的这几样（成品 + 余料）。她背包里原有的**同类**东西会一并被扫进去，
+     * 但那本来就是从这网络里取出来的，回去不亏。
+     */
+    private static void storeIntoTerminal(ServerLevel level, EntityMaid maid, IItemHandler backpack,
+                                          List<ItemStack> produced) {
+        Map<Item, Integer> filter = new HashMap<>();
+        for (ItemStack stack : produced) {
+            if (!stack.isEmpty()) {
+                filter.merge(stack.getItem(), stack.getCount(), Integer::sum);
+            }
+        }
+        if (filter.isEmpty()) {
+            return;
+        }
+        // 没有终端 / 没绑网络 / 不在覆盖范围内，都会拿到 null，那就照旧留在背包里
+        ItemProvider terminal = BlueprintBuildController.findWirelessProvider(level, maid);
+        if (terminal == null) {
+            return;
+        }
+        if (terminal.acceptInto(backpack, filter) > 0) {
+            maid.swing(InteractionHand.MAIN_HAND);
+        }
     }
 
     /** 产物与余料都进她背包；塞不下就掉在脚边——宁可满地都是，也不能凭空蒸发 */
