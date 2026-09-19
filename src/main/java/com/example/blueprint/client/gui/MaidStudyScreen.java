@@ -85,6 +85,18 @@ public class MaidStudyScreen extends Screen {
     private static final int COLOR_ROW = 0xBBBBBB;
     private static final int COLOR_PRIORITY = 0xFFFF55;
     private static final int COLOR_SELECTED = 0x55FFFF;
+    /**
+     * 摆法里一个**槽位**的底与框。
+     * <p>
+     * 面板底色是近乎全黑的 {@link #COLOR_PANEL}，物品直接画上去就像悬在墨水里——看不出
+     * "这里有九格""哪一格是空的"。给每个槽位（**空槽也画**）铺一层浅灰底、描一圈边，
+     * 才读得出一整块网格来。
+     */
+    private static final int COLOR_SLOT_FILL = 0xFF2B2B31;
+    private static final int COLOR_SLOT_EDGE = 0xFF565663;
+    /** 摆法那张卡（材料格 → 箭头 → 产物）的底板与外框 */
+    private static final int COLOR_CARD_FILL = 0x30FFFFFF;
+    private static final int COLOR_CARD_EDGE = 0xFF3A3A44;
     /** Shift+左键按下去会**忘掉**这个产物：红 */
     private static final int COLOR_FORGET = 0xFFFF5555;
 
@@ -595,6 +607,27 @@ public class MaidStudyScreen extends Screen {
         // 而面板只有 88 宽，省下这一行正好把摆法往上提一提
         int gridY = chipTop + chipsHeight(recipes.size()) + 6;
         int gridX = x + (PANEL_WIDTH - 3 * LAYOUT_CELL) / 2;
+        // 几何**一次算清**：材料格、箭头、产物都排在同一条中线上，卡片底板要用到它们的边界
+        int arrowX = x + PANEL_WIDTH / 2 - 1;
+        int arrowY = gridY + 3 * LAYOUT_CELL + 2;
+        int outX = x + (PANEL_WIDTH - 16) / 2;
+        int outY = arrowY + 11;
+
+        // 摆法那一整块先铺一层亮底 + 外框：把"材料格 → 箭头 → 产物"圈成一张卡。
+        // 面板本来就近乎全黑，不铺底、物品看着就像悬在墨水里
+        int cardTop = gridY - 3;
+        int cardBottom = outY + 19;
+        graphics.fill(x - 2, cardTop, x + PANEL_WIDTH + 2, cardBottom, COLOR_CARD_FILL);
+        graphics.renderOutline(x - 2, cardTop, PANEL_WIDTH + 4, cardBottom - cardTop,
+                COLOR_CARD_EDGE);
+        // 槽位**全画**（空格也画）：JEI 那种一整块网格，缺哪一格都会看着像少放了什么
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 3; col++) {
+                drawSlot(graphics, gridX + col * LAYOUT_CELL, gridY + row * LAYOUT_CELL);
+            }
+        }
+        drawSlot(graphics, outX, outY); // 产物那一格
+
         List<ItemStack> grid = recipe.grid();
         for (int i = 0; i < Math.min(grid.size(), 9); i++) {
             ItemStack stack = grid.get(i);
@@ -619,16 +652,12 @@ public class MaidStudyScreen extends Screen {
         }
 
         // 箭头：一小段竖线 + 一个三角，纯用方块拼出来，不指望字体里有箭头字符
-        int arrowX = x + PANEL_WIDTH / 2 - 1;
-        int arrowY = gridY + 3 * LAYOUT_CELL + 2;
         graphics.fill(arrowX, arrowY, arrowX + 2, arrowY + 4, COLOR_LABEL);
         graphics.fill(arrowX - 3, arrowY + 4, arrowX + 5, arrowY + 5, COLOR_LABEL);
         graphics.fill(arrowX - 2, arrowY + 5, arrowX + 4, arrowY + 6, COLOR_LABEL);
         graphics.fill(arrowX - 1, arrowY + 6, arrowX + 3, arrowY + 7, COLOR_LABEL);
 
         ItemStack out = recipeResult(learned, recipe);
-        int outX = x + (PANEL_WIDTH - 16) / 2;
-        int outY = arrowY + 11;
         if (!out.isEmpty()) {
             graphics.renderItem(out, outX, outY);
             if (mouseX >= outX && mouseX < outX + 16 && mouseY >= outY && mouseY < outY + 16
@@ -648,6 +677,18 @@ public class MaidStudyScreen extends Screen {
                     x + Math.max(0, (PANEL_WIDTH - this.font.width(text)) / 2), outY + 20,
                     COLOR_LABEL, false);
         }
+    }
+
+    /**
+     * 一个槽位：铺底 + 描框。
+     * <p>
+     * 单拆一个方法是因为它要被画十次（3×3 材料格 + 产物格），而且**空槽也要画**——
+     * "这里有格子、这里是空的"本身就是给主人看的信息（JEI 也是整块网格都画）。
+     */
+    private static void drawSlot(GuiGraphics graphics, int cellX, int cellY) {
+        graphics.fill(cellX - 1, cellY - 1, cellX + LAYOUT_CELL - 1, cellY + LAYOUT_CELL - 1,
+                COLOR_SLOT_FILL);
+        graphics.renderOutline(cellX - 1, cellY - 1, LAYOUT_CELL, LAYOUT_CELL, COLOR_SLOT_EDGE);
     }
 
     /**
