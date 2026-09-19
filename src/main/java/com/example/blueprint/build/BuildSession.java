@@ -29,16 +29,45 @@ public class BuildSession {
     private static final int MAX_PASS = 3;
 
     private final Schematic schematic;
+    /** 这座结构一共多少块。会话开始时定下来，当进度条的分母 */
+    private final int total;
     private List<Schematic.BlockEntry> order;
     private List<Schematic.BlockEntry> deferred;
     private int cursor = 0;
     private int pass = 0;
     private boolean finished = false;
 
-    public BuildSession(Schematic schematic) {
+    /**
+     * @param level  用来看工地上**已经到位**的方块
+     * @param origin 锚点：结构 (0,0,0) 在世界里的落点
+     */
+    public BuildSession(Schematic schematic, ServerLevel level, BlockPos origin) {
         this.schematic = schematic;
         this.order = plan(schematic);
         this.deferred = new ArrayList<>();
+        this.total = order.size();
+        fastForward(level, origin);
+    }
+
+    /**
+     * 开局先把游标推到"第一块还没到位的方块"上。
+     * <p>
+     * 为什么非做不可：{@link #remaining()} 是拿"游标之后还剩多少"算的，而进度条的分母是
+     * "一共多少块"。会话每隔一会儿就会重建一次（为了发现中途被拆掉的方块），新会话的游标
+     * 从 0 开始——**已经建好的那几百块会被算成"还没建"**，进度于是一下掉回 0，
+     * 再随着她一块块掠过那些旧方块涨回来。玩家看到的就是"进度条偶尔清空又涨回来"。
+     * <p>
+     * 这件事不影响施工本身（{@link #step} 本来就会跳过已到位的方块），
+     * 影响的只是"她报出来的那个进度"对不对。
+     */
+    private void fastForward(ServerLevel level, BlockPos origin) {
+        while (cursor < order.size()) {
+            Schematic.BlockEntry entry = order.get(cursor);
+            if (!level.getBlockState(origin.offset(entry.pos())).equals(entry.state())) {
+                return;
+            }
+            cursor++;
+        }
     }
 
     /**
@@ -119,6 +148,26 @@ public class BuildSession {
 
     public int remaining() {
         return Math.max(0, order.size() - cursor) + deferred.size();
+    }
+
+    /**
+     * 这座结构一共多少块。
+     * <p>
+     * 用**一开始**的块数当分母，而不是"这一轮还剩多少"：分母要是会变，进度条就会往回跳，
+     * 而它是给人看的——跳一下，玩家就没法判断她到底建到哪儿了。
+     */
+    public int total() {
+        return total;
+    }
+
+    /**
+     * 已经到位多少块。
+     * <p>
+     * 含**开工前就已经正确**的那些：续建、被拆后重扫都会重建会话，而幂等推进会把
+     * 已经建好的部分一路掠过——进度因此从那个位置接着往上走，不会从零重来。
+     */
+    public int done() {
+        return Math.max(0, total - remaining());
     }
 
     /**

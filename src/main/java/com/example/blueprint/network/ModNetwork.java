@@ -11,6 +11,7 @@ import com.example.blueprint.network.packet.C2SSetNamePacket;
 import com.example.blueprint.network.packet.C2SSetRotationPacket;
 import com.example.blueprint.network.packet.C2SForgetStudyPacket;
 import com.example.blueprint.network.packet.C2SSelectStudyRecipePacket;
+import com.example.blueprint.network.packet.S2CBuildProgressPacket;
 import com.example.blueprint.network.packet.S2CSchematicDataPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkRegistry;
@@ -18,9 +19,10 @@ import net.minecraftforge.network.simple.SimpleChannel;
 
 public class ModNetwork {
 
-    // 1.5.3 改了学习池的包（设优先级 → 选做法；停用包整个删掉），
-    // 协议不兼容了，按约定升版本号：新旧客户端/服务端不能混连
-    private static final String PROTOCOL_VERSION = "2";
+    // 1.5.3 改了学习池的包（设优先级 → 选做法；停用包整个删掉），协议不兼容，升到 2；
+    // 1.5.4 加了施工进度包（S2CBuildProgressPacket），再升到 3。
+    // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
+    private static final String PROTOCOL_VERSION = "3";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(BlueprintMod.MOD_ID, "main"),
@@ -56,5 +58,9 @@ public class ModNetwork {
         CHANNEL.registerMessage(id++, C2SForgetStudyPacket.class,
                 C2SForgetStudyPacket::encode, C2SForgetStudyPacket::decode,
                 C2SForgetStudyPacket::handle);
+        // 施工进度：服务端推给女仆附近的玩家，客户端拿去画进度条
+        CHANNEL.registerMessage(id++, S2CBuildProgressPacket.class,
+                S2CBuildProgressPacket::encode, S2CBuildProgressPacket::decode,
+                S2CBuildProgressPacket::handle);
     }
 }

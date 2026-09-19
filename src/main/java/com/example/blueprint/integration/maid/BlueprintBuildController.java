@@ -7,6 +7,8 @@ import com.example.blueprint.build.ItemProvider;
 import com.example.blueprint.integration.ae2.Ae2Compat;
 import com.example.blueprint.item.BindingBookItem;
 import com.example.blueprint.item.BlueprintItem;
+import com.example.blueprint.network.ModNetwork;
+import com.example.blueprint.network.packet.S2CBuildProgressPacket;
 import com.example.blueprint.schematic.Schematic;
 import com.example.blueprint.schematic.SchematicStorage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
@@ -19,6 +21,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
@@ -30,6 +33,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
+import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -96,6 +101,10 @@ public class BlueprintBuildController {
     private static final long MESSAGE_COOLDOWN_MS = 30_000L;
     /** 缺少材料时最多列出几种，免得聊天栏被刷屏 */
     private static final int MAX_REPORTED_MATERIALS = 5;
+    /** 施工进度多久推一次（约半秒）。进度条是给人看的，半秒跳一下已经足够顺滑 */
+    private static final int PROGRESS_INTERVAL = 10;
+    /** 进度只推给这么远的玩家（显示距离是 16 格，这里留一圈余量） */
+    private static final double PROGRESS_RADIUS_SQR = 24.0D * 24.0D;
 
     private BuildSession session;
     /** 整座结构一共要多少材料。还料时用它判断"哪些是这次工程带来的" */
@@ -104,9 +113,15 @@ public class BlueprintBuildController {
     private Map<Item, Integer> pendingBill = Map.of();
     /** 再扣掉背包已有的之后，真正还要从容器里拿的量。用它判断值不值得跑一趟 */
     private Map<Item, Integer> shortfall = Map.of();
-    /** 上次已经播报过的缺料清单。内容没变就说明是同一件事，不再重复弹 */
+    /**
+     * 上次播报过的缺料"内容指纹"（物品 id + 数量）。
+     * <p>
+     * 用它挡重复：缺料有三条路径会开口（找不到来源、来源里没有、背包塞不下），
+     * 各报各的就会一直弹——她每几秒重试一次，而缺料往往要玩家跑一趟仓库才好，
+     * 这期间屏幕上就一直刷同一件事。内容没变就闭嘴，真变了才再说。
+     */
     @Nullable
-    private Map<Item, Integer> lastReportedShortfall;
+    private String lastShortfallSignature;
     private UUID activeId;
     private BlockPos activeAnchor;
     private Rotation activeRotation = Rotation.NONE;
@@ -126,6 +141,8 @@ public class BlueprintBuildController {
     private int repathCooldown = 0;
     private int cooldown = 0;
     private int rescanTimer = RESCAN_INTERVAL;
+    /** 离下一次推施工进度还有多少 tick */
+    private int progressTimer = 0;
     private long lastMessageAt = 0;
     /** 正在播放开合动画的容器，以及剩余时间 */
     private BlockPos openContainerPos;
@@ -206,6 +223,11 @@ public class BlueprintBuildController {
             return;
         }
 
+        // 进度推给附近的玩家（客户端画进度条）。特意放在冷却判断**之前**：
+        // 她在等冷却、在走路、去取料的路上，进度条都该照常显示——
+        // 玩家想知道的是"建到哪了"，不是"她这一刻有没有在放方块"
+        tickProgress(level, maid);
+
         if (cooldown > 0) {
             cooldown--;
             return;
@@ -255,7 +277,7 @@ public class BlueprintBuildController {
         bill = Map.of();
         pendingBill = Map.of();
         shortfall = Map.of();
-        lastReportedShortfall = null;
+        lastShortfallSignature = null;
         fetchProvider = null;
         returnProvider = null;
         returnFinished = false;
@@ -265,6 +287,7 @@ public class BlueprintBuildController {
         state = State.MOVE_TO_SPOT;
         cooldown = 0;
         rescanTimer = RESCAN_INTERVAL;
+        progressTimer = 0;
     }
 
     /**
@@ -280,11 +303,24 @@ public class BlueprintBuildController {
     }
 
     private void onCompleted(ServerLevel level, EntityMaid maid, ItemStack stack) {
+        // 有几块到头来还是放不下（缺支撑、位置被占）：**必须说一声**。
+        // 不然报的是"建好啦"，而墙上可能少着几个火把、半砖——玩家得自己一块块对。
+        // 这里 remaining() 只会是那种"放不下"的：缺料是不会走到 finished 的
+        // （见 BuildSession.step：缺料当场停在那一块上，不会扫到队尾）
+        int leftover = session == null ? 0 : session.remaining();
         // 完工标记写在蓝图上，所以"施工完毕"只会播报一次
         if (!BlueprintItem.isCompleted(stack)) {
             BlueprintItem.setCompleted(stack, true);
-            notify(level, maid, "message.blueprint.maid_build_done");
+            if (leftover > 0) {
+                BlueprintMod.LOGGER.info("女仆 {} 完工，但有 {} 块放不下（缺支撑或位置被占）",
+                        maid.getUUID(), leftover);
+                notify(level, maid, "message.blueprint.maid_build_leftover", leftover);
+            } else {
+                notify(level, maid, "message.blueprint.maid_build_done");
+            }
         }
+        // 最后推一次进度。之后靠客户端的时效自己消失——不需要再补一条"结束了"
+        sendProgress(level, maid);
         // 建完就把蓝图收回背包。手腾出来之后，findBlueprint 自然会挑到
         // 背包里下一张还没建完的图，女仆接着干下一单，不需要玩家盯着换图。
         stashFinishedBlueprint(maid);
@@ -298,6 +334,48 @@ public class BlueprintBuildController {
      * 手腾空之后，下一轮查找就会落到背包里那张还没建完的图上，
      * 女仆于是自己接着干下一单。
      */
+    /**
+     * 把施工进度推给附近的玩家（客户端拿去画进度条）。
+     * <p>
+     * 每 {@value #PROGRESS_INTERVAL} tick 推一次：进度条半秒跳一下已经够顺滑，
+     * 每 tick 一条包在多人服上纯属白烧带宽。收工那一次由 {@link #onCompleted} 单独发。
+     */
+    private void tickProgress(ServerLevel level, EntityMaid maid) {
+        if (session == null) {
+            return;
+        }
+        if (progressTimer > 0) {
+            progressTimer--;
+            return;
+        }
+        progressTimer = PROGRESS_INTERVAL;
+        sendProgress(level, maid);
+    }
+
+    /**
+     * 只发给她**附近**的玩家。
+     * <p>
+     * 进度条本来就只在 16 格内显示（见 {@code BuildProgressHud}），报到半个维度之外是浪费；
+     * 推送半径留得比显示距离大一圈，玩家走近时条已经在了，不会"走到跟前才突然蹦出来"。
+     */
+    private void sendProgress(ServerLevel level, EntityMaid maid) {
+        if (session == null) {
+            return;
+        }
+        int done = session.done();
+        int total = session.total();
+        double x = maid.getX();
+        double y = maid.getY();
+        double z = maid.getZ();
+        for (ServerPlayer player : level.players()) {
+            if (player.distanceToSqr(x, y, z) > PROGRESS_RADIUS_SQR) {
+                continue;
+            }
+            ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                    new S2CBuildProgressPacket(maid.getId(), done, total));
+        }
+    }
+
     private void stashFinishedBlueprint(EntityMaid maid) {
         IItemHandler backpack = new MaidItemSource(maid).getBackpack();
         if (backpack == null) {
@@ -342,7 +420,9 @@ public class BlueprintBuildController {
             return;
         }
         Schematic schematic = base.rotate(activeRotation);
-        session = new BuildSession(schematic);
+        // 带上工地现状：新会话的游标直接推到"第一块还没到位"的地方，
+        // 进度条不会因为这次重扫掉回 0（见 BuildSession#fastForward）
+        session = new BuildSession(schematic, level, activeAnchor);
         bill = BuildSession.bill(schematic);
     }
 
@@ -731,8 +811,11 @@ public class BlueprintBuildController {
             return provider;
         }
 
-        // 坐标还在，但里面已经没有需要的材料了
-        notify(level, maid, "message.blueprint.maid_bound_empty", describeShortfall());
+        // 坐标还在，但里面已经没有需要的材料了。
+        // 走 sayTo 而不是 notify：缺料提示自己有闸门，不该再被 30 秒冷却挤掉
+        if (shouldReportShortfall("bound_empty", shortfall)) {
+            sayTo(level, maid, "message.blueprint.maid_bound_empty", describeShortfall());
+        }
         return null;
     }
 
@@ -811,10 +894,12 @@ public class BlueprintBuildController {
             BlueprintMod.LOGGER.warn("女仆 {} 在 {} 没取到材料（{}还缺的 {} 种，背包空余 {} 格）",
                     maid.getUUID(), pos, hasWanted ? "容器里有" : "容器里没有",
                     shortfall.size(), countEmptySlots(backpack));
-            notify(level, maid, hasWanted
-                            ? "message.blueprint.maid_backpack_full"
-                            : "message.blueprint.maid_source_empty",
-                    describeShortfall());
+            String kind = hasWanted ? "backpack_full" : "source_empty";
+            if (shouldReportShortfall(kind, shortfall)) {
+                sayTo(level, maid, hasWanted
+                        ? "message.blueprint.maid_backpack_full"
+                        : "message.blueprint.maid_source_empty", describeShortfall());
+            }
         } else {
             BlueprintMod.LOGGER.info("女仆 {} 从 {} 取到 {} 种材料", maid.getUUID(), pos, moved);
         }
@@ -1027,7 +1112,7 @@ public class BlueprintBuildController {
         // 女仆按蓝图当前朝向施工
         Schematic schematic = base.rotate(rotation);
 
-        session = new BuildSession(schematic);
+        session = new BuildSession(schematic, level, anchor);
         bill = BuildSession.bill(schematic);
         activeId = id;
         activeAnchor = anchor;
@@ -1158,23 +1243,62 @@ public class BlueprintBuildController {
             return;
         }
 
-        // 同一批缺料只说一次。女仆每隔几秒就会重试一遍，照实播报的话
-        // 聊天栏会被同一句话刷满。等清单变了（又建了一部分、或者换了蓝图）再提醒。
-        // 这里也不走 notify：那条路径有 30 秒冷却，会让这条重要提示被别的消息挤掉。
-        if (shortfall.equals(lastReportedShortfall)) {
+        // 同一批缺料只说一次（闸门见 shouldReportShortfall）；也不走 notify——
+        // 那条路径的 30 秒冷却会把这条重要提示挤掉
+        if (!shouldReportShortfall("no_source", shortfall)) {
             return;
         }
-        lastReportedShortfall = Map.copyOf(shortfall);
 
         if (shortfall.isEmpty()) {
-            nearby.sendSystemMessage(MaidSpeech.speak(maid,
-                    Component.translatable("message.blueprint.maid_no_material")));
+            sayTo(level, maid, "message.blueprint.maid_no_material");
             return;
         }
 
         BlueprintMod.LOGGER.info("女仆 {} 缺少建造材料：{}", maid.getUUID(), shortfall);
+        sayTo(level, maid, "message.blueprint.maid_missing_materials", describeShortfall());
+    }
+
+    /**
+     * 缺料这一类提示的总闸门：**同一件事只说一次**，内容真变了才重新开口。
+     * <p>
+     * 三条路径都会报缺料（找不到来源、来源里没有、背包塞不下），各报各的就会"一直弹"：
+     * 她每 {@value #NO_SOURCE_COOLDOWN} tick 重试一次，30 秒的冷却一过又是一条，
+     * 而缺料往往要玩家跑一趟仓库才好——这期间屏幕上就一直刷同一件事。
+     * <p>
+     * 指纹用**物品 id** 拼，不用显示名：显示名会跟着语言变，切成另一种语言就成"新内容"了。
+     */
+    private boolean shouldReportShortfall(String kind, Map<Item, Integer> list) {
+        String signature = kind + "|" + shortfallSignature(list);
+        if (signature.equals(lastShortfallSignature)) {
+            return false;
+        }
+        lastShortfallSignature = signature;
+        return true;
+    }
+
+    /** 缺料清单的内容指纹：物品 id 加数量，跟语言无关；排过序，同一批料每次都拼成一样 */
+    private static String shortfallSignature(Map<Item, Integer> list) {
+        List<String> parts = new ArrayList<>(list.size());
+        for (Map.Entry<Item, Integer> entry : list.entrySet()) {
+            parts.add(ForgeRegistries.ITEMS.getKey(entry.getKey()) + "x" + entry.getValue());
+        }
+        parts.sort(null);
+        return String.join(";", parts);
+    }
+
+    /**
+     * 直接说给附近的人听，**不走 {@link #notify} 的冷却**。
+     * <p>
+     * 缺料提示自己有一套"内容不变就不重复"的闸门，再叠一层 30 秒冷却只会把重要提示挤掉：
+     * 同一次里前一句别的提示刚说完，这句就发不出去了。
+     */
+    private void sayTo(ServerLevel level, EntityMaid maid, String translationKey, Object... args) {
+        Player nearby = level.getNearestPlayer(maid, 16.0D);
+        if (nearby == null) {
+            return;
+        }
         nearby.sendSystemMessage(MaidSpeech.speak(maid,
-                Component.translatable("message.blueprint.maid_missing_materials", describeShortfall())));
+                Component.translatable(translationKey, args)));
     }
 
     /**
