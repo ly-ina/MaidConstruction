@@ -1,6 +1,7 @@
 package com.example.blueprint.client.gui;
 
 import com.example.blueprint.integration.maid.MaidCraftOrder;
+import com.example.blueprint.integration.maid.MaidIndustryTask;
 import com.example.blueprint.integration.maid.MaidSpeech;
 import com.example.blueprint.integration.maid.MaidStudyPool;
 import com.example.blueprint.network.ModNetwork;
@@ -453,6 +454,16 @@ public class MaidStudyScreen extends Screen {
         graphics.drawString(this.font,
                 this.font.plainSubstrByWidth(progress.getString(), PANEL_X - 20),
                 x, y + 22, COLOR_LABEL, false);
+
+        // 她在等上班时间：**面板上也写一行**。聊天栏那句话会滚掉，而主人盯着这块看的时候
+        // 最想知道的就是"她怎么不动"——作息客户端也算得出来（世界时间 + 她自己的作息表）
+        if (!MaidIndustryTask.isWorkingTime(maid)) {
+            graphics.drawString(this.font,
+                    this.font.plainSubstrByWidth(
+                            Component.translatable("gui.blueprint.study.off_duty").getString(),
+                            PANEL_X - 20),
+                    x, y + 34, COLOR_LABEL, false);
+        }
     }
 
     /**

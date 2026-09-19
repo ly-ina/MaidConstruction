@@ -73,6 +73,25 @@ public class MaidCraftTickHandler {
     private static final Map<UUID, Integer> COOLDOWN = new HashMap<>();
     /** 每个女仆上次提示的时间 */
     private static final Map<UUID, Long> LAST_WARN = new HashMap<>();
+    /** 刚说完"下班"之后这么久内不再念"还没到上班时间"（同一个意思别说两遍） */
+    private static final long OFF_DUTY_PAUSE_MS = 10_000L;
+    /** 每个女仆上次为作息开口的时间（"下班啦"与"还没到上班时间"共用这本账） */
+    private static final Map<UUID, Long> LAST_OFF_DUTY = new HashMap<>();
+    /**
+     * 上次为**哪张单**说过"还没到上班时间"。
+     * <p>
+     * 记的是"产物 + 还剩多少 + 一共多少"：同一张单只说一次——他知道了就行，
+     * 没必要求着夜班每分钟念一遍（这句是发到**聊天栏**的，不是动作栏）。
+     * 单子换了、数量变了，才重新说一遍。
+     */
+    private static final Map<UUID, String> OFF_DUTY_TOLD = new HashMap<>();
+    /**
+     * 每个女仆上一**拍**在不在上班时间。
+     * <p>
+     * 存它只为抓"刚下班"那一个瞬间。第一次见到某只女仆时只记不报——否则每次进游戏、
+     * 每次切进工业模式，她都要"下班"一次。
+     */
+    private static final Map<UUID, Boolean> ON_DUTY = new HashMap<>();
 
     /**
      * 主人下的单做完了、还没当面告诉他：等她手头没活了就跑过去说一句。
@@ -100,11 +119,19 @@ public class MaidCraftTickHandler {
             if (!(entity instanceof EntityMaid maid) || !MaidIndustryTask.isIndustry(maid)) {
                 continue;
             }
+            boolean onDuty = MaidIndustryTask.isWorkingTime(maid);
+            Boolean before = ON_DUTY.put(maid.getUUID(), onDuty);
+            if (before != null && before && !onDuty) {
+                goOffDuty(maid);
+            }
             if (MaidCraftOrder.first(maid) != null) {
                 // 有活：只在**上班时间**干。不在就让她等着——单子排着队不会跑，
-                // 到点了自己会开工
-                if (MaidIndustryTask.isWorkingTime(maid)) {
+                // 到点了自己会开工。但要**开口说一句**：不说的话主人看到的只是
+                // "下了单她一动不动"，跟"她坏了"没法区分
+                if (onDuty) {
                     tickMaid(level, maid);
+                } else {
+                    warnOffDuty(level, maid);
                 }
                 continue;
             }
@@ -115,9 +142,61 @@ public class MaidCraftTickHandler {
             tickReport(level, maid);
             if (!REPORTS.containsKey(maid.getUUID())) {
                 COOLDOWN.remove(maid.getUUID()); // 下次下单不用再等上好几秒
+                LAST_OFF_DUTY.remove(maid.getUUID());
+                OFF_DUTY_TOLD.remove(maid.getUUID());
+                ON_DUTY.remove(maid.getUUID());
                 MaidIndustryTask.release(maid);
             }
         }
+    }
+
+    /**
+     * 下班了。
+     * <p>
+     * 这是她自己盼着的那一刻，所以**专门说一句、还要高兴一下**——跟"还缺材料"那类汇报不是
+     * 一回事：手上有没有单没做完都不影响她下班。剩着单的话把那件事也捎上，免得主人以为
+     * 她把活忘了（单子排着队不会跑，到上班时间她自己接着做）。
+     */
+    private static void goOffDuty(EntityMaid maid) {
+        MaidSpeech.say(maid, MaidCraftOrder.first(maid) != null
+                ? "message.blueprint.craft.off_work_pending"
+                : "message.blueprint.craft.off_work");
+        maid.tryPlayMaidPickupSound(); // 高兴一下（跟"做好了"那一次同一个声音）
+        // 刚说完下班，别紧接着又念一句"还没到上班时间"——同一个意思说两遍
+        LAST_OFF_DUTY.put(maid.getUUID(), System.currentTimeMillis());
+    }
+
+    /**
+     * "现在不是我的上班时间"——**同一张单只说一次**。
+     * <p>
+     * 为什么要说：不说的话主人看到的只是"下了单她一动不动"，跟"她坏了"没法区分。
+     * 但也不必反复念：这句走的是聊天栏，夜里每过一分钟来一句就是噪音。所以拿手上
+     * 那张单的样子（产物 + 剩余 + 总量）当"说过没有"的凭据，单子变了才再说。
+     * <p>
+     * 单独一本账、不走 {@link #warn}：那本账是"这单缺料"的（15 秒冷却、还会给单子盖章），
+     * 作息的事不该挪用缺料的账。
+     */
+    private static void warnOffDuty(ServerLevel level, EntityMaid maid) {
+        Long last = LAST_OFF_DUTY.get(maid.getUUID());
+        if (last != null && System.currentTimeMillis() - last < OFF_DUTY_PAUSE_MS) {
+            return;
+        }
+        String state = orderState(maid);
+        if (state.equals(OFF_DUTY_TOLD.get(maid.getUUID()))) {
+            return; // 这张单已经招呼过了
+        }
+        OFF_DUTY_TOLD.put(maid.getUUID(), state);
+        LAST_OFF_DUTY.put(maid.getUUID(), System.currentTimeMillis());
+        MaidSpeech.say(maid, "message.blueprint.craft.off_duty");
+        BlueprintMod.LOGGER.info("女仆 {} 手上有单，但此刻不是她的工作时间（作息 {}）",
+                maid.getUUID(), maid.getSchedule());
+    }
+
+    /** 手上那张单的样子：产物 + 还剩多少 + 一共多少。用来判断"这句招呼打过了没有" */
+    private static String orderState(EntityMaid maid) {
+        MaidCraftOrder.Order head = MaidCraftOrder.first(maid);
+        return head == null ? "" : head.product().getHoverName().getString()
+                + "|" + head.remaining() + "|" + MaidCraftOrder.pendingAmount(maid);
     }
 
     private static void tickMaid(ServerLevel level, EntityMaid maid) {
