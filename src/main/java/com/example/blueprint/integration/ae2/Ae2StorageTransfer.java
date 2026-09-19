@@ -128,4 +128,23 @@ final class Ae2StorageTransfer {
         }
         return moved;
     }
+
+    /**
+     * 把一样东西塞进存储，返回收下的个数。
+     * <p>
+     * 施工时拆下来的方块走这条路回仓库（女仆背包塞不下之后的第二站）。
+     * 按实际收下的个数返回，收不下就不算数——网络满了、物品被禁入（黑名单）
+     * 都由 AE2 自己决定，这里只如实转达。
+     */
+    static int deposit(MEStorage storage, ItemStack stack) {
+        if (stack.isEmpty()) {
+            return 0;
+        }
+        AEItemKey key = AEItemKey.of(stack);
+        if (key == null) {
+            return 0;
+        }
+        long inserted = storage.insert(key, stack.getCount(), Actionable.MODULATE, SOURCE);
+        return (int) Math.max(0, Math.min(inserted, stack.getCount()));
+    }
 }

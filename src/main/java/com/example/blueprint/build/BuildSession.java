@@ -1,9 +1,12 @@
 package com.example.blueprint.build;
 
+import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.schematic.Schematic;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -23,6 +26,11 @@ import java.util.Map;
  * <p>
  * 整个流程是幂等的——已经和目标状态一致的方块会被跳过，
  * 因此女仆中途被打断、存档重载后重新开始也不会破坏已建成的部分。
+ * <p>
+ * 唯一会"破坏"世界的一步是放置本身：位置上原本站着什么，就会被目标方块顶掉。
+ * 顶掉的东西交给 {@link Salvage} 处置（见 {@link #clearAt}），绝不无声销毁；
+ * 而**她动不了的方块**（基岩这类谁也拆不掉的，或者要她没有的工具的）一律不碰，
+ * 位置原样留着，最后算进"还剩几块放不下"。
  */
 public class BuildSession {
 
@@ -172,8 +180,12 @@ public class BuildSession {
 
     /**
      * 最多放置 maxBlocks 个方块，返回本次的执行结果。
+     *
+     * @param salvage 位置上原有方块的去处（可为 null，那时拆下来的东西照旧凭空消失——
+     *                只有"没人来收"的场合才这么传，女仆那边永远有一个实现）
      */
-    public StepResult step(ServerLevel level, BlockPos origin, ItemSource source, int maxBlocks) {
+    public StepResult step(ServerLevel level, BlockPos origin, ItemSource source, int maxBlocks,
+                           @Nullable Salvage salvage) {
         if (finished) {
             return new StepResult(0, 0, true, 0, null);
         }
@@ -230,6 +242,19 @@ public class BuildSession {
                 source.consume(required.getKey(), required.getValue());
             }
 
+            // 放下去之前先把这位置上原来的东西拆下来收走。
+            // 顺序不能反：setBlock 一执行，原来的方块连同方块实体就都没了，
+            // 再想算掉落物也无从下手（那正是之前"顶掉的东西凭空消失"的由来）
+            //
+            // 拆不掉的（基岩、屏障，或者要她没有的工具的方块）就**跳过这一块**：
+            // 留到最后一并说明还剩几块放不下（见 BlueprintBuildController#onCompleted），
+            // 绝不能硬盖——盖下去就是把这个方块从世界里删掉
+            if (!clearAt(level, world, salvage)) {
+                deferred.add(entry);
+                cursor++;
+                continue;
+            }
+
             level.setBlock(world, entry.state(), Block.UPDATE_ALL);
 
             if (entry.blockEntity() != null) {
@@ -246,6 +271,76 @@ public class BuildSession {
         }
 
         return new StepResult(placed, missing, finished, remaining(), lastPlaced);
+    }
+
+    /**
+     * 把 {@code pos} 上原本那个方块"拆下来"交给回收方，好给目标方块腾地方。
+     * <p>
+     * 拆下来的东西按方块自己的战利品表算，用的工具是 {@link BlockHarvest#toolFor}——
+     * 也就是"她手上那把下界合金的"，没有附魔、没有剪刀。所以：
+     * <ul>
+     *   <li>石头出圆石、草方块出泥土、机器出它自己（模组的战利品表也照走）；</li>
+     *   <li>草、树叶这类要剪刀才有收成的，她就什么也拿不到——按主人的说法，
+     *       她不会为了这个特意去找剪刀。</li>
+     * </ul>
+     * 容器里的东西一并掏出来：原版玩家拆箱子就是这个结果，而且她已经把这格
+     * 盖成别的方块了，里面的东西再不拿出来就永远没了。
+     *
+     * @return true 表示这一格腾出来了（本来就空，或者拆得掉）；
+     *         false 表示**她动不了**这块（基岩这类谁也拆不掉的，或者要她没有的工具的），
+     *         位置得原样留着——见 {@link BlockHarvest#canHarvest}
+     */
+    public static boolean clearAt(ServerLevel level, BlockPos pos, @Nullable Salvage salvage) {
+        BlockState existing = level.getBlockState(pos);
+        if (existing.isAir()) {
+            return true; // 空位：没有东西要腾
+        }
+        ItemStack tool = BlockHarvest.toolFor(existing);
+        if (!BlockHarvest.canHarvest(level, pos, existing, tool)) {
+            // **动不了就别动**：以前这里是直接覆盖，于是连基岩都能被顶掉。
+            // 她不是玩家，没有"消除方块"这种权力——一块基岩被删掉，
+            // 比少建一块严重得多，而且没法还原
+            if (salvage != null) {
+                if (existing.getDestroySpeed(level, pos) < 0.0F) {
+                    salvage.unbreakable(level, pos, existing);
+                } else {
+                    salvage.cannotHarvest(level, pos, existing);
+                }
+            }
+            return false;
+        }
+        if (salvage == null) {
+            return true; // 没人来收，照旧不留东西（只有"无主"的场合才这么传）
+        }
+        BlockEntity blockEntity = level.getBlockEntity(pos);
+        try {
+            // 这里 entity 传 null：不是玩家拆的，也就不该有幸运、进度这些额外加成
+            for (ItemStack drop : Block.getDrops(existing, level, pos, blockEntity, null, tool)) {
+                if (!drop.isEmpty()) {
+                    salvage.collect(level, pos, drop);
+                }
+            }
+            if (blockEntity instanceof Container container) {
+                for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                    // 先把这一格腾空、再交出去：顺序反过来的话，
+                    // 交接过程中真出了岔子，东西会既在容器里又被收走一遍
+                    ItemStack inside = container.getItem(slot).copy();
+                    if (inside.isEmpty()) {
+                        continue;
+                    }
+                    container.setItem(slot, ItemStack.EMPTY);
+                    salvage.collect(level, pos, inside);
+                }
+                container.setChanged();
+            }
+        } catch (Exception e) {
+            // 模组的战利品表、方块实体都有可能在算掉落时抛异常。
+            // 建造**不能因为"收东西"失败而停下**：该让开的位置照样得让开，
+            // 最多个别方块的东西没回来——而这比整座工地卡死好得多
+            BlueprintMod.LOGGER.warn("拆 {} 的 {} 时收不了它的东西：{}",
+                    pos, existing.getBlock(), e.toString());
+        }
+        return true;
     }
 
     /**

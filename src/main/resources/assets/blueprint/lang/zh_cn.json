@@ -76,6 +76,8 @@
   "message.blueprint.cleared": "已清空蓝图，可以重新录制",
   "message.blueprint.maid_no_material": "我找不到建造要用的材料",
   "message.blueprint.maid_missing_materials": "我找不到这些材料：%s",
+  "message.blueprint.maid_need_tool": "%s 我拆不动——得有对应的工具才挖得开，这块我先留着",
+  "message.blueprint.maid_unbreakable": "%s 我动不了——那不是能挖掉的东西，这块我先留着",
   "message.blueprint.maid_missing_more": "，等共 %s 种",
   "message.blueprint.maid_build_done": "蓝图建好啦",
   "message.blueprint.maid_build_leftover": "建好啦，不过还有 %s 块放不下（多半是缺支撑或者位置被占），重新定位就能再试一次",

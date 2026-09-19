@@ -11,6 +11,7 @@ import com.example.blueprint.build.ItemProvider;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.IItemHandler;
@@ -156,6 +157,17 @@ public class Ae2ItemProvider implements ItemProvider {
             int moved = Ae2StorageTransfer.acceptInto(storage, src, filter);
             if (moved > 0) {
                 return moved;
+            }
+        }
+        return 0;
+    }
+
+    @Override
+    public int deposit(ItemStack stack) {
+        for (MEStorage storage : storages()) {
+            int accepted = Ae2StorageTransfer.deposit(storage, stack);
+            if (accepted > 0) {
+                return accepted;
             }
         }
         return 0;

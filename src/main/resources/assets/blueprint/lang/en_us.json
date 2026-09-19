@@ -76,6 +76,8 @@
   "message.blueprint.cleared": "Blueprint cleared, ready to record again",
   "message.blueprint.maid_no_material": "I cannot find the materials for the build",
   "message.blueprint.maid_missing_materials": "I cannot find these materials: %s",
+  "message.blueprint.maid_need_tool": "I cannot break the %s — it needs a proper tool, so I will leave it for now",
+  "message.blueprint.maid_unbreakable": "I cannot touch the %s — it is not something that can be broken, so I will leave it for now",
   "message.blueprint.maid_missing_more": ", and %s more kinds",
   "message.blueprint.maid_build_done": "The blueprint is built",
   "message.blueprint.maid_build_leftover": "Built, though %s blocks could not be placed (usually missing support or the spot is taken) - re-anchor to try again",

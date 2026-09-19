@@ -88,4 +88,9 @@ public class Ae2WirelessProvider implements ItemProvider {
     public int acceptInto(IItemHandler src, Map<Item, Integer> filter) {
         return Ae2StorageTransfer.acceptInto(storage, src, filter);
     }
+
+    @Override
+    public int deposit(ItemStack stack) {
+        return Ae2StorageTransfer.deposit(storage, stack);
+    }
 }

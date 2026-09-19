@@ -4,6 +4,7 @@ import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.build.BlockContainerProvider;
 import com.example.blueprint.build.BuildSession;
 import com.example.blueprint.build.ItemProvider;
+import com.example.blueprint.build.Salvage;
 import com.example.blueprint.integration.ae2.Ae2Compat;
 import com.example.blueprint.item.BindingBookItem;
 import com.example.blueprint.item.BlueprintItem;
@@ -27,9 +28,11 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -39,9 +42,11 @@ import net.minecraftforge.registries.ForgeRegistries;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -114,14 +119,22 @@ public class BlueprintBuildController {
     /** 再扣掉背包已有的之后，真正还要从容器里拿的量。用它判断值不值得跑一趟 */
     private Map<Item, Integer> shortfall = Map.of();
     /**
-     * 上次播报过的缺料"内容指纹"（物品 id + 数量）。
+     * 每种说法各自记的"上次说过什么内容"（说法 → 内容指纹）。
      * <p>
-     * 用它挡重复：缺料有三条路径会开口（找不到来源、来源里没有、背包塞不下），
-     * 各报各的就会一直弹——她每几秒重试一次，而缺料往往要玩家跑一趟仓库才好，
-     * 这期间屏幕上就一直刷同一件事。内容没变就闭嘴，真变了才再说。
+     * 用它挡重复：缺料有四条路径会开口（找不到来源、容器里没有、背包塞不下、绑定书仓库空了），
+     * 各报各的就会一直弹——她每几秒重试一次，而缺料往往要玩家跑一趟仓库才好。
+     * <p>
+     * <b>账必须分开记</b>，这一点以前是错的：那时只有**一个**字段，四种说法共用一格，
+     * 于是"容器里没有"刚把指纹写下去，"找不到来源"又把它覆盖掉，轮到"容器里没有"
+     * 再说时又成了"新内容"——两句话来回覆盖，屏幕上就变成无限复读。
+     * 玩家看到的正是"她一直在说同一件事"。
      */
-    @Nullable
-    private String lastShortfallSignature;
+    private final Map<String, String> lastShortfall = new HashMap<>();
+
+    /** 缺料提示之间的最小间隔（约 3 秒），详见 {@link #shouldReportShortfall} */
+    private static final long SHORTFALL_QUIET_MS = 3_000L;
+    /** 上一次说缺料是什么时候 */
+    private long lastShortfallAt = 0L;
     private UUID activeId;
     private BlockPos activeAnchor;
     private Rotation activeRotation = Rotation.NONE;
@@ -147,6 +160,15 @@ public class BlueprintBuildController {
     /** 正在播放开合动画的容器，以及剩余时间 */
     private BlockPos openContainerPos;
     private int openContainerTimer = 0;
+    /**
+     * 已经说过"挖不动"的方块种类。
+     * <p>
+     * 按种类封口而不是按次数：重扫会让同一面墙被反复"顶掉再放"，
+     * 每一次都报就成了复读；而换了一种更硬的方块，该说的还是得说。
+     * 换蓝图、收工时清空（见 {@link #refreshSession}、{@link #reset}），
+     * 下一处工地重新说。
+     */
+    private final Set<ResourceLocation> toolWarned = new HashSet<>();
 
 
     // ------------------------------------------------------------------
@@ -277,7 +299,8 @@ public class BlueprintBuildController {
         bill = Map.of();
         pendingBill = Map.of();
         shortfall = Map.of();
-        lastShortfallSignature = null;
+        lastShortfall.clear();
+        lastShortfallAt = 0L;
         fetchProvider = null;
         returnProvider = null;
         returnFinished = false;
@@ -288,6 +311,7 @@ public class BlueprintBuildController {
         cooldown = 0;
         rescanTimer = RESCAN_INTERVAL;
         progressTimer = 0;
+        toolWarned.clear();
     }
 
     /**
@@ -534,7 +558,8 @@ public class BlueprintBuildController {
             maid.getLookControl().setLookAt(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
         }
 
-        BuildSession.StepResult result = session.step(level, activeAnchor, new MaidItemSource(maid), 1);
+        BuildSession.StepResult result = session.step(level, activeAnchor, new MaidItemSource(maid), 1,
+                new MaidSalvage(maid));
 
         if (result.placed() > 0) {
             // 真的动工了，说明这处工地还没完工
@@ -569,6 +594,10 @@ public class BlueprintBuildController {
                 ? pendingBill
                 : ItemProvider.missingAmounts(backpack, pendingBill);
         if (shortfall.isEmpty()) {
+            // 眼下什么都不缺了：之前那几句"缺东西"就此销账。
+            // 不销的话，等到下次真的再缺同一样（用掉了、被人拿走了），
+            // 她会因为"这句说过了"而永远闭嘴——那是另一种难查
+            lastShortfall.clear();
             cooldown = NO_SOURCE_COOLDOWN;
             return;
         }
@@ -584,6 +613,97 @@ public class BlueprintBuildController {
         BlueprintMod.LOGGER.info("女仆 {} 出发去 {} 取料（来源：{}，缺口 {} 种）",
                 maid.getUUID(), provider.interactPos(), provider.getClass().getSimpleName(),
                 pendingBill.size());
+    }
+
+    // ------------------------------------------------------------------
+    // 被顶掉的方块上拆下来的东西
+    // ------------------------------------------------------------------
+
+    /**
+     * 拆下来的东西去哪：**她自己的背包 → 身上的无线终端 → 脚边地上**。
+     * <p>
+     * 顺序是有讲究的：背包最省事，先试；装不下才去找终端——那一步要解析 ME 网络，
+     * 比塞背包贵得多，只在真的需要时才走；两边都不收，就丢在她脚边。
+     * 满地是东西总比凭空消失强。
+     * <p>
+     * 每次施工现造一个这种薄对象（控制器是每 tick 拿到女仆的，它得记住是哪一只），
+     * 代价可以忽略。
+     */
+    private final class MaidSalvage implements Salvage {
+
+        private final EntityMaid maid;
+
+        private MaidSalvage(EntityMaid maid) {
+            this.maid = maid;
+        }
+
+        @Override
+        public void collect(ServerLevel level, BlockPos pos, ItemStack stack) {
+            if (stack.isEmpty()) {
+                return;
+            }
+            // 1）背包。insertItemStacked 会把塞不下的原样还回来，
+            //    那部分正好是下一站要接着收的
+            ItemStack rest = stack;
+            IItemHandler backpack = new MaidItemSource(maid).getBackpack();
+            if (backpack != null) {
+                rest = ItemHandlerHelper.insertItemStacked(backpack, stack, false);
+            }
+            if (rest.isEmpty()) {
+                return;
+            }
+
+            // 2）她饰品栏里那台无线终端（等于放回仓库）。
+            //    这一步要顺着终端解析网络，贵，所以放在背包之后
+            ItemProvider terminal = findWirelessProvider(level, maid);
+            if (terminal != null) {
+                int accepted = terminal.deposit(rest);
+                if (accepted > 0) {
+                    rest = rest.copyWithCount(rest.getCount() - accepted);
+                }
+            }
+            if (rest.isEmpty()) {
+                return;
+            }
+
+            // 3）两边都收不下：丢在地上。绝不"收下再扔掉"——那就是物品蒸发
+            Block.popResource(level, pos, rest);
+            BlueprintMod.LOGGER.info("女仆 {} 拆下来的 {} 背包和终端都收不下，丢在 {}",
+                    maid.getUUID(), rest.getHoverName().getString(), pos);
+        }
+
+        @Override
+        public void cannotHarvest(ServerLevel level, BlockPos pos, BlockState state) {
+            reportUnremovable(level, pos, state, "need_tool", "message.blueprint.maid_need_tool");
+        }
+
+        @Override
+        public void unbreakable(ServerLevel level, BlockPos pos, BlockState state) {
+            reportUnremovable(level, pos, state, "unbreakable", "message.blueprint.maid_unbreakable");
+        }
+
+        /**
+         * "这块我动不了，先留着"——两种情形共用这一套账，只是话说得不一样。
+         * <p>
+         * 同一**种**方块只说一次：重扫会让同一面墙被反复"顶掉再放"，
+         * 每一下都报就是复读；换一种动不了的方块时，该说的还是要说。
+         */
+        private void reportUnremovable(ServerLevel level, BlockPos pos, BlockState state,
+                                       String reason, String translationKey) {
+            ResourceLocation id = ForgeRegistries.BLOCKS.getKey(state.getBlock());
+            if (id == null || !toolWarned.add(id)) {
+                return;
+            }
+            // 附近没人就先不说，也**别记成已经说过**——否则玩家赶回来时反而听不到。
+            // 这一条和 notifyMissingMaterials 是同一个道理
+            if (level.getNearestPlayer(maid, 16.0D) == null) {
+                toolWarned.remove(id);
+                return;
+            }
+            BlueprintMod.LOGGER.warn("女仆 {} 动不了 {}（{}）：位置留在原地不动",
+                    maid.getUUID(), id, reason);
+            sayTo(level, maid, translationKey, state.getBlock().getName());
+        }
     }
 
     private void tickFetch(ServerLevel level, EntityMaid maid) {
@@ -1117,6 +1237,8 @@ public class BlueprintBuildController {
         activeId = id;
         activeAnchor = anchor;
         activeRotation = rotation;
+        // 换了工地就重新记账：上处说过"这块我拆不动"，不代表这处也免开尊口
+        toolWarned.clear();
         standSpot = resolveStandSpot(level, anchor, schematic.getSize());
         fetchProvider = null;
         returnProvider = null;
@@ -1259,20 +1381,35 @@ public class BlueprintBuildController {
     }
 
     /**
-     * 缺料这一类提示的总闸门：**同一件事只说一次**，内容真变了才重新开口。
+     * 缺料这一类提示的总闸门：**同一种说法、同一批缺料，只说一次**。
      * <p>
-     * 三条路径都会报缺料（找不到来源、来源里没有、背包塞不下），各报各的就会"一直弹"：
-     * 她每 {@value #NO_SOURCE_COOLDOWN} tick 重试一次，30 秒的冷却一过又是一条，
-     * 而缺料往往要玩家跑一趟仓库才好——这期间屏幕上就一直刷同一件事。
-     * <p>
+     * 两条判据：
+     * <ol>
+     *   <li><b>内容指纹按说法分开记</b>。这是关键——四种说法共用一格的话，
+     *       它们会互相覆盖对方的指纹，"没变"的东西每轮都变成"新内容"，
+     *       于是无限复读（见 {@link #lastShortfall} 的注释）。</li>
+     *   <li><b>两次开口之间留 {@value #SHORTFALL_QUIET_MS} 毫秒</b>。同一次尝试里
+     *       可能有好几条路都想说话（绑定书仓库空了 + 到处都找不到），
+     *       留个间隔就只会放第一条出去，不会一口气刷两行。</li>
+     * </ol>
      * 指纹用**物品 id** 拼，不用显示名：显示名会跟着语言变，切成另一种语言就成"新内容"了。
+     * <p>
+     * 被间隔挡下的这条**不记账**：记了就等于把这件事永久封口，
+     * 等安静下来它反而再也没机会开口。
      */
     private boolean shouldReportShortfall(String kind, Map<Item, Integer> list) {
-        String signature = kind + "|" + shortfallSignature(list);
-        if (signature.equals(lastShortfallSignature)) {
+        String signature = shortfallSignature(list);
+        if (signature.equals(lastShortfall.get(kind))) {
             return false;
         }
-        lastShortfallSignature = signature;
+        long now = System.currentTimeMillis();
+        if (now - lastShortfallAt < SHORTFALL_QUIET_MS) {
+            return false;
+        }
+        lastShortfall.put(kind, signature);
+        lastShortfallAt = now;
+        // 留一行日志：以后再说"她怎么老是重复同一句"，一眼就能看出是哪条路、什么内容
+        BlueprintMod.LOGGER.info("缺料提示（{}）：{}", kind, signature);
         return true;
     }
 
