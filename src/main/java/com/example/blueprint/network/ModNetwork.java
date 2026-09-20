@@ -22,9 +22,10 @@ public class ModNetwork {
 
     // 1.5.3 改了学习池的包（设优先级 → 选做法；停用包整个删掉），协议不兼容，升到 2；
     // 1.5.4 加了施工进度包（S2CBuildProgressPacket），再升到 3；
-    // 1.6.0 加了"撤掉队列里某一张单"的包（C2SCancelCraftOrderPacket），升到 4。
+    // 1.6.0 加了"撤掉队列里某一张单"的包（C2SCancelCraftOrderPacket），升到 4；
+    // 之后进度包里多了"她此刻在干什么"（phase），包格式变了，再升到 5。
     // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
-    private static final String PROTOCOL_VERSION = "4";
+    private static final String PROTOCOL_VERSION = "5";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(BlueprintMod.MOD_ID, "main"),

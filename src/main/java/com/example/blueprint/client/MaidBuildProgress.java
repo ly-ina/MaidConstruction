@@ -5,7 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 客户端记着"哪个女仆建到哪了"，给进度条当数据源。
+ * 客户端记着"哪个女仆建到哪了、此刻在干什么"，给进度条当数据源。
  * <p>
  * 数据是服务端推来的（{@code S2CBuildProgressPacket}），只在施工期间推、而且节流。
  * 所以这里也**按时效作废**：超过 {@link #STALE_MS} 没有新进度就当这条没用了——
@@ -25,8 +25,8 @@ public final class MaidBuildProgress {
     private MaidBuildProgress() {
     }
 
-    public static void put(int maidId, int done, int total) {
-        ENTRIES.put(maidId, new Entry(done, total, System.currentTimeMillis()));
+    public static void put(int maidId, int done, int total, byte phase) {
+        ENTRIES.put(maidId, new Entry(done, total, phase, System.currentTimeMillis()));
     }
 
     /**
@@ -40,8 +40,8 @@ public final class MaidBuildProgress {
         return ENTRIES;
     }
 
-    /** 一次施工的快照：已完成多少、一共多少 */
-    public record Entry(int done, int total, long at) {
+    /** 一次施工的快照：已完成多少、一共多少、此刻在干什么 */
+    public record Entry(int done, int total, byte phase, long at) {
 
         /** 还剩多少块（不会小于 0） */
         public int left() {
@@ -51,6 +51,19 @@ public final class MaidBuildProgress {
         /** 完成度百分比 */
         public int percent() {
             return total <= 0 ? 0 : (int) Math.round(done * 100.0D / total);
+        }
+
+        /**
+         * "她在干什么"的翻译键。包、客户端都存序号，文案在客户端按玩家语言翻——
+         * 服务端要是把中文写进包，玩家切成英文也还是中文。
+         */
+        public String phaseKey() {
+            return switch (phase) {
+                case 1 -> "hud.blueprint.maid_phase.fetch";
+                case 2 -> "hud.blueprint.maid_phase.walk";
+                case 3 -> "hud.blueprint.maid_phase.stuck";
+                default -> "hud.blueprint.maid_phase.build";
+            };
         }
     }
 

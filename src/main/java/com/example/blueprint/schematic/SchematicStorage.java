@@ -3,13 +3,16 @@ package com.example.blueprint.schematic;
 import com.example.blueprint.BlueprintMod;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import javax.annotation.Nullable;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -23,6 +26,15 @@ public class SchematicStorage extends SavedData {
     private static final String NAME = BlueprintMod.MOD_ID + "_schematics";
 
     private final Map<UUID, Schematic> schematics = new LinkedHashMap<>();
+
+    /**
+     * 已经建完的"机械动力蓝图工地"（内容 + 锚点的指纹）。
+     * <p>
+     * 机械动力那张图我们只读不改（连 NBT 都不写），完工标记只能记在自己这儿。
+     * 记进存档是必要的：重启之后她得记得这处已经建过，
+     * 否则会跑过去、发现没活可干、又报一次"建好啦"。
+     */
+    private final Set<String> completed = new HashSet<>();
 
     public SchematicStorage() {
     }
@@ -47,6 +59,10 @@ public class SchematicStorage extends SavedData {
                 BlueprintMod.LOGGER.warn("跳过损坏的蓝图数据: {}", holder.getUUID("id"), e);
             }
         }
+        ListTag completedTag = tag.getList("completed", Tag.TAG_STRING);
+        for (int i = 0; i < completedTag.size(); i++) {
+            storage.completed.add(completedTag.getString(i));
+        }
         return storage;
     }
 
@@ -60,6 +76,12 @@ public class SchematicStorage extends SavedData {
             list.add(holder);
         }
         tag.put("schematics", list);
+
+        ListTag completedTag = new ListTag();
+        for (String signature : completed) {
+            completedTag.add(StringTag.valueOf(signature));
+        }
+        tag.put("completed", completedTag);
         return tag;
     }
 
@@ -85,5 +107,19 @@ public class SchematicStorage extends SavedData {
 
     public int size() {
         return schematics.size();
+    }
+
+    // ------------------------------------------------------------------
+    // 机械动力蓝图的完工标记（图本身不写，记在这里）
+    // ------------------------------------------------------------------
+
+    public boolean isCompleted(String signature) {
+        return completed.contains(signature);
+    }
+
+    public void setCompleted(String signature, boolean value) {
+        if (value ? completed.add(signature) : completed.remove(signature)) {
+            setDirty();
+        }
     }
 }

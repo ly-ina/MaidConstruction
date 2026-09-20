@@ -103,12 +103,15 @@ public class BuildProgressHud {
         }
         graphics.renderOutline(x, y, BAR_WIDTH, BAR_HEIGHT, COLOR_EDGE);
 
-        // 名字 + 还剩几块 + 百分比：只给一条光秃秃的进度条，玩家还得自己算
+        // 名字 + 还剩几块 + 百分比 + **她此刻在干什么**：只给一条光秃秃的进度条，
+        // 玩家还得自己算；而"她是在取料、在走路，还是缺料干等着"更是完全看不出来
         Component text = Component.empty()
                 .append(maid.getDisplayName())
                 .append("：")
                 .append(Component.translatable("gui.blueprint.build_progress",
-                        progress.left(), progress.percent()));
+                        progress.left(), progress.percent()))
+                .append(Component.literal(" · "))
+                .append(Component.translatable(progress.phaseKey()));
         graphics.drawString(mc.font, text,
                 centerX - mc.font.width(text) / 2, y + BAR_HEIGHT + 4, 0xFFFFFF, true);
     }

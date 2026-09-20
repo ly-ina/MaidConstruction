@@ -166,6 +166,8 @@ public class BlueprintBuildController {
      * 不叫 moveTicks：那个名字已经被"走向某个目标"那套逻辑用了，两处语义不同，别混。
      */
     private int spotSearchTicks = 0;
+    /** 诊断日志的节拍：每 100 tick（约 5 秒）写一行"她卡在哪"，见 {@code tick} */
+    private int debugTicks = 0;
     /** 这一趟要去取料的来源。可能是身边的箱子，也可能是绑定书指定的远程仓库 */
     private ItemProvider fetchProvider;
     /** 完工后正在使用的还料目标 */
@@ -215,12 +217,12 @@ public class BlueprintBuildController {
             notify(level, maid, "message.blueprint.maid_forbidden");
             return;
         }
-        if (!BlueprintItem.hasSchematic(stack)) {
+        if (!MaidBlueprint.hasSchematic(stack)) {
             setWorkingHomeMode(maid, false);
             notify(level, maid, "message.blueprint.maid_empty_blueprint");
             return;
         }
-        if (!BlueprintItem.hasAnchor(stack)) {
+        if (!MaidBlueprint.hasAnchor(stack)) {
             setWorkingHomeMode(maid, false);
             notify(level, maid, "message.blueprint.maid_no_anchor");
             return;
@@ -229,7 +231,13 @@ public class BlueprintBuildController {
         refreshSession(level, maid, stack);
         if (session == null) {
             setWorkingHomeMode(maid, false);
-            notify(level, maid, "message.blueprint.maid_no_schematic");
+            // 机械动力那张读不出来时把原因说清楚：光一句"找不到结构"，
+            // 玩家没法动手改（文件名没写？文件没上传？还是文件坏了？）
+            if (MaidBlueprint.isCreate(stack)) {
+                notify(level, maid, "message.blueprint.maid_create_unreadable", MaidBlueprint.problem());
+            } else {
+                notify(level, maid, "message.blueprint.maid_no_schematic");
+            }
             return;
         }
         if (session.isFinished()) {
@@ -247,23 +255,37 @@ public class BlueprintBuildController {
         // 蓝图自己已经标着"完工"，那就别再往工地跑了。
         // 少了这一条，工地上的方块只要被拆掉几块，session 就不再是 finished，
         // 女仆会颠颠地跑过去补，补完又不满、不满又去……看起来就是没完没了地来回跑
-        if (BlueprintItem.isCompleted(stack)) {
+        if (MaidBlueprint.isCompleted(level, stack)) {
             setWorkingHomeMode(maid, false);
             return;
         }
 
         // 施工期间钉在岗位上，别往主人那边跑
         setWorkingHomeMode(maid, true);
+
+        // 每 5 秒把"她现在到底卡在哪一步"写一行日志。
+        // 大结构上出问题时（站着不动、来回跑），光看现象猜不出来是哪个环节——
+        // 这一行能直接看出是状态没切、还是进度不动、还是站位到不了、还是在等取料
+        if (++debugTicks >= 100) {
+            debugTicks = 0;
+            BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 状态={} 进度 {}/{} 站位={} 下一块={} 取料={} 冷却={} 站位计时={}",
+                    maid.getUUID(), state, session.done(), session.total(), standSpot,
+                    session.peekNextTarget(level, activeAnchor),
+                    fetchProvider == null ? "无" : fetchProvider.getClass().getSimpleName(),
+                    cooldown, spotSearchTicks);
+        }
         // 这里不能清完工标记：重扫后 session 是刚重建的，还没走过一遍，
         // isFinished() 自然是 false，此时清标记会导致每次重扫都重新播报一遍"施工完毕"。
         // 只在真的放下方块时才清（见 tickBuild）。
         //
         // 施工期间定期重扫：session 的游标只往前走，已经放好的方块要是被人拆了，
         // 光靠顺序推进是发现不了的，得从头再扫一遍才能补上。
-        if (--rescanTimer <= 0) {
-            rescanTimer = RESCAN_INTERVAL;
-            rescan(level);
-        }
+        // 这里以前每 RESCAN_INTERVAL tick 就重扫一次（重建会话、从头比对世界）。
+        // 那个做法有两个毛病：**她放几块就被打断一次重头比对**，而且每几秒就要
+        // 重新判定一遍"哪些放不下"——玩家看到的就是"隔一会儿又检测一次、又念一遍"。
+        // 改成：**一趟从头放到尾**，放完了由 BuildSession 自己收尾（isFinished），
+        // 缺料当场停在那一块上、放不下的进 deferred 到最后一起交代。
+        // 工地中途被人拆了几块怎么办：重新定位或改朝向会清掉完工标记，她会从头再走一遍。
         if (session == null) {
             setWorkingHomeMode(maid, false);
             notify(level, maid, "message.blueprint.maid_no_schematic");
@@ -410,12 +432,15 @@ public class BlueprintBuildController {
         // （见 BuildSession.step：缺料当场停在那一块上，不会扫到队尾）
         int leftover = session == null ? 0 : session.remaining();
         // 完工标记写在蓝图上，所以"施工完毕"只会播报一次
-        if (!BlueprintItem.isCompleted(stack)) {
-            BlueprintItem.setCompleted(stack, true);
+        if (!MaidBlueprint.isCompleted(level, stack)) {
+            MaidBlueprint.setCompleted(level, stack, true);
             if (leftover > 0) {
                 BlueprintMod.LOGGER.info("女仆 {} 完工，但有 {} 块放不下（缺支撑或位置被占）",
                         maid.getUUID(), leftover);
                 notify(level, maid, "message.blueprint.maid_build_leftover", leftover);
+                // 紧跟一句"挡路的是什么、在哪"。这里不走 notify：那条路上的 30 秒冷却
+                // 会把第二句直接吞掉，而这两句本来是一起说的
+                sayTo(level, maid, "message.blueprint.maid_blocked_list", describeBlocked(maid));
             } else {
                 notify(level, maid, "message.blueprint.maid_build_done");
             }
@@ -465,6 +490,20 @@ public class BlueprintBuildController {
         }
         int done = session.done();
         int total = session.total();
+
+        // 她此刻在干什么。这个字段是给进度条上那行字用的：
+        // 玩家最需要的不是"建到几成"，而是"她这会儿是在取料、在走路，还是在发呆"
+        byte phase;
+        if (state == State.FETCH) {
+            phase = S2CBuildProgressPacket.PHASE_FETCH;
+        } else if (state == State.MOVE_TO_SPOT) {
+            phase = S2CBuildProgressPacket.PHASE_WALK;
+        } else if (!shortfall.isEmpty() && fetchProvider == null) {
+            // 缺料、又没处可去（没找到来源）：这就是"发呆"的实情
+            phase = S2CBuildProgressPacket.PHASE_STUCK;
+        } else {
+            phase = S2CBuildProgressPacket.PHASE_BUILD;
+        }
         double radius = BlueprintConfig.progressRadius() + PROGRESS_RADIUS_MARGIN;
         double radiusSqr = radius * radius;
         double x = maid.getX();
@@ -475,7 +514,7 @@ public class BlueprintBuildController {
                 continue;
             }
             ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                    new S2CBuildProgressPacket(maid.getId(), done, total));
+                    new S2CBuildProgressPacket(maid.getId(), done, total, phase));
         }
     }
 
@@ -486,9 +525,9 @@ public class BlueprintBuildController {
         }
 
         InteractionHand hand;
-        if (maid.getMainHandItem().getItem() instanceof BlueprintItem) {
+        if (MaidBlueprint.isBlueprint(maid.getMainHandItem())) {
             hand = InteractionHand.MAIN_HAND;
-        } else if (maid.getOffhandItem().getItem() instanceof BlueprintItem) {
+        } else if (MaidBlueprint.isBlueprint(maid.getOffhandItem())) {
             hand = InteractionHand.OFF_HAND;
         } else {
             // 已经在背包里了，不用动
@@ -662,8 +701,8 @@ public class BlueprintBuildController {
 
         if (result.placed() > 0) {
             // 真的动工了，说明这处工地还没完工
-            if (BlueprintItem.isCompleted(stack)) {
-                BlueprintItem.setCompleted(stack, false);
+            if (MaidBlueprint.isCompleted(level, stack)) {
+                MaidBlueprint.setCompleted(level, stack, false);
             }
             // 挥手 + 这个方块的放置音效
             maid.swing(InteractionHand.MAIN_HAND);
@@ -693,10 +732,10 @@ public class BlueprintBuildController {
                 ? pendingBill
                 : ItemProvider.missingAmounts(backpack, pendingBill);
         if (shortfall.isEmpty()) {
-            // 眼下什么都不缺了：之前那几句"缺东西"就此销账。
-            // 不销的话，等到下次真的再缺同一样（用掉了、被人拿走了），
-            // 她会因为"这句说过了"而永远闭嘴——那是另一种难查
-            lastShortfall.clear();
+            // 眼下什么都不缺了。**这里不再销账**：
+            // 销了的话，她取到一点料、清单短暂变空、再缺同一批，就会**再说一遍**——
+            // 玩家看到的就是同一句"背包不下还缺的材料"反复刷屏。
+            // 账留到**换工地**时才清（见 refreshSession），也就是"一处工地同一批缺料只说一次"
             cooldown = NO_SOURCE_COOLDOWN;
             return;
         }
@@ -719,11 +758,13 @@ public class BlueprintBuildController {
     // ------------------------------------------------------------------
 
     /**
-     * 拆下来的东西去哪：**她自己的背包 → 身上的无线终端 → 脚边地上**。
+     * 拆下来的东西去哪：**身上的无线终端 → 她自己的背包 → 脚边地上**。
      * <p>
-     * 顺序是有讲究的：背包最省事，先试；装不下才去找终端——那一步要解析 ME 网络，
-     * 比塞背包贵得多，只在真的需要时才走；两边都不收，就丢在她脚边。
-     * 满地是东西总比凭空消失强。
+     * 顺序是有讲究的：回收物**先回仓库**（终端等于仓库）。背包很小，
+     * 先塞背包的话几趟就满了，而背包一满**取料也进不来**——
+     * 就是"缺料 → 背包放不下 → 取不到料"那个死循环。
+     * 终端收不下（没链接网络、网络满、物品被禁入）才落到背包；
+     * 两边都不收，就丢在她脚边：满地是东西总比凭空消失强。
      * <p>
      * 每次施工现造一个这种薄对象（控制器是每 tick 拿到女仆的，它得记住是哪一只），
      * 代价可以忽略。
@@ -741,25 +782,29 @@ public class BlueprintBuildController {
             if (stack.isEmpty()) {
                 return;
             }
-            // 1）背包。insertItemStacked 会把塞不下的原样还回来，
-            //    那部分正好是下一站要接着收的
+            // 1）**先给终端**（等于直接放回仓库）。
+            //    背包很小，施工时拆下来的东西几趟就把它塞满；一塞满，
+            //    取料也进不来——于是"缺料 → 背包放不下 → 取不到料"的死循环。
+            //    回收物本来就该回仓库，没道理占着她的背包
             ItemStack rest = stack;
-            IItemHandler backpack = new MaidItemSource(maid).getBackpack();
-            if (backpack != null) {
-                rest = ItemHandlerHelper.insertItemStacked(backpack, stack, false);
-            }
-            if (rest.isEmpty()) {
-                return;
-            }
-
-            // 2）她饰品栏里那台无线终端（等于放回仓库）。
-            //    这一步要顺着终端解析网络，贵，所以放在背包之后
             ItemProvider terminal = findWirelessProvider(level, maid);
             if (terminal != null) {
                 int accepted = terminal.deposit(rest);
                 if (accepted > 0) {
                     rest = rest.copyWithCount(rest.getCount() - accepted);
                 }
+            } else {
+                BlueprintMod.LOGGER.debug("女仆 {} 身上没有可用的无线终端，拆下来的东西先放背包", maid.getUUID());
+            }
+            if (rest.isEmpty()) {
+                return;
+            }
+
+            // 2）终端收不下（没链接网络、网络满了、物品被禁入）才落到背包。
+            //    insertItemStacked 会把塞不下的原样还回来，那部分正好是下一站要接着收的
+            IItemHandler backpack = new MaidItemSource(maid).getBackpack();
+            if (backpack != null) {
+                rest = ItemHandlerHelper.insertItemStacked(backpack, rest, false);
             }
             if (rest.isEmpty()) {
                 return;
@@ -1317,9 +1362,9 @@ public class BlueprintBuildController {
     // ------------------------------------------------------------------
 
     private void refreshSession(ServerLevel level, EntityMaid maid, ItemStack stack) {
-        UUID id = BlueprintItem.getSchematicId(stack);
-        BlockPos anchor = BlueprintItem.getAnchor(stack);
-        Rotation rotation = BlueprintItem.getRotation(stack);
+        UUID id = MaidBlueprint.id(stack);
+        BlockPos anchor = MaidBlueprint.anchor(stack);
+        Rotation rotation = MaidBlueprint.rotation(stack);
 
         if (id == null || anchor == null) {
             return;
@@ -1330,7 +1375,8 @@ public class BlueprintBuildController {
             return;
         }
 
-        Schematic base = SchematicStorage.get(level).get(id);
+        // 我们的蓝图从蓝图库取；机械动力那张是现翻的（翻好按内容缓存，不是每 tick 重来）
+        Schematic base = MaidBlueprint.schematic(level, stack);
         if (base == null) {
             return;
         }
@@ -1343,8 +1389,18 @@ public class BlueprintBuildController {
         activeId = id;
         activeAnchor = anchor;
         activeRotation = rotation;
-        // 换了工地就重新记账：上处说过"这块我拆不动"，不代表这处也免开尊口
-        toolWarned.clear();
+        // **换了工地**才重新记账：上处说过"这块我拆不动"，不代表这处也免开尊口。
+        // 同一处工地反复重建会话（重扫、进度重建）**不算换工地**——
+        // 以前这里无条件清账，于是每隔几秒的重扫都把"说过了"重置一遍，
+        // 同一块基岩就被她一遍遍地念叨
+        if (!Objects.equals(id, activeId)
+                || !Objects.equals(anchor, activeAnchor)
+                || rotation != activeRotation) {
+            toolWarned.clear();
+            // 缺料那几句也一起销账：换了工地、换了图，该说的重新说
+            lastShortfall.clear();
+            lastShortfallAt = 0L;
+        }
         standSpot = resolveStandSpot(level, anchor, schematic.getSize());
         spotSearchTicks = 0; // 换了工地，找站位的耐心重新算
         fetchProvider = null;
@@ -1363,19 +1419,21 @@ public class BlueprintBuildController {
      * 万一身上全是完工的，就随便返回一张，好让上层把"施工完毕"播报出去。
      */
     private static ItemStack findBlueprint(EntityMaid maid) {
+        // 完工标记（机械动力那张记在存档里）要问世界，所以这里得有 ServerLevel
+        ServerLevel level = maid.level() instanceof ServerLevel server ? server : null;
         ItemStack finished = null;
 
         ItemStack mainHand = maid.getMainHandItem();
-        if (mainHand.getItem() instanceof BlueprintItem) {
-            if (!BlueprintItem.isCompleted(mainHand)) {
+        if (MaidBlueprint.usable(mainHand)) {
+            if (level == null || !MaidBlueprint.isCompleted(level, mainHand)) {
                 return mainHand;
             }
             finished = mainHand;
         }
 
         ItemStack offHand = maid.getOffhandItem();
-        if (offHand.getItem() instanceof BlueprintItem) {
-            if (!BlueprintItem.isCompleted(offHand)) {
+        if (MaidBlueprint.usable(offHand)) {
+            if (level == null || !MaidBlueprint.isCompleted(level, offHand)) {
                 return offHand;
             }
             if (finished == null) {
@@ -1387,10 +1445,10 @@ public class BlueprintBuildController {
         if (backpack != null) {
             for (int i = 0; i < backpack.getSlots(); i++) {
                 ItemStack stack = backpack.getStackInSlot(i);
-                if (!(stack.getItem() instanceof BlueprintItem)) {
+                if (!MaidBlueprint.usable(stack)) {
                     continue;
                 }
-                if (!BlueprintItem.isCompleted(stack)) {
+                if (level == null || !MaidBlueprint.isCompleted(level, stack)) {
                     return stack;
                 }
                 if (finished == null) {
@@ -1520,11 +1578,18 @@ public class BlueprintBuildController {
         return true;
     }
 
-    /** 缺料清单的内容指纹：物品 id 加数量，跟语言无关；排过序，同一批料每次都拼成一样 */
+    /**
+     * 缺料清单的内容指纹：**只看缺哪几样，不看各缺多少**，跟语言无关；排过序，同一批料每次都拼成一样。
+     * <p>
+     * 数量**必须**排除掉：她一边施工一边取料，每样缺的数量几乎每一趟都在变
+     * （红砖块 3712 → 3700 → …），把数量算进指纹，同一批缺料每一趟都成了"新内容"，
+     * 于是同一句话反复刷屏——"只提示一遍"就是这么被破坏的。
+     * 换了缺的**种类**才算新情况，那时候本来就该再说一次。
+     */
     private static String shortfallSignature(Map<Item, Integer> list) {
         List<String> parts = new ArrayList<>(list.size());
-        for (Map.Entry<Item, Integer> entry : list.entrySet()) {
-            parts.add(ForgeRegistries.ITEMS.getKey(entry.getKey()) + "x" + entry.getValue());
+        for (Item item : list.keySet()) {
+            parts.add(String.valueOf(ForgeRegistries.ITEMS.getKey(item)));
         }
         parts.sort(null);
         return String.join(";", parts);
@@ -1575,4 +1640,40 @@ public class BlueprintBuildController {
         }
         return list;
     }
+
+    /**
+     * "还有哪几块放不下、被什么占着、在哪"。
+     * <p>
+     * 光说一句"还有 3 块放不下"，玩家得自己满工地找；把**方块名和坐标**说出来，
+     * 就能直接过去处理（挖掉、补支撑）。位置上是空气的说明是**缺支撑**，
+     * 不是被占——那两种情况修法完全不同，所以分开说。
+     */
+    private Component describeBlocked(EntityMaid maid) {
+        List<Schematic.BlockEntry> leftovers = session == null ? List.of() : session.leftovers();
+        MutableComponent list = Component.empty();
+        int shown = 0;
+        for (Schematic.BlockEntry entry : leftovers) {
+            if (shown >= MAX_BLOCKED_REPORTED) {
+                break;
+            }
+            BlockPos world = activeAnchor.offset(entry.pos());
+            BlockState here = maid.level().getBlockState(world);
+            if (shown > 0) {
+                list.append(Component.literal("、"));
+            }
+            list.append(here.isAir()
+                    ? Component.translatable("message.blueprint.blocked_no_support")
+                    : here.getBlock().getName());
+            list.append(Component.literal(" (" + world.getX() + ", " + world.getY() + ", " + world.getZ() + ")"));
+            shown++;
+        }
+        if (leftovers.size() > shown) {
+            // 只说前几个，剩下的报个数——坐标一串太长，聊天框会刷满
+            list.append(Component.literal("、" + (leftovers.size() - shown) + "…"));
+        }
+        return list;
+    }
+
+    /** 报坐标时最多列几处（其余只报个数） */
+    private static final int MAX_BLOCKED_REPORTED = 3;
 }
