@@ -3,6 +3,7 @@ package com.example.blueprint.build;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.schematic.Schematic;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.Item;
@@ -285,7 +286,14 @@ public class BuildSession {
             if (entry.blockEntity() != null) {
                 BlockEntity blockEntity = level.getBlockEntity(world);
                 if (blockEntity != null) {
-                    blockEntity.load(entry.blockEntity());
+                    // **放下去的时候才剔掉容器里的物品。**
+                    // 录的时候必须照实记（材料判定要用那份 NBT），
+                    // 但要是在放下去时把物品照装，就成了**凭空复制**：
+                    // 录一台装好样板的样板供应器，放下就多出一套样板。
+                    // 所以：录得全，放得空——机器的配置照旧，容器是空的
+                    CompoundTag clean = entry.blockEntity().copy();
+                    Schematic.stripContainerItems(clean);
+                    blockEntity.load(clean);
                     blockEntity.setChanged();
                 }
             }

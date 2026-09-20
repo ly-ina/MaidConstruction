@@ -1,5 +1,6 @@
 package com.example.blueprint.schematic;
 
+import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.build.BlockEntityRotationResolver;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -117,6 +118,11 @@ public final class Schematic {
 
                     BlockEntity blockEntity = level.getBlockEntity(cursor);
                     if (blockEntity != null) {
+                        // **这里照实录，一个键都不删。**
+                        // 原因：材料判定（BlockMaterialResolver）要靠这份 NBT 才知道
+                        // "这个位置需要哪些物品"——AE2 线缆要的是贴在面上的部件、机器要的是它自己，
+                        // 录的时候就剔掉，她会直接"找不到材料"。
+                        // 防复制挪到**放置**那一步去剔（见 BuildSession.step）
                         blockEntities.put(index, blockEntity.saveWithoutMetadata());
                     }
                 }
@@ -124,6 +130,63 @@ public final class Schematic {
         }
 
         return new Schematic(size, palette, blocks, blockEntities);
+    }
+
+    /**
+     * 剔掉方块实体 NBT 里的**物品库存**，只留配置（朝向、频道、优先级这些）。
+     * <p>
+     * 混合两套判据，缺一不可：
+     * <ul>
+     *   <li><b>已知键</b>：原版容器的 {@code Items}、AE2 的 {@code inv} 与发送清单……
+     *       这些名字是确定的，直接删最稳；</li>
+     *   <li><b>形状兜底</b>：任何"元素是物品栈形状（{@code id} + {@code Count}）的列表"
+     *       都删掉——别的模组各有各的键名，认名字认不全，认形状才兜得住。</li>
+     * </ul>
+     * 为什么非要剔：录制是"记结构"，容器里的东西不属于结构。
+     * 原样录下来的话，放下去就是**凭空复制**（样板、磁盘、整箱材料都会翻倍），
+     * 那是漏洞不是功能。
+     */
+    public static void stripContainerItems(CompoundTag tag) {
+        for (String key : ITEM_INVENTORY_KEYS) {
+            tag.remove(key);
+        }
+        List<String> extra = new ArrayList<>();
+        for (String key : tag.getAllKeys()) {
+            if (looksLikeItemList(tag.get(key))) {
+                extra.add(key);
+            }
+        }
+        extra.forEach(tag::remove);
+        if (!extra.isEmpty()) {
+            // 删了哪些键写一行：哪台机器的配置被误删，从这里就能看出是哪个键名
+            BlueprintMod.LOGGER.debug("录制剔掉容器物品：{}", extra);
+        }
+    }
+
+    /** 各模组放物品列表常用的键名（认得出就先删，剩下的交给形状判断） */
+    private static final String[] ITEM_INVENTORY_KEYS = {
+            "Items", "items", "inv", "inventory", "Inventory", "sendList", "send_list", "buffer"
+    };
+
+    /** 这个标签看起来是不是"一串物品栈"：元素带 {@code id} 又有 {@code Count}/{@code count} */
+    private static boolean looksLikeItemList(Tag value) {
+        if (!(value instanceof ListTag list) || list.isEmpty()) {
+            return false;
+        }
+        int checked = Math.min(list.size(), 4);
+        for (int i = 0; i < checked; i++) {
+            if (!(list.get(i) instanceof CompoundTag entry)) {
+                return false;
+            }
+            boolean hasId = entry.contains("id", Tag.TAG_STRING) || entry.contains("id", Tag.TAG_INT)
+                    || entry.contains("item", Tag.TAG_STRING);
+            boolean hasCount = entry.contains("Count", Tag.TAG_ANY_NUMERIC)
+                    || entry.contains("count", Tag.TAG_ANY_NUMERIC);
+            if (!(hasId && hasCount)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ------------------------------------------------------------------

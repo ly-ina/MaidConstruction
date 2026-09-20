@@ -403,6 +403,8 @@ public final class CreateSchematic {
                 copy.remove("x");
                 copy.remove("y");
                 copy.remove("z");
+                // 这里**照实搬**（别剔）：材料判定要用这份 NBT。
+                // 防复制在放置那一步做（见 BuildSession.step）
                 blockEntities.put(index, copy);
             }
         }
