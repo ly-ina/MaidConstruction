@@ -14,11 +14,13 @@ import com.example.blueprint.network.packet.S2CBuildProgressPacket;
 import com.example.blueprint.schematic.Schematic;
 import com.example.blueprint.schematic.SchematicStorage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.SchedulePos;
 import com.github.tartaricacid.touhoulittlemaid.inventory.handler.BaubleItemHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
@@ -66,8 +68,20 @@ public class BlueprintBuildController {
     private static final int PLACE_COOLDOWN = 4;
     private static final int FETCH_COOLDOWN = 20;
     private static final int NO_SOURCE_COOLDOWN = 100;
-    /** 走到站位多近算到岗 */
-    private static final double ARRIVE_DISTANCE_SQR = 4.0D;
+    /**
+     * 走到站位多近算到岗（只算水平，垂直另算）。
+     * <p>
+     * 特意定得比寻路的收敛精度宽松：寻路常常在离目标两三格的地方就停下。
+     * 死守"两格内"的话，取料回来、或者走到大结构外圈的站位时，
+     * 她永远算"没到岗"——BUILD 一进去又被判成"离岗"打回 MOVE_TO_SPOT，
+     * 两个状态每 tick 互踢，看上去就是站在那儿一圈一圈地找路、死活不放方块。
+     * 施工本来就没有距离限制（见类注释），站得宽松点没有任何坏处。
+     */
+    private static final double ARRIVE_DISTANCE_SQR = 12.25D;
+    /** 到岗的垂直容差：站在同一层附近就行，不必踩在同一格高度 */
+    private static final double ARRIVE_DY = 2.5D;
+    /** 找站位最多找多久（tick）：找太久就放弃站位、就地开工，见 {@link #tickMoveToSpot} */
+    private static final int MOVE_PATIENCE_TICKS = 150;
     /** 站位离结构最外围一圈往外留几格 */
     private static final int STAND_MARGIN = 2;
     /** 偏离站位超过这么远就算被别的 AI 拽走了，得回岗位 */
@@ -147,6 +161,11 @@ public class BlueprintBuildController {
     private State state = State.MOVE_TO_SPOT;
     /** 女仆的施工站位，站定后不再挪窝 */
     private BlockPos standSpot;
+    /**
+     * 找这个站位已经找了多少 tick（见 {@link #MOVE_PATIENCE_TICKS}）。
+     * 不叫 moveTicks：那个名字已经被"走向某个目标"那套逻辑用了，两处语义不同，别混。
+     */
+    private int spotSearchTicks = 0;
     /** 这一趟要去取料的来源。可能是身边的箱子，也可能是绑定书指定的远程仓库 */
     private ItemProvider fetchProvider;
     /** 完工后正在使用的还料目标 */
@@ -270,34 +289,85 @@ public class BlueprintBuildController {
         }
     }
 
+    /** 开工前那份作息坐标的备份：收工时原样还回去 */
+    private static final String SCHEDULE_BACKUP_TAG = "BlueprintScheduleBackup";
+
     /**
-     * 施工期间开启待命模式，完工后还原。
+     * 施工期间把她的**工作区钉到蓝图坐标上**，收工再原样还回去。
      * <p>
-     * 车万女仆的 MaidFollowOwnerTask 会在离主人太远时把女仆拽回去，
-     * 甚至直接传送走——而它内部会先判断 isHomeModeEnable()。
-     * 所以施工时开着待命，她就不会中途跑掉；
-     * 完工后关掉，她立刻恢复跟随（离得远的话 TLM 会自己把她传送回主人身边）。
-     * <p>
-     * 这里会记住开工前的原始状态，不会把玩家自己设的待命给覆盖掉。
+     * 车万女仆的待命模式是拿**作息坐标**当"家"的（{@link SchedulePos} 里的工作/待机/睡觉三个点，
+     * 女仆本身并没有单独的"家"坐标）。所以：
+     * <ul>
+     *   <li>待命开着 → {@code MaidFollowOwnerTask} 不会把她拽回主人身边（她要"在家"）；</li>
+     *   <li>再把工作区和待机点设成**蓝图锚点** → 她这个"家"正好就是工地。
+     *       原来那份坐标（主人家里、别的基地）跟她这会儿干的活没关系，
+     *       "跑远取料却被传送回去"就是它造成的；</li>
+     *   <li>收工/换工作时把备份的三个坐标和"已配置"标记**原样还原**，
+     *       玩家自己设的作息一个字节都不改。</li>
+     * </ul>
      */
     private void setWorkingHomeMode(EntityMaid maid, boolean working) {
         CompoundTag data = maid.getPersistentData();
+        SchedulePos schedule = maid.getSchedulePos();
         if (working) {
+            if (schedule == null) {
+                return;
+            }
             if (!data.contains(HOME_MODE_TAG)) {
                 data.putBoolean(HOME_MODE_TAG, maid.isHomeModeEnable());
-                BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 开工，记下原本的待命状态 = {}",
-                        maid.getUUID(), data.getBoolean(HOME_MODE_TAG));
+                data.put(SCHEDULE_BACKUP_TAG, backupSchedule(schedule));
+                BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 开工：记下待命状态 = {}，"
+                                + "作息坐标 工作={} 待机={}（维度 {}）",
+                        maid.getUUID(), data.getBoolean(HOME_MODE_TAG),
+                        schedule.getWorkPos(), schedule.getIdlePos(), schedule.getDimension());
+            }
+            if (activeAnchor != null) {
+                // 钉到蓝图坐标：她要待的地方就是工地
+                schedule.setWorkPos(activeAnchor);
+                schedule.setIdlePos(activeAnchor);
+                schedule.setDimension(maid.level().dimension().location());
+                schedule.setConfigured(true);
             }
             if (!maid.isHomeModeEnable()) {
                 maid.setHomeModeEnable(true);
             }
-        } else if (data.contains(HOME_MODE_TAG)) {
+            return;
+        }
+
+        if (schedule != null && data.contains(SCHEDULE_BACKUP_TAG)) {
+            restoreSchedule(schedule, data.getCompound(SCHEDULE_BACKUP_TAG));
+            data.remove(SCHEDULE_BACKUP_TAG);
+        }
+        if (data.contains(HOME_MODE_TAG)) {
             boolean original = data.getBoolean(HOME_MODE_TAG);
             data.remove(HOME_MODE_TAG);
-            BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 收工，待命状态还原为 {}",
+            BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 收工：待命状态还原为 {}，作息坐标已还原",
                     maid.getUUID(), original);
             maid.setHomeModeEnable(original);
         }
+    }
+
+    /** 备份她那份作息坐标，收工时原样还回去 */
+    private static CompoundTag backupSchedule(SchedulePos schedule) {
+        CompoundTag backup = new CompoundTag();
+        backup.put("work", NbtUtils.writeBlockPos(schedule.getWorkPos()));
+        backup.put("idle", NbtUtils.writeBlockPos(schedule.getIdlePos()));
+        backup.put("sleep", NbtUtils.writeBlockPos(schedule.getSleepPos()));
+        ResourceLocation dimension = schedule.getDimension();
+        backup.putString("dim", dimension == null ? "" : dimension.toString());
+        backup.putBoolean("configured", schedule.isConfigured());
+        return backup;
+    }
+
+    private static void restoreSchedule(SchedulePos schedule, CompoundTag backup) {
+        schedule.setWorkPos(NbtUtils.readBlockPos(backup.getCompound("work")));
+        schedule.setIdlePos(NbtUtils.readBlockPos(backup.getCompound("idle")));
+        schedule.setSleepPos(NbtUtils.readBlockPos(backup.getCompound("sleep")));
+        ResourceLocation dimension = ResourceLocation.tryParse(backup.getString("dim"));
+        if (dimension != null) {
+            schedule.setDimension(dimension);
+        }
+        schedule.setConfigured(backup.getBoolean("configured"));
     }
 
     private void reset() {
@@ -313,6 +383,7 @@ public class BlueprintBuildController {
         returnTicks = 0;
         moveTarget = null;
         standSpot = null;
+        spotSearchTicks = 0;
         state = State.MOVE_TO_SPOT;
         cooldown = 0;
         rescanTimer = RESCAN_INTERVAL;
@@ -472,13 +543,32 @@ public class BlueprintBuildController {
         double y = standSpot.getY();
         double z = standSpot.getZ() + 0.5D;
 
-        if (maid.distanceToSqr(x, y, z) <= ARRIVE_DISTANCE_SQR) {
+        double dx = maid.getX() - x;
+        double dz = maid.getZ() - z;
+        if (dx * dx + dz * dz <= ARRIVE_DISTANCE_SQR && Math.abs(maid.getY() - y) <= ARRIVE_DY) {
+            spotSearchTicks = 0;
+            state = State.BUILD;
+            return;
+        }
+
+        // 找了太久还没到岗：多半是这个站位寻路到不了（取料回来时尤其常见——
+        // 她停下的地方离站位就差那么两三格，寻路却再不肯往前）。
+        // 施工本来就没有距离限制，站着不动照样能建，
+        // 所以干脆放弃站位就地开工，好过在这儿一圈圈地转
+        if (++spotSearchTicks > MOVE_PATIENCE_TICKS) {
+            BlueprintMod.LOGGER.info("女仆 {} 找了 {} tick 还没走到站位 {}，就地开工",
+                    maid.getUUID(), spotSearchTicks, standSpot);
+            spotSearchTicks = 0;
+            // 置空很关键：tickBuild 里还有一条"离站位 8 格以上就回岗位"，
+            // 不清掉的话她刚开工又会被踢回来，还是互踢
+            standSpot = null;
             state = State.BUILD;
             return;
         }
 
         if (!moveTowards(level, maid, x, y, z)) {
             // 到不了站位也无所谓，站着不动照样能建
+            spotSearchTicks = 0;
             state = State.BUILD;
         }
     }
@@ -1152,6 +1242,13 @@ public class BlueprintBuildController {
      */
     @Nullable
     private ItemProvider findReturnTarget(ServerLevel level, EntityMaid maid) {
+        // 身上带着无线终端就先还回网络：不用走动，也就不会出现"附近找不到能收的容器"。
+        // 她本来就是从这儿取的料，还回来天经地义
+        ItemProvider wireless = findWirelessProvider(level, maid);
+        if (wireless != null) {
+            BlueprintMod.LOGGER.info("女仆 {} 把剩余材料还回身上的无线终端所连的网络", maid.getUUID());
+            return wireless;
+        }
         ItemProvider bound = createBoundProvider(level, maid);
         return bound != null ? bound : findNearbyAcceptor(level, maid);
     }
@@ -1249,6 +1346,7 @@ public class BlueprintBuildController {
         // 换了工地就重新记账：上处说过"这块我拆不动"，不代表这处也免开尊口
         toolWarned.clear();
         standSpot = resolveStandSpot(level, anchor, schematic.getSize());
+        spotSearchTicks = 0; // 换了工地，找站位的耐心重新算
         fetchProvider = null;
         returnProvider = null;
         returnFinished = false;

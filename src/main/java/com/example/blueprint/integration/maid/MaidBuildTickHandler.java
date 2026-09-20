@@ -35,6 +35,15 @@ public class MaidBuildTickHandler {
     /** 每只女仆上次说这句话的时间 */
     private static final Map<UUID, Long> LAST_OFF_DUTY = new HashMap<>();
 
+    /** 施工驱动连续抛异常的次数（成功一 tick 就清掉） */
+    private static final Map<UUID, Integer> FAIL_COUNT = new HashMap<>();
+    /** 每只女仆上次把异常写进日志的时间，见 {@link #FAIL_LOG_COOLDOWN_MS} */
+    private static final Map<UUID, Long> FAIL_LOGGED_AT = new HashMap<>();
+    /** 同一只女仆的报错日志最小间隔（半分钟）：她每 tick 都在试同一块，不节流就是刷屏 */
+    private static final long FAIL_LOG_COOLDOWN_MS = 30_000L;
+    /** 连续错这么多次就停她的工：同一处反复炸，一直试只是白刷日志 */
+    private static final int MAX_CONSECUTIVE_FAILURES = 20;
+
     @SubscribeEvent
     public static void onLevelTick(TickEvent.LevelTickEvent event) {
         if (event.phase != TickEvent.Phase.END || !(event.level instanceof ServerLevel level)) {
@@ -61,8 +70,19 @@ public class MaidBuildTickHandler {
                 warnOffDuty(level, maid);
                 continue;
             }
-            CONTROLLERS.computeIfAbsent(maid.getId(), id -> new BlueprintBuildController())
-                    .tick(level, maid);
+            BlueprintBuildController controller =
+                    CONTROLLERS.computeIfAbsent(maid.getId(), id -> new BlueprintBuildController());
+            try {
+                controller.tick(level, maid);
+                // 这一 tick 平安无事：把"连续出错"的账销掉
+                FAIL_COUNT.remove(maid.getUUID());
+            } catch (Throwable t) {
+                // 施工是**直接改世界**的：setBlock、方块实体 load、战利品表……
+                // 全都有可能在别的模组手里抛异常。这里是主线程的 tick，
+                // 一炸就是整台服务器陪葬——所以每只女仆单独兜住。
+                // 兜住之后服务器照常跑，只是她这一 tick 白干（见 handleFailure）
+                handleFailure(maid, controller, t);
+            }
         }
 
         if (++tickCounter >= CLEANUP_INTERVAL) {
@@ -88,6 +108,38 @@ public class MaidBuildTickHandler {
                         + "想让她昼夜不停地建，把 config/blueprint-common.toml 里的 "
                         + "schedule.build_only_on_shift 设成 false",
                 maid.getUUID(), maid.getSchedule());
+    }
+
+    /**
+     * 施工驱动抛异常了：记一笔、节流地喊一声，连续出错太多次就先停她的工。
+     * <p>
+     * 三个考虑：
+     * <ul>
+     *   <li><b>不能让一只女仆把服务器带崩</b>——异常在这里被兜住，世界照常 tick；</li>
+     *   <li><b>日志要节流</b>：出问题的地方每 tick 都会抛（她每 tick 都试同一块），
+     *       不节流就是刷屏，把真正有用的信息淹掉；</li>
+     *   <li><b>连续出错就停工</b>：既然是同一处反复炸，一直试下去只是白刷日志，
+     *       停下来等她被人重新安排（把蓝图拿下来再放回去即可重试）。</li>
+     * </ul>
+     */
+    private static void handleFailure(EntityMaid maid, BlueprintBuildController controller, Throwable t) {
+        UUID id = maid.getUUID();
+        int fails = FAIL_COUNT.merge(id, 1, Integer::sum);
+        long now = System.currentTimeMillis();
+        Long last = FAIL_LOGGED_AT.get(id);
+        if (fails == 1 || last == null || now - last >= FAIL_LOG_COOLDOWN_MS) {
+            FAIL_LOGGED_AT.put(id, now);
+            BlueprintMod.LOGGER.error("女仆 {} 的施工驱动抛异常（累计 {} 次，已单独兜住，服务器不受影响；"
+                    + "连续 {} 次就停她的工）", id, fails, MAX_CONSECUTIVE_FAILURES, t);
+        }
+        if (fails >= MAX_CONSECUTIVE_FAILURES) {
+            FAIL_COUNT.remove(id);
+            FAIL_LOGGED_AT.remove(id);
+            CONTROLLERS.remove(maid.getId());
+            controller.detach(maid);
+            BlueprintMod.LOGGER.error("女仆 {} 连续 {} 次施工出错，先停工。"
+                    + "把手上那张蓝图拿下来再放回去，可以重新开工", id, MAX_CONSECUTIVE_FAILURES);
+        }
     }
 
     private static boolean isBuildTask(EntityMaid maid) {
