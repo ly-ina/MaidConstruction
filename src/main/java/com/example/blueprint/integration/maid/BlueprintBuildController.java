@@ -282,7 +282,7 @@ public class BlueprintBuildController {
         // 每 5 秒把"她现在到底卡在哪一步"写一行日志。
         // 大结构上出问题时（站着不动、来回跑），光看现象猜不出来是哪个环节——
         // 这一行能直接看出是状态没切、还是进度不动、还是站位到不了、还是在等取料
-        if (++debugTicks >= 100) {
+        if (++debugTicks >= 600) {
             debugTicks = 0;
             BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 状态={} 进度 {}/{} 锚点={} 图={} 站位={} 下一块={} 取料={} 冷却={} 站位计时={}",
                     maid.getUUID(), state, session.done(), session.total(), activeAnchor,

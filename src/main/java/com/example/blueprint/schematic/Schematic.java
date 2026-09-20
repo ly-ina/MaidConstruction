@@ -150,22 +150,43 @@ public final class Schematic {
         for (String key : ITEM_INVENTORY_KEYS) {
             tag.remove(key);
         }
-        List<String> extra = new ArrayList<>();
+        List<String> drop = new ArrayList<>();
+        List<CompoundTag> nested = new ArrayList<>();
         for (String key : tag.getAllKeys()) {
-            if (looksLikeItemList(tag.get(key))) {
-                extra.add(key);
+            Tag value = tag.get(key);
+            if (looksLikeItemList(value)) {
+                drop.add(key);
+                continue;
+            }
+            // **往里钻**：格雷把物品放在 ForgeCaps 里（能力序列化那一层），
+            // 只看顶层等于什么都没剔——机器里的东西照样子复制出来
+            if (value instanceof CompoundTag child) {
+                nested.add(child);
+            } else if (value instanceof ListTag list) {
+                for (Tag element : list) {
+                    if (element instanceof CompoundTag child) {
+                        nested.add(child);
+                    }
+                }
             }
         }
-        extra.forEach(tag::remove);
-        if (!extra.isEmpty()) {
-            // 删了哪些键写一行：哪台机器的配置被误删，从这里就能看出是哪个键名
-            BlueprintMod.LOGGER.debug("录制剔掉容器物品：{}", extra);
+        drop.forEach(tag::remove);
+        for (CompoundTag child : nested) {
+            stripContainerItems(child);
         }
     }
 
-    /** 各模组放物品列表常用的键名（认得出就先删，剩下的交给形状判断） */
+    /**
+     * 各模组放物品（或流体）常用的键名。这些是拿真实蓝图扫出来的，
+     * 不是照着印象列的——格雷（GregTech）与 AE2 系扩展的都在里面。
+     */
     private static final String[] ITEM_INVENTORY_KEYS = {
-            "Items", "items", "inv", "inventory", "Inventory", "sendList", "send_list", "buffer"
+            // 原版 / 通用
+            "Items", "items", "inv", "inventory", "Inventory",
+            // AE2 及其扩展（样板、发送清单、退回槽）
+            "sendList", "send_list", "buffer", "patterns", "returnInv",
+            // 格雷（GregTech）：电路槽、机器内缓冲、机器槽、流体罐
+            "circuitInventory", "internalBuffer", "machineSlot", "tank"
     };
 
     /** 这个标签看起来是不是"一串物品栈"：元素带 {@code id} 又有 {@code Count}/{@code count} */

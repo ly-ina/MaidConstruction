@@ -48,6 +48,15 @@ public final class BlockedSpotHighlighter {
     /** 一帧最多画几个框：大结构上挡路的位置可能很多，全画会掉帧 */
     private static final int MAX_BOXES = 256;
 
+    /**
+     * 结构 → 非空气方块清单的缓存。
+     * <p>
+     * {@code entries()} 每次调用都要**遍历整座结构**并新建一份列表：九千多元素的列表
+     * 每帧重建一次，帧率就是这么被吃掉的。同一张图的内容不会变，缓存住就行。
+     */
+    private static final java.util.Map<java.util.UUID, java.util.List<Schematic.BlockEntry>> ENTRY_CACHE =
+            new java.util.HashMap<>();
+
     private BlockedSpotHighlighter() {
     }
 
@@ -90,7 +99,9 @@ public final class BlockedSpotHighlighter {
             if (schematic == null) {
                 continue;
             }
-            for (Schematic.BlockEntry entry : schematic.entries()) {
+            java.util.List<Schematic.BlockEntry> entries =
+                    ENTRY_CACHE.computeIfAbsent(id, key -> java.util.List.copyOf(schematic.entries()));
+            for (Schematic.BlockEntry entry : entries) {
                 if (drawn >= MAX_BOXES) {
                     break;
                 }
