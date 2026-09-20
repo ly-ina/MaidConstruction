@@ -3,17 +3,18 @@ package com.example.blueprint.client;
 import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 客户端记着"哪个女仆建到哪了、此刻在干什么"，给进度条当数据源。
  * <p>
  * 数据是服务端推来的（{@code S2CBuildProgressPacket}），只在施工期间推、而且节流。
- * 所以这里也**按时效作废**：超过 {@link #STALE_MS} 没有新进度就当这条没用了——
- * 女仆停工、蓝图被收走、她走出推送半径，进度条都会自己消失，
- * 服务端不必再补一条"结束了"。
+ * 所以这里也**按时效作废**：超过 {@link #STALE_MS} 没有新进度就当这条没用了。
  * <p>
- * 键是**实体 id** 而不是 UUID：客户端要拿它去 {@code level.getEntity(id)} 找到她本人
- * （要按"离玩家多远"决定显不显示），实体 id 正好是干这个的。
+ * 键是**实体 id**（客户端要拿它 {@code level.getEntity(id)} 找到她本人、算离玩家多远），
+ * 但**每条里都存着她的 UUID**：实体 id 会被游戏复用，光按 id 认人会留下一条过期的进度，
+ * 看着就是"两条进度条来回覆盖"。渲染时拿 UUID 一比对，不是同一个人就当场删掉
+ * （见 {@link #removeIfNot(UUID)} 的用法）。
  */
 public final class MaidBuildProgress {
 
@@ -25,8 +26,8 @@ public final class MaidBuildProgress {
     private MaidBuildProgress() {
     }
 
-    public static void put(int maidId, int done, int total, byte phase) {
-        ENTRIES.put(maidId, new Entry(done, total, phase, System.currentTimeMillis()));
+    public static void put(int maidId, UUID maidUuid, int done, int total, byte phase) {
+        ENTRIES.put(maidId, new Entry(maidUuid, done, total, phase, System.currentTimeMillis()));
     }
 
     /**
@@ -40,8 +41,25 @@ public final class MaidBuildProgress {
         return ENTRIES;
     }
 
-    /** 一次施工的快照：已完成多少、一共多少、此刻在干什么 */
-    public record Entry(int done, int total, byte phase, long at) {
+    /**
+     * 这个实体 id 上的记录**不是**这个 UUID 的（实体 id 被复用了），当场删掉。
+     * <p>
+     * 少了这一步，旧记录会一直挂到超时：那两秒里屏幕上就有两条，数字来回覆盖。
+     */
+    public static void removeIfNot(int maidId, UUID expected) {
+        Entry entry = ENTRIES.get(maidId);
+        if (entry != null && !entry.maidUuid().equals(expected)) {
+            ENTRIES.remove(maidId);
+        }
+    }
+
+    /** 实体查不到了（她被卸载、被移除）：立刻删，别等超时 */
+    public static void remove(int maidId) {
+        ENTRIES.remove(maidId);
+    }
+
+    /** 一次施工的快照：是谁、已完成多少、一共多少、此刻在干什么 */
+    public record Entry(UUID maidUuid, int done, int total, byte phase, long at) {
 
         /** 还剩多少块（不会小于 0） */
         public int left() {

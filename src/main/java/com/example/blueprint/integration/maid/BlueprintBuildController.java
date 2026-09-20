@@ -82,7 +82,7 @@ public class BlueprintBuildController {
     /** 到岗的垂直容差：站在同一层附近就行，不必踩在同一格高度 */
     private static final double ARRIVE_DY = 2.5D;
     /** 找站位最多找多久（tick）：找太久就放弃站位、就地开工，见 {@link #tickMoveToSpot} */
-    private static final int MOVE_PATIENCE_TICKS = 150;
+    private static final int MOVE_PATIENCE_TICKS = 40;
     /** 站位离结构最外围一圈往外留几格 */
     private static final int STAND_MARGIN = 2;
     /** 偏离站位超过这么远就算被别的 AI 拽走了，得回岗位 */
@@ -284,8 +284,10 @@ public class BlueprintBuildController {
         // 这一行能直接看出是状态没切、还是进度不动、还是站位到不了、还是在等取料
         if (++debugTicks >= 100) {
             debugTicks = 0;
-            BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 状态={} 进度 {}/{} 站位={} 下一块={} 取料={} 冷却={} 站位计时={}",
-                    maid.getUUID(), state, session.done(), session.total(), standSpot,
+            BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 状态={} 进度 {}/{} 锚点={} 图={} 站位={} 下一块={} 取料={} 冷却={} 站位计时={}",
+                    maid.getUUID(), state, session.done(), session.total(), activeAnchor,
+                    activeId == null ? "无" : activeId.toString().substring(0, 8),
+                    standSpot,
                     session.peekNextTarget(level, activeAnchor),
                     fetchProvider == null ? "无" : fetchProvider.getClass().getSimpleName(),
                     cooldown, spotSearchTicks);
@@ -535,7 +537,7 @@ public class BlueprintBuildController {
                 continue;
             }
             ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                    new S2CBuildProgressPacket(maid.getId(), done, total, phase));
+                    new S2CBuildProgressPacket(maid.getId(), maid.getUUID(), done, total, phase));
         }
     }
 
@@ -1421,7 +1423,12 @@ public class BlueprintBuildController {
             // 缺料那几句**不在这里销账**：她身上可能同时有两张图、或者一轮里结构数据抖一下，
             // 那都不该让"同一批缺料"重新说一遍。换了缺的种类它自己会再说（指纹按种类算）
         }
-        standSpot = resolveStandSpot(level, anchor, schematic.getSize());
+        // **站哪都行**：施工本来就没有距离限制（见类注释），她已经到工地附近就就地开工，
+        // 不必再去找一个"合适"的站位——大结构外圈那一圈，走过去又远、路上还容易卡，
+        // 表现就是"一直在找站位"。只有她离得还远时，才给她一个落脚方向
+        boolean alreadyNearby =
+                maid.distanceToSqr(anchor.getX() + 0.5D, maid.getY(), anchor.getZ() + 0.5D) <= 256.0D;
+        standSpot = alreadyNearby ? null : resolveStandSpot(level, anchor, schematic.getSize());
         spotSearchTicks = 0; // 换了工地，找站位的耐心重新算
         fetchProvider = null;
         returnProvider = null;

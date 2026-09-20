@@ -203,15 +203,24 @@ public class BuildSession {
         int placed = 0;
         int missing = 0;
         BlockPos lastPlaced = null;
+        /** 这一趟里有没有"因为料不够"而跳过方块 */
+        boolean materialShort = false;
 
         while (placed < maxBlocks) {
             if (cursor >= order.size()) {
-                if (!deferred.isEmpty() && pass < MAX_PASS) {
-                    // 上一轮因为缺少支撑没能放下的，现在支撑应该已经就位了
+                if (!deferred.isEmpty() && (materialShort || pass < MAX_PASS)) {
+                    // 把跳过的接回来：缺支撑的（下一趟支撑可能就位了）、**缺料的**（料一到就接着放）
                     order = deferred;
                     deferred = new ArrayList<>();
                     cursor = 0;
-                    pass++;
+                    pass = materialShort ? 0 : pass + 1;
+                    if (materialShort) {
+                        // **缺料这一趟到此为止**：把剩下的原样留着、立刻返回，好让调用方去取料。
+                        // 绝不能继续往下判 finished——那会把"料还不够"报成"建好了、这几块放不下"，
+                        // 而它们既不是缺支撑也不是位置被占（玩家看到的就是"明明还差很多却说放不下"）
+                        missing++;
+                        break;
+                    }
                     continue;
                 }
                 finished = true;
@@ -240,11 +249,17 @@ public class BuildSession {
             }
 
             if (!hasEnough(source, needed)) {
-                // 缺料就停在这个方块上，下一轮还从这里继续。
-                // 不能 continue 往后扫：那会一路扫到队尾，让 finished 变成 true，
-                // 调用方就会误判成"已经建完"，从而再也不去取材料。
+                // 手上料不够：**这一块先跳过，继续往后放**——先把"背包里有料"的那些放掉。
+                // 以前这里是 break（整趟停在这一块），结果她只顾着再去取料，
+                // 背包里明明够料的几十块一块没动——"取了材料却不放置"就是这么来的。
+                //
+                // 跳过的进 deferred，并且**记下这趟有料不够**：趟末不能把它当"放不下"收尾，
+                // 否则 finished 会变成 true，调用方就会误判成"已经建完"、再也不去取料
                 missing++;
-                break;
+                materialShort = true;
+                deferred.add(entry);
+                cursor++;
+                continue;
             }
 
             // 先确认全都够再动手：材料可能不止一种，中途失败会白扣掉前面那些

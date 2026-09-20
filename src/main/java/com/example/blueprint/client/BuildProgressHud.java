@@ -70,6 +70,18 @@ public class BuildProgressHud {
         Entity nearest = null;
         MaidBuildProgress.Entry progress = null;
         double nearestDistance = showDistanceSqr();
+        // 先清一遍**过期的**：实体 id 会被游戏复用（区块卸载重载、女仆被移除再放出来都会换 id），
+        // 这条记录如果"查到的人不是她那一位"，就说明它早该走了。
+        // 少了这一步，一条已经停止更新的旧进度会一直跟真身抢屏幕——
+        // 表现就是"两条进度条来回覆盖，一条卡着不动、一条实时更新"
+        for (Map.Entry<Integer, MaidBuildProgress.Entry> candidate :
+                new java.util.ArrayList<>(active.entrySet())) {
+            Entity entity = mc.level.getEntity(candidate.getKey());
+            if (entity != null && !entity.getUUID().equals(candidate.getValue().maidUuid())) {
+                MaidBuildProgress.remove(candidate.getKey());
+            }
+        }
+
         for (Map.Entry<Integer, MaidBuildProgress.Entry> candidate : active.entrySet()) {
             Entity entity = mc.level.getEntity(candidate.getKey());
             if (entity == null) {

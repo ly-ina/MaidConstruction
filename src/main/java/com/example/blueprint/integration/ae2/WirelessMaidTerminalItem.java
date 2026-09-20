@@ -12,6 +12,7 @@ import net.minecraft.core.GlobalPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
@@ -87,6 +88,16 @@ public class WirelessMaidTerminalItem extends WirelessTerminalItem {
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
+        // **不是真人在用，就别走"开面板"这条路**。
+        // 女仆身上带着它时，TLM 那边会当物品"用"一下，而 AE2 的打开流程里
+        // 会喊"无法找到所链接的网络""超出范围"这类话——那些话是给玩家看的，
+        // 落到主人聊天框里就成了每几秒刷一次的噪音。
+        // 判据：服务端的假玩家（TLM 给女仆代操作时用的那种）没有连接
+        if (!level.isClientSide
+                && player instanceof ServerPlayer serverPlayer
+                && serverPlayer.connection == null) {
+            return InteractionResultHolder.pass(stack);
+        }
         if (player.isShiftKeyDown()) {
             if (!level.isClientSide) {
                 WirelessMaidLink.unlink(stack);
