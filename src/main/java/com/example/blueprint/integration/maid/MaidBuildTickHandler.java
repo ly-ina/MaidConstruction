@@ -1,5 +1,7 @@
 package com.example.blueprint.integration.maid;
 
+import com.example.blueprint.BlueprintConfig;
+import com.example.blueprint.BlueprintMod;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -9,6 +11,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 直接驱动处于「蓝图施工」模式的女仆。
@@ -26,6 +29,11 @@ public class MaidBuildTickHandler {
     private static final Map<Integer, BlueprintBuildController> CONTROLLERS = new HashMap<>();
     private static final int CLEANUP_INTERVAL = 600;
     private static int tickCounter = 0;
+
+    /** "现在不是我的上班时间"这句话的最小间隔（一分钟） */
+    private static final long OFF_DUTY_COOLDOWN_MS = 60_000L;
+    /** 每只女仆上次说这句话的时间 */
+    private static final Map<UUID, Long> LAST_OFF_DUTY = new HashMap<>();
 
     @SubscribeEvent
     public static void onLevelTick(TickEvent.LevelTickEvent event) {
@@ -46,6 +54,13 @@ public class MaidBuildTickHandler {
                 }
                 continue;
             }
+            // 施工也按作息表来——**默认关着**（理由见 BlueprintConfig 里那个开关的注释）：
+            // 它一生效，不在上班时间她就干杵着，而这个现象跟"她坏了"几乎一模一样，
+            // 所以先按 1.5.5 的老行为（昼夜不停建）跑，想要作息的人自己打开
+            if (BlueprintConfig.buildOnlyOnShift() && !MaidIndustryTask.isWorkingTime(maid)) {
+                warnOffDuty(level, maid);
+                continue;
+            }
             CONTROLLERS.computeIfAbsent(maid.getId(), id -> new BlueprintBuildController())
                     .tick(level, maid);
         }
@@ -54,6 +69,25 @@ public class MaidBuildTickHandler {
             tickCounter = 0;
             cleanup(level);
         }
+    }
+
+    /**
+     * 不在上班时间时说一句，省得主人分不清"她在等天亮"和"她坏了"。
+     * <p>
+     * 同一只女仆一分钟最多一次：这张单子可能要等一整夜，每分钟念一遍是噪音。
+     */
+    private static void warnOffDuty(ServerLevel level, EntityMaid maid) {
+        long now = System.currentTimeMillis();
+        Long last = LAST_OFF_DUTY.get(maid.getUUID());
+        if (last != null && now - last < OFF_DUTY_COOLDOWN_MS) {
+            return;
+        }
+        LAST_OFF_DUTY.put(maid.getUUID(), now);
+        MaidSpeech.say(maid, "message.blueprint.craft.off_duty");
+        BlueprintMod.LOGGER.info("女仆 {} 在施工模式，但此刻不是她的工作时间（作息 {}）；"
+                        + "想让她昼夜不停地建，把 config/blueprint-common.toml 里的 "
+                        + "schedule.build_only_on_shift 设成 false",
+                maid.getUUID(), maid.getSchedule());
     }
 
     private static boolean isBuildTask(EntityMaid maid) {

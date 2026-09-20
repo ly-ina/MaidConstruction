@@ -6,8 +6,14 @@ import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.KeyCounter;
 import appeng.api.storage.MEStorage;
+import com.example.blueprint.BlueprintConfig;
+import com.example.blueprint.BlueprintMod;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraftforge.registries.ForgeRegistries;
 
 /**
@@ -109,15 +115,54 @@ public class InfiniteItemStorage implements MEStorage {
 
     private static synchronized KeyCounter snapshot() {
         if (allItems == null) {
+            boolean blocksOnly = BlueprintConfig.creativeInterfaceBlocksOnly();
             KeyCounter counter = new KeyCounter();
+            int skipped = 0;
             for (Item item : ForgeRegistries.ITEMS) {
-                AEItemKey key = AEItemKey.of(item);
-                if (key != null) {
-                    counter.add(key, AMOUNT);
+                // 默认只列**可放置的方块**：这个接口是给女仆备建材的，
+                // 而物品/装备/材料那一堆在建造里既用不上，又是这份清单的大头——
+                // 少掉它们，终端打开和排序都快得多（配置里改成 all 可以要回全物品）
+                if (blocksOnly && !isPlaceableBlock(item)) {
+                    continue;
                 }
+                AEItemKey key = AEItemKey.of(item);
+                if (key == null) {
+                    continue;
+                }
+                // **先替 AE2 问一次名字**。
+                // 有模组的物品在"不带数据、默认形态"的栈上算名字会抛异常——
+                // irons_spells_js 的 CustomSpellBook 就是（它假设法术容器一定在）。
+                // 而 AE2 的终端**排序时**正要对清单里的每一种问一遍显示名
+                // （KeySorters → AEKey.getDisplayName），问到这种就炸，
+                // 而且是**渲染界面时**崩客户端——玩家只看见"一开创造接口就崩"。
+                // 所以这种物品干脆不列：它本来也不是能从创造接口正常取到的东西
+                try {
+                    new ItemStack(item).getHoverName();
+                } catch (Throwable t) {
+                    skipped++;
+                    continue;
+                }
+                counter.add(key, AMOUNT);
             }
             allItems = counter;
+            BlueprintMod.LOGGER.info("创造女仆接口向 ME 网络申报 {} 种{}（跳过了 {} 种算不出显示名的）",
+                    counter.size(), blocksOnly ? "可放置的方块" : "物品", skipped);
+            if (skipped > 0) {
+                BlueprintMod.LOGGER.warn("有 {} 种东西算不出显示名（多半是别的模组的物品在默认形态下就抛异常），"
+                                + "创造女仆接口已跳过它们——列进网络只会让 AE2 终端排序时崩溃",
+                        skipped);
+            }
         }
         return allItems;
+    }
+
+    /**
+     * 这个物品是"能放下去的方块"吗。
+     * <p>
+     * 判据是 {@code BlockItem} 加上"对应的方块不是空气"：有些方块物品（比如早期版本里
+     * 那些占位用的）对不上一个真方块，把它们列进去，玩家取出来也是个放不下去的东西。
+     */
+    private static boolean isPlaceableBlock(Item item) {
+        return item instanceof BlockItem && Block.byItem(item) != Blocks.AIR;
     }
 }

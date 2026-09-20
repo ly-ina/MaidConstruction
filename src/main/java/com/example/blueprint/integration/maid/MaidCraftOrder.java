@@ -254,4 +254,22 @@ public final class MaidCraftOrder implements TaskDataKey<List<MaidCraftOrder.Ord
             maid.setAndSyncData(KEY, List.of());
         }
     }
+
+    /**
+     * 撤掉队列里的第几张（界面上那个 ✕）。
+     * <p>
+     * 按**下标**撤，跟界面看到的顺序一致——界面就是照这个顺序列的，中间再按产物去匹配
+     * 等于多绕一圈还容易撤错（有附魔的变体差一点 NBT 就不是同一样东西了）。
+     *
+     * @return 真的撤掉了返回 true；下标越界返回 false
+     */
+    public static boolean removeAt(EntityMaid maid, int index) {
+        List<Order> current = new ArrayList<>(pending(maid));
+        if (index < 0 || index >= current.size()) {
+            return false;
+        }
+        current.remove(index);
+        maid.setAndSyncData(KEY, current);
+        return true;
+    }
 }

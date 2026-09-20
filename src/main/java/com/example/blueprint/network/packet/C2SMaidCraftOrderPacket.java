@@ -1,5 +1,6 @@
 package com.example.blueprint.network.packet;
 
+import com.example.blueprint.BlueprintConfig;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.integration.maid.MaidCraftOrder;
 import com.example.blueprint.integration.maid.MaidIndustryTask;
@@ -55,8 +56,13 @@ public class C2SMaidCraftOrderPacket {
                 return;
             }
             Entity entity = level.getEntity(msg.maidId);
-            // 只认自己的女仆：别人的单轮不到你来下
-            if (!(entity instanceof EntityMaid maid) || maid.getOwner() != player) {
+            if (!(entity instanceof EntityMaid maid)) {
+                return;
+            }
+            // 只认自己的女仆：别人的单轮不到你来下。
+            // 默认如此，配置里可以关掉（关掉则谁都能操作，连服主也不做额外例外——
+            // 需要服主特权时请开着这条、把服主加进白名单模组去管）
+            if (BlueprintConfig.ownerOnlyOrders() && maid.getOwner() != player) {
                 return;
             }
 

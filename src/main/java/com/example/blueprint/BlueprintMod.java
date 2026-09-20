@@ -8,7 +8,9 @@ import com.example.blueprint.registry.ModItems;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
@@ -20,6 +22,9 @@ public class BlueprintMod {
 
     public BlueprintMod() {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
+
+        // 行为开关落在 config/blueprint-common.toml，两边各读本地那份（见 BlueprintConfig）
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, BlueprintConfig.SPEC);
 
         ModItems.ITEMS.register(modBus);
         ModCreativeTabs.TABS.register(modBus);

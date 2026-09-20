@@ -10,6 +10,8 @@ import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import com.example.blueprint.BlueprintConfig;
+
 import java.util.Map;
 
 /**
@@ -20,7 +22,7 @@ import java.util.Map;
  * <p>
  * 有几条守则是"看的人"的体验：
  * <ul>
- *   <li><b>只在附近显示</b>（{@value #SHOW_DISTANCE_SQR} 的平方根 = 16 格）：
+ *   <li><b>只在附近显示</b>（默认 16 格，见 {@code progress.radius}）：
  *       远处她自己在干活，屏幕上杵着一条进度条只是干扰；</li>
  *   <li><b>有几条在建就只显示最近那个</b>：同时显示三条互相压着，谁也不是谁的进度；</li>
  *   <li><b>带上她的名字</b>：多人服里两三个女仆都在建，不带名字根本不知道是谁的。</li>
@@ -32,8 +34,16 @@ import java.util.Map;
         bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class BuildProgressHud {
 
-    /** 女仆离玩家这么近才显示（平方距离；跟"缺料提示"用的 16 格保持一致） */
-    private static final double SHOW_DISTANCE_SQR = 16.0D * 16.0D;
+    /**
+     * 女仆离玩家这么近才显示（平方距离）。
+     * <p>
+     * 距离由配置给（{@code progress.radius}），默认 16 格——跟"缺料提示"用的距离一致。
+     * 服务端是按同一个值（再多留 8 格余量）推送的，所以这个值改大改小，两边一起动。
+     */
+    private static double showDistanceSqr() {
+        double radius = BlueprintConfig.progressRadius();
+        return radius * radius;
+    }
     private static final int BAR_WIDTH = 120;
     private static final int BAR_HEIGHT = 6;
     /** 条画在准星下面一点 */
@@ -59,7 +69,7 @@ public class BuildProgressHud {
         }
         Entity nearest = null;
         MaidBuildProgress.Entry progress = null;
-        double nearestDistance = SHOW_DISTANCE_SQR;
+        double nearestDistance = showDistanceSqr();
         for (Map.Entry<Integer, MaidBuildProgress.Entry> candidate : active.entrySet()) {
             Entity entity = mc.level.getEntity(candidate.getKey());
             if (entity == null) {

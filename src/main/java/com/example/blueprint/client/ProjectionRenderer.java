@@ -7,7 +7,12 @@ import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.schematic.Schematic;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.example.blueprint.BlueprintConfig;
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.client.Camera;
+import net.minecraft.world.InteractionHand;
+
+import javax.annotation.Nullable;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LightTexture;
@@ -81,7 +86,7 @@ public class ProjectionRenderer {
             return;
         }
 
-        ItemStack stack = BlueprintItem.findHeld(mc.player);
+        ItemStack stack = projectionSource(mc);
         if (stack.isEmpty()) {
             return;
         }
@@ -265,6 +270,60 @@ public class ProjectionRenderer {
      * 直接按下标遍历、复用同一个 MutableBlockPos 会好很多。
      */
     private static long lastRequestAt = 0;
+
+    /**
+     * 该照谁手上的蓝图画：**先看你自己，再看附近的女仆**。
+     * <p>
+     * 你自己手里拿着蓝图时永远画你自己那张——否则在工地旁边站着，屏幕会被她那张图盖住，
+     * 而你想看的正是自己刚录好的样子。
+     * <p>
+     * 没拿蓝图时才去找女仆：她拿着还没建完的图，站在旁边看不见她要建什么，
+     * 只能对着空地等她一块块放，这一条就是补这个的。
+     * 有几只就取**最近**那只——同时叠两张半透明的图，谁也看不清。
+     */
+    private static ItemStack projectionSource(Minecraft mc) {
+        ItemStack held = BlueprintItem.findHeld(mc.player);
+        if (!held.isEmpty() || mc.level == null || !BlueprintConfig.maidProjection()) {
+            return held;
+        }
+
+        double radius = BlueprintConfig.maidProjectionRadius();
+        ItemStack best = ItemStack.EMPTY;
+        double bestDistance = radius * radius;
+        for (EntityMaid maid : mc.level.getEntitiesOfClass(EntityMaid.class,
+                mc.player.getBoundingBox().inflate(radius))) {
+            ItemStack stack = maidBuildingBlueprint(maid);
+            if (stack == null) {
+                continue;
+            }
+            double distance = maid.distanceToSqr(mc.player);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = stack;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * 女仆手上那张**还没建完**的蓝图。
+     * <p>
+     * 只认主手和副手，不去翻她的背包：蓝图在她手上才说明她正打算建它。
+     * 背包里躺着好几张时照顺序挑一张画出来，玩家会看到一座跟自己毫无关系的建筑浮在眼前。
+     */
+    @Nullable
+    private static ItemStack maidBuildingBlueprint(EntityMaid maid) {
+        for (InteractionHand hand : InteractionHand.values()) {
+            ItemStack stack = maid.getItemInHand(hand);
+            if (stack.getItem() instanceof BlueprintItem
+                    && BlueprintItem.hasSchematic(stack)
+                    && BlueprintItem.hasAnchor(stack)
+                    && !BlueprintItem.isCompleted(stack)) {
+                return stack;
+            }
+        }
+        return null;
+    }
 
     /**
      * 向服务端索取结构数据，两秒最多一次，避免每帧刷包。

@@ -1,6 +1,7 @@
 package com.example.blueprint.network;
 
 import com.example.blueprint.BlueprintMod;
+import com.example.blueprint.network.packet.C2SCancelCraftOrderPacket;
 import com.example.blueprint.network.packet.C2SCapturePacket;
 import com.example.blueprint.network.packet.C2SClearBlueprintPacket;
 import com.example.blueprint.network.packet.C2SImportBlueprintPacket;
@@ -20,9 +21,10 @@ import net.minecraftforge.network.simple.SimpleChannel;
 public class ModNetwork {
 
     // 1.5.3 改了学习池的包（设优先级 → 选做法；停用包整个删掉），协议不兼容，升到 2；
-    // 1.5.4 加了施工进度包（S2CBuildProgressPacket），再升到 3。
+    // 1.5.4 加了施工进度包（S2CBuildProgressPacket），再升到 3；
+    // 1.6.0 加了"撤掉队列里某一张单"的包（C2SCancelCraftOrderPacket），升到 4。
     // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
-    private static final String PROTOCOL_VERSION = "3";
+    private static final String PROTOCOL_VERSION = "4";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(BlueprintMod.MOD_ID, "main"),
@@ -62,5 +64,9 @@ public class ModNetwork {
         CHANNEL.registerMessage(id++, S2CBuildProgressPacket.class,
                 S2CBuildProgressPacket::encode, S2CBuildProgressPacket::decode,
                 S2CBuildProgressPacket::handle);
+        // 队列列表里那个 ✕：撤掉某一张单（跟"撤掉全部"是两个包，见包自身的注释）
+        CHANNEL.registerMessage(id++, C2SCancelCraftOrderPacket.class,
+                C2SCancelCraftOrderPacket::encode, C2SCancelCraftOrderPacket::decode,
+                C2SCancelCraftOrderPacket::handle);
     }
 }

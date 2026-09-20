@@ -1,5 +1,6 @@
 package com.example.blueprint.integration.maid;
 
+import com.example.blueprint.BlueprintConfig;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.build.BlockContainerProvider;
 import com.example.blueprint.build.BuildSession;
@@ -108,8 +109,13 @@ public class BlueprintBuildController {
     private static final int MAX_REPORTED_MATERIALS = 5;
     /** 施工进度多久推一次（约半秒）。进度条是给人看的，半秒跳一下已经足够顺滑 */
     private static final int PROGRESS_INTERVAL = 10;
-    /** 进度只推给这么远的玩家（显示距离是 16 格，这里留一圈余量） */
-    private static final double PROGRESS_RADIUS_SQR = 24.0D * 24.0D;
+    /**
+     * 进度只推给**附近**的玩家，距离由配置给（{@code progress.radius}）。
+     * <p>
+     * 推送半径比显示距离大一圈（{@value #PROGRESS_RADIUS_MARGIN} 格）：玩家走近时条已经在了，
+     * 不会"走到跟前才突然蹦出来"。
+     */
+    private static final double PROGRESS_RADIUS_MARGIN = 8.0D;
 
     private BuildSession session;
     /** 整座结构一共要多少材料。还料时用它判断"哪些是这次工程带来的" */
@@ -388,11 +394,13 @@ public class BlueprintBuildController {
         }
         int done = session.done();
         int total = session.total();
+        double radius = BlueprintConfig.progressRadius() + PROGRESS_RADIUS_MARGIN;
+        double radiusSqr = radius * radius;
         double x = maid.getX();
         double y = maid.getY();
         double z = maid.getZ();
         for (ServerPlayer player : level.players()) {
-            if (player.distanceToSqr(x, y, z) > PROGRESS_RADIUS_SQR) {
+            if (player.distanceToSqr(x, y, z) > radiusSqr) {
                 continue;
             }
             ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
@@ -558,8 +566,9 @@ public class BlueprintBuildController {
             maid.getLookControl().setLookAt(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
         }
 
+        // 回收可以在配置里关掉：那时传 null，被顶掉的方块照老样子直接消失
         BuildSession.StepResult result = session.step(level, activeAnchor, new MaidItemSource(maid), 1,
-                new MaidSalvage(maid));
+                BlueprintConfig.salvageEnabled() ? new MaidSalvage(maid) : null);
 
         if (result.placed() > 0) {
             // 真的动工了，说明这处工地还没完工

@@ -5,6 +5,7 @@ import com.example.blueprint.integration.maid.MaidIndustryTask;
 import com.example.blueprint.integration.maid.MaidSpeech;
 import com.example.blueprint.integration.maid.MaidStudyPool;
 import com.example.blueprint.network.ModNetwork;
+import com.example.blueprint.network.packet.C2SCancelCraftOrderPacket;
 import com.example.blueprint.network.packet.C2SForgetStudyPacket;
 import com.example.blueprint.network.packet.C2SMaidCraftOrderPacket;
 import com.example.blueprint.network.packet.C2SSelectStudyRecipePacket;
@@ -73,6 +74,23 @@ public class MaidStudyScreen extends Screen {
     private static final int USES_ROWS = 5;
     /** 左下"她现在的活"从哪一行开始（产物格子下面那片） */
     private static final int QUEUE_Y = 144;
+    /** 队列列表：一行多高、一屏放几行（其余的靠滚轮翻） */
+    private static final int QUEUE_ROW = 18;
+    private static final int QUEUE_ROWS = 3;
+    /** 队列列表里，那一行右边"撤掉这张"的 ✕ 从行首往右多少像素 */
+    private static final int QUEUE_CANCEL_X = 128;
+    /** ✕ 的命中大小（画的是字，命中框比字略大一点更好点） */
+    private static final int QUEUE_CANCEL_SIZE = 12;
+    /** 队列状态那行（总数，或者"她在休息"）画在列表下面 */
+    private static final int QUEUE_STATUS_Y = QUEUE_Y + QUEUE_ROWS * QUEUE_ROW + 2;
+
+    /**
+     * 队列列表滚到第几行（第一行是最前面那张单）。
+     * <p>
+     * 单子最多 {@code MaidCraftOrder.MAX_ORDERS} 张，一屏只放得下三行，所以得能翻。
+     * 这是**看的人的视角**，跟着界面走，不进存档。
+     */
+    private int ordersScrollRow = 0;
     /** 左下角那个"?"的边长（画与命中都用它，免得两处算法走样） */
     private static final int HELP_SIZE = 11;
     /** 界面上飘的那句话显示多久 */
@@ -187,11 +205,12 @@ public class MaidStudyScreen extends Screen {
                 .bounds(left + PANEL_X, top + WINDOW_HEIGHT - 22, PANEL_WIDTH, 18).build();
         this.addRenderableWidget(this.orderButton);
 
-        // 撤单管的是**整个队列**，跟左下那块"她现在的活"是一回事，就放它下面；
-        // 没有待做的单时它不出现
+        // 撤单管的是**整个队列**，跟左下那块"她现在的活"是一回事，就放它下面。
+        // 位置往下让过、也往右让了一点：上面三行列表 + 一行状态要用那片地方，
+        // 而最左下角还立着那个"?"（x = left+8，宽 11），顶着它画会正好压住
         this.cancelButton = Button.builder(Component.translatable("gui.blueprint.study.cancel_orders"),
                         b -> sendOrder(-1, 0))
-                .bounds(left + 10, top + QUEUE_Y + 38, 144, 18).build();
+                .bounds(left + 26, top + WINDOW_HEIGHT - 20, 128, 18).build();
         this.addRenderableWidget(this.cancelButton);
     }
 
@@ -310,8 +329,8 @@ public class MaidStudyScreen extends Screen {
             return;
         }
 
-        // 左下那块"她现在的活"跟池子里有没有东西无关，先画
-        drawQueue(graphics);
+        // 左下那块"她现在的活"跟池子里有没有东西无关，先画（要鼠标坐标画悬停）
+        drawQueue(graphics, mouseX, mouseY);
         if (pool.isEmpty()) {
             graphics.drawString(this.font, Component.translatable("gui.blueprint.study.empty"),
                     left + 10, top + GRID_Y + 4, COLOR_LABEL, false);
@@ -437,7 +456,7 @@ public class MaidStudyScreen extends Screen {
      * 这块跟"取消全部待做"放在一起：它们都是**整个队列**的事，
      * 跟右边那颗只管"选中产物"的下单按钮不是一回事。
      */
-    private void drawQueue(GuiGraphics graphics) {
+    private void drawQueue(GuiGraphics graphics, int mouseX, int mouseY) {
         EntityMaid maid = maid();
         if (maid == null) {
             return;
@@ -446,36 +465,104 @@ public class MaidStudyScreen extends Screen {
         int y = top + QUEUE_Y;
         List<MaidCraftOrder.Order> orders = MaidCraftOrder.pending(maid);
         if (orders.isEmpty()) {
+            ordersScrollRow = 0;
             graphics.drawString(this.font, Component.translatable("gui.blueprint.study.queue_empty"),
                     x, y + 4, COLOR_LABEL, false);
             return;
         }
-        MaidCraftOrder.Order head = orders.get(0);
-        graphics.renderItem(head.product(), x, y);
-        graphics.drawString(this.font,
-                this.font.plainSubstrByWidth(head.product().getHoverName().getString(),
-                        PANEL_X - 42),
-                x + 20, y + 4, COLOR_TEXT, false);
 
-        ItemStack root = head.root();
-        Component progress = root != null
-                ? Component.translatable("gui.blueprint.study.queue_nested_progress",
-                        head.remaining(), root.getHoverName())
-                : Component.translatable("gui.blueprint.study.queue_progress",
-                        head.remaining(), MaidCraftOrder.pendingAmount(maid), orders.size());
-        graphics.drawString(this.font,
-                this.font.plainSubstrByWidth(progress.getString(), PANEL_X - 20),
-                x, y + 22, COLOR_LABEL, false);
+        // 一条条列出来（不是只显示最前面那张）：队列就是拿来"看和改"的，
+        // 只给她正在做的那一张，后面的单等于看不见、也撤不掉
+        int maxScroll = Math.max(0, orders.size() - QUEUE_ROWS);
+        ordersScrollRow = Math.max(0, Math.min(maxScroll, ordersScrollRow));
+        for (int i = 0; i < QUEUE_ROWS && ordersScrollRow + i < orders.size(); i++) {
+            drawQueueRow(graphics, orders.get(ordersScrollRow + i), x, y + i * QUEUE_ROW, mouseX, mouseY);
+        }
 
-        // 她在等上班时间：**面板上也写一行**。聊天栏那句话会滚掉，而主人盯着这块看的时候
-        // 最想知道的就是"她怎么不动"——作息客户端也算得出来（世界时间 + 她自己的作息表）
+        // 状态那行：**只写更要紧的那一句**。两句叠在一起会互相盖住，
+        // 而"她在休息"比"队列有多少个"更急需让主人看见（他在等活，不是在数数）
+        int statusY = top + QUEUE_STATUS_Y;
         if (!MaidIndustryTask.isWorkingTime(maid)) {
             graphics.drawString(this.font,
                     this.font.plainSubstrByWidth(
                             Component.translatable("gui.blueprint.study.off_duty").getString(),
                             PANEL_X - 20),
-                    x, y + 34, COLOR_LABEL, false);
+                    x, statusY, COLOR_LABEL, false);
+        } else {
+            graphics.drawString(this.font,
+                    this.font.plainSubstrByWidth(
+                            Component.translatable("gui.blueprint.study.queue_summary",
+                                    orders.size(), MaidCraftOrder.pendingAmount(maid)).getString(),
+                            PANEL_X - 20),
+                    x, statusY, COLOR_LABEL, false);
         }
+    }
+
+    /**
+     * 队列里的一行：图标 + 名字 + 还剩几个 + 右边一个 ✕。
+     * <p>
+     * 零件单（为了做 X 才插进来的）在名字后面缀一句"为了做 X"——不然主人只看见她在搓木棍，
+     * 不知道是给谁备料。缀句太长就把名字截短，别让"为了做…"被挤掉。
+     */
+    private void drawQueueRow(GuiGraphics graphics, MaidCraftOrder.Order order,
+                              int x, int y, int mouseX, int mouseY) {
+        graphics.renderItem(order.product(), x, y + 1);
+        boolean nested = order.root() != null;
+        graphics.drawString(this.font,
+                this.font.plainSubstrByWidth(order.product().getHoverName().getString(),
+                        nested ? 44 : 78),
+                x + 20, y + 5, COLOR_ROW, false);
+        if (nested) {
+            graphics.drawString(this.font,
+                    this.font.plainSubstrByWidth(
+                            Component.translatable("gui.blueprint.study.queue_for",
+                                    order.root().getHoverName()).getString(), 40),
+                    x + 62, y + 5, COLOR_LABEL, false);
+        }
+        graphics.drawString(this.font, "×" + order.remaining(), x + 104, y + 5, COLOR_TEXT, false);
+
+        // 撤掉这一张。命中框比字大一点：靠一个字去点，差一像素就点不中了
+        boolean hover = queueCancelHovered(x, y, mouseX, mouseY);
+        graphics.drawString(this.font, "×", x + QUEUE_CANCEL_X, y + 5,
+                hover ? COLOR_TEXT : COLOR_LABEL, false);
+    }
+
+    /** 鼠标是不是停在这一行的 ✕ 上 */
+    private boolean queueCancelHovered(int x, int y, int mouseX, int mouseY) {
+        int cx = x + QUEUE_CANCEL_X;
+        return mouseX >= cx && mouseX < cx + QUEUE_CANCEL_SIZE
+                && mouseY >= y && mouseY < y + QUEUE_CANCEL_SIZE;
+    }
+
+    /** 鼠标点在队列某一行的 ✕ 上时返回那一行的下标，否则 -1 */
+    private int queueCancelAt(List<MaidCraftOrder.Order> orders, double mouseX, double mouseY) {
+        int row = queueRowAt(orders, mouseX, mouseY);
+        if (row < 0) {
+            return -1;
+        }
+        int y = top + QUEUE_Y + (row - ordersScrollRow) * QUEUE_ROW;
+        return queueCancelHovered(left + 10, y, (int) mouseX, (int) mouseY) ? row : -1;
+    }
+
+    /** 鼠标落在队列列表的第几行上（不在列表里返回 -1） */
+    private int queueRowAt(List<MaidCraftOrder.Order> orders, double mouseX, double mouseY) {
+        if (maid() == null || orders.isEmpty()) {
+            return -1;
+        }
+        int x = left + 10;
+        for (int i = 0; i < QUEUE_ROWS && ordersScrollRow + i < orders.size(); i++) {
+            int y = top + QUEUE_Y + i * QUEUE_ROW;
+            if (mouseX >= x && mouseX < x + PANEL_X - 20 && mouseY >= y && mouseY < y + QUEUE_ROW) {
+                return ordersScrollRow + i;
+            }
+        }
+        return -1;
+    }
+
+    /** 撤掉队列里的第 index 张 */
+    private void sendCancel(int index, int flashX, int flashY) {
+        ModNetwork.CHANNEL.sendToServer(new C2SCancelCraftOrderPacket(maidEntityId, index));
+        flashAt(herLine("message.blueprint.craft.cleared_one"), flashX, flashY);
     }
 
     /**
@@ -1064,6 +1151,14 @@ public class MaidStudyScreen extends Screen {
             return super.mouseClicked(mouseX, mouseY, button);
         }
 
+        // 队列列表里那个 ✕：撤掉这一张。
+        // 只认 ✕，点行本身不动手——主人常常只是在看队列，顺手点一下就撤掉一张太容易误伤
+        int queueIndex = queueCancelAt(MaidCraftOrder.pending(maid()), mouseX, mouseY);
+        if (queueIndex >= 0) {
+            sendCancel(queueIndex, (int) mouseX, (int) mouseY);
+            return true;
+        }
+
         if (productIndex >= 0) {
             // Shift+左键 = 忘掉这个产物（连同它的配方）。不做二次确认：删了只是暂时不会做，
             // 主人再演示一次就补回来了，丢得起；要的就是"随手清掉记歪的东西"。
@@ -1126,6 +1221,16 @@ public class MaidStudyScreen extends Screen {
             int maxScroll = Math.max(0, totalRows - USES_ROWS);
             usesScrollRow = Math.max(0,
                     Math.min(maxScroll, usesScrollRow + (delta < 0 ? 1 : -1)));
+            return true;
+        }
+
+        // 鼠标在左下队列列表上：滚轮翻队列（跟上面那块用途页互不重叠，谁在鼠标底下就归谁）
+        if (maid() != null
+                && mouseX >= left + 10 && mouseX < left + 10 + PANEL_X - 20
+                && mouseY >= top + QUEUE_Y && mouseY < top + QUEUE_Y + QUEUE_ROWS * QUEUE_ROW) {
+            int maxScroll = Math.max(0, MaidCraftOrder.pending(maid()).size() - QUEUE_ROWS);
+            ordersScrollRow = Math.max(0,
+                    Math.min(maxScroll, ordersScrollRow + (delta < 0 ? 1 : -1)));
             return true;
         }
         int totalRows = (matchingIndices(pool).size() + COLUMNS - 1) / COLUMNS;
