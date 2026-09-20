@@ -7,6 +7,7 @@ import com.example.blueprint.build.BuildSession;
 import com.example.blueprint.build.ItemProvider;
 import com.example.blueprint.build.Salvage;
 import com.example.blueprint.integration.ae2.Ae2Compat;
+import com.example.blueprint.integration.ae2.TerminalChunkLoader;
 import com.example.blueprint.item.BindingBookItem;
 import com.example.blueprint.item.BlueprintItem;
 import com.example.blueprint.network.ModNetwork;
@@ -149,12 +150,20 @@ public class BlueprintBuildController {
      * 再说时又成了"新内容"——两句话来回覆盖，屏幕上就变成无限复读。
      * 玩家看到的正是"她一直在说同一件事"。
      */
-    private final Map<String, String> lastShortfall = new HashMap<>();
-
-    /** 缺料提示之间的最小间隔（约 3 秒），详见 {@link #shouldReportShortfall} */
+    /**
+     * 「这一句说过了」的账：**按女仆本人（UUID）存，而且放在静态表里**。
+     * <p>
+     * 以前它挂在控制器实例上，而控制器在 {@code reset}/{@code detach} 之后会被丢掉重建，
+     * 账本跟着一起没——同一批缺料于是每一轮又被当成"新情况"，玩家看到的就是无限复读。
+     * 放到静态表里，控制器怎么换都不丢；换了缺的**种类**才会再说（指纹只看种类，不看数量）。
+     */
+    private static final Map<UUID, Map<String, String>> SAID_SHORTFALL = new HashMap<>();
+    /** 每只女仆上一次开口的时间（3 秒节流用），同样不随控制器重建而丢 */
+    private static final Map<UUID, Long> SAID_SHORTFALL_AT = new HashMap<>();
+    /** 缺料提示之间的最小间隔（同一次尝试里好几条路都想说话时，只放第一条出去） */
     private static final long SHORTFALL_QUIET_MS = 3_000L;
-    /** 上一次说缺料是什么时候 */
-    private long lastShortfallAt = 0L;
+    /** 这一 tick 在驱动哪只女仆：账本按她存，见 {@link #SAID_SHORTFALL} */
+    private UUID currentMaidId;
     private UUID activeId;
     private BlockPos activeAnchor;
     private Rotation activeRotation = Rotation.NONE;
@@ -204,6 +213,8 @@ public class BlueprintBuildController {
 
     public void tick(ServerLevel level, EntityMaid maid) {
         tickOpenContainer(level);
+        // 账本按她本人记账（控制器会被丢掉重建，见 SAID_SHORTFALL）
+        currentMaidId = maid.getUUID();
 
         ItemStack stack = findBlueprint(maid);
         if (stack.isEmpty()) {
@@ -262,6 +273,11 @@ public class BlueprintBuildController {
 
         // 施工期间钉在岗位上，别往主人那边跑
         setWorkingHomeMode(maid, true);
+
+        // 把她终端链着的那个无线访问点所在区块带起来。
+        // 不带起来的话，基地那一片没加载时网络解析不到，取料取不到、回收也塞不回去，
+        // 看起来就像终端坏了。**加载拿不到也照常施工**（施工优先），只是退到背包/地上
+        TerminalChunkLoader.hold(level, maid.getUUID(), collectHeldStacks(maid));
 
         // 每 5 秒把"她现在到底卡在哪一步"写一行日志。
         // 大结构上出问题时（站着不动、来回跑），光看现象猜不出来是哪个环节——
@@ -367,6 +383,10 @@ public class BlueprintBuildController {
                     maid.getUUID(), original);
             maid.setHomeModeEnable(original);
         }
+        // 她不再干这活了：把自己持的访问点区块票还回去（只还她自己的，不动别人的）
+        if (maid.level() instanceof ServerLevel serverLevel) {
+            TerminalChunkLoader.release(serverLevel, maid.getUUID());
+        }
     }
 
     /** 备份她那份作息坐标，收工时原样还回去 */
@@ -397,8 +417,9 @@ public class BlueprintBuildController {
         bill = Map.of();
         pendingBill = Map.of();
         shortfall = Map.of();
-        lastShortfall.clear();
-        lastShortfallAt = 0L;
+        // 这里**不再清缺料的账**：reset 在"她这一 tick 没图/没定位/没结构"时都会走，
+        // 清了的话，她在取料循环里每绕一圈都会把"说过了"重新变成"新情况"，就是无限复读的由来。
+        // 账本按女仆存在静态表里（SAID_SHORTFALL），要再说只有两种可能：换了缺的种类，或者她说的是别的说法
         fetchProvider = null;
         returnProvider = null;
         returnFinished = false;
@@ -1397,9 +1418,8 @@ public class BlueprintBuildController {
                 || !Objects.equals(anchor, activeAnchor)
                 || rotation != activeRotation) {
             toolWarned.clear();
-            // 缺料那几句也一起销账：换了工地、换了图，该说的重新说
-            lastShortfall.clear();
-            lastShortfallAt = 0L;
+            // 缺料那几句**不在这里销账**：她身上可能同时有两张图、或者一轮里结构数据抖一下，
+            // 那都不该让"同一批缺料"重新说一遍。换了缺的种类它自己会再说（指纹按种类算）
         }
         standSpot = resolveStandSpot(level, anchor, schematic.getSize());
         spotSearchTicks = 0; // 换了工地，找站位的耐心重新算
@@ -1563,16 +1583,22 @@ public class BlueprintBuildController {
      * 等安静下来它反而再也没机会开口。
      */
     private boolean shouldReportShortfall(String kind, Map<Item, Integer> list) {
+        if (currentMaidId == null) {
+            return true; // 认不出是谁就别记账（正常驱动下一定认得）
+        }
+        Map<String, String> said =
+                SAID_SHORTFALL.computeIfAbsent(currentMaidId, id -> new HashMap<>());
         String signature = shortfallSignature(list);
-        if (signature.equals(lastShortfall.get(kind))) {
-            return false;
+        if (signature.equals(said.get(kind))) {
+            return false; // 同一批缺料（同一批**种类**）说过了
         }
         long now = System.currentTimeMillis();
-        if (now - lastShortfallAt < SHORTFALL_QUIET_MS) {
-            return false;
+        Long last = SAID_SHORTFALL_AT.get(currentMaidId);
+        if (last != null && now - last < SHORTFALL_QUIET_MS) {
+            return false; // 同一次尝试里另一条路刚说过，这次先让给它（且不记账）
         }
-        lastShortfall.put(kind, signature);
-        lastShortfallAt = now;
+        said.put(kind, signature);
+        SAID_SHORTFALL_AT.put(currentMaidId, now);
         // 留一行日志：以后再说"她怎么老是重复同一句"，一眼就能看出是哪条路、什么内容
         BlueprintMod.LOGGER.info("缺料提示（{}）：{}", kind, signature);
         return true;
