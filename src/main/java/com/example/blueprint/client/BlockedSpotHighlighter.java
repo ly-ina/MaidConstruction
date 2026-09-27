@@ -3,8 +3,8 @@ package com.example.blueprint.client;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.build.BlockHarvest;
 import com.example.blueprint.item.BlueprintItem;
+import com.example.blueprint.integration.maid.MaidCompat;
 import com.example.blueprint.schematic.Schematic;
-import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
@@ -12,7 +12,6 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -78,15 +77,19 @@ public final class BlockedSpotHighlighter {
         pose.pushPose();
         pose.translate(-camera.x, -camera.y, -camera.z);
 
+        // 女仆模组没装就什么都不画。**这个方法自己的字节码里只要出现一次
+        // EntityMaid 的名字**，没装女仆的客户端执行到那儿就是一次
+        // NoClassDefFoundError（投影那个渲染器 1.6.3 就是这么崩的，这里同样有一句）。
+        // 女仆相关的代码现在全关在 MaidClientBridge 里，只有确认装了才会被加载
+        java.util.List<ItemStack> held = MaidCompat.isLoaded()
+                ? MaidClientBridge.heldBlueprints((net.minecraft.client.multiplayer.ClientLevel) level)
+                : java.util.List.of();
+
         int drawn = 0;
-        for (Entity entity : ((net.minecraft.client.multiplayer.ClientLevel) level).entitiesForRendering()) {
+        for (ItemStack stack : held) {
             if (drawn >= MAX_BOXES) {
                 break;
             }
-            if (!(entity instanceof EntityMaid maid) || !maid.isAlive()) {
-                continue;
-            }
-            ItemStack stack = heldBlueprint(maid);
             if (stack.isEmpty()) {
                 continue;
             }
@@ -138,15 +141,5 @@ public final class BlockedSpotHighlighter {
 
         pose.popPose();
         buffers.endBatch(RenderType.lines());
-    }
-
-    /** 她手上那张蓝图（先主手，再副手） */
-    private static ItemStack heldBlueprint(EntityMaid maid) {
-        ItemStack main = maid.getMainHandItem();
-        if (main.getItem() instanceof BlueprintItem) {
-            return main;
-        }
-        ItemStack off = maid.getOffhandItem();
-        return off.getItem() instanceof BlueprintItem ? off : ItemStack.EMPTY;
     }
 }

@@ -38,13 +38,17 @@ public class S2CBuildProgressPacket {
 
     private final int maidId;
     private final UUID maidUuid;
+    /** 工地身份：同一处工地（同一张图 + 同一锚点 + 朝向）不随重扫改变 */
+    private final long site;
     private final int done;
     private final int total;
     private final byte phase;
 
-    public S2CBuildProgressPacket(int maidId, UUID maidUuid, int done, int total, byte phase) {
+    public S2CBuildProgressPacket(int maidId, UUID maidUuid, long site,
+                                  int done, int total, byte phase) {
         this.maidId = maidId;
         this.maidUuid = maidUuid;
+        this.site = site;
         this.done = done;
         this.total = total;
         this.phase = phase;
@@ -53,20 +57,22 @@ public class S2CBuildProgressPacket {
     public static void encode(S2CBuildProgressPacket msg, FriendlyByteBuf buf) {
         buf.writeInt(msg.maidId);
         buf.writeUUID(msg.maidUuid);
+        buf.writeLong(msg.site);
         buf.writeInt(msg.done);
         buf.writeInt(msg.total);
         buf.writeByte(msg.phase);
     }
 
     public static S2CBuildProgressPacket decode(FriendlyByteBuf buf) {
-        return new S2CBuildProgressPacket(buf.readInt(), buf.readUUID(),
+        return new S2CBuildProgressPacket(buf.readInt(), buf.readUUID(), buf.readLong(),
                 buf.readInt(), buf.readInt(), buf.readByte());
     }
 
     public static void handle(S2CBuildProgressPacket msg, Supplier<NetworkEvent.Context> ctx) {
         NetworkEvent.Context context = ctx.get();
         context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> MaidBuildProgress.put(msg.maidId, msg.maidUuid, msg.done, msg.total, msg.phase)));
+                () -> () -> MaidBuildProgress.put(msg.maidId, msg.maidUuid, msg.site,
+                        msg.done, msg.total, msg.phase)));
         context.setPacketHandled(true);
     }
 }

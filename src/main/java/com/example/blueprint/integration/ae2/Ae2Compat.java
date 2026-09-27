@@ -81,6 +81,26 @@ public final class Ae2Compat {
         return isLoaded() ? Ae2TerminalRegistry.WIRELESS_MAID_TERMINAL.orElse(null) : null;
     }
 
+    /**
+     * 她身上带着我们的无线女仆终端吗。
+     * <p>
+     * 只做物品比对，**不碰网络**——所以"网络连不上"的时候也能用它把话说清楚：
+     * 带着终端却解析不出网络，和"她压根没带终端"，对玩家是两件完全不同的事
+     * （前者该去看无线访问点，后者该去把终端交给她）。
+     */
+    public static boolean carriesTerminal(Iterable<ItemStack> candidates) {
+        Item terminal = wirelessTerminalItem();
+        if (terminal == null) {
+            return false;
+        }
+        for (ItemStack stack : candidates) {
+            if (stack.getItem() == terminal) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** 女仆绑定卡这个物品；没装 AE2 时返回 {@code null}。理由同上。 */
     @Nullable
     public static Item maidBindingCardItem() {

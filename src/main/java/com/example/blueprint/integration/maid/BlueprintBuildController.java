@@ -81,8 +81,31 @@ public class BlueprintBuildController {
     private static final double ARRIVE_DISTANCE_SQR = 12.25D;
     /** 到岗的垂直容差：站在同一层附近就行，不必踩在同一格高度 */
     private static final double ARRIVE_DY = 2.5D;
-    /** 找站位最多找多久（tick）：找太久就放弃站位、就地开工，见 {@link #tickMoveToSpot} */
-    private static final int MOVE_PATIENCE_TICKS = 40;
+    /**
+     * 走向站位时，**连着多少 tick 没靠近**才算走不过去（见 {@link #tickMoveToSpot}）。
+     * <p>
+     * 注意是"没靠近"而不是"花了多久"：从结构里往外走可能要绕一大圈
+     * （穿过大厅、绕过外墙），死按时间的话她走到一半就被判"到不了"、就地开工——
+     * 那正是"怎么也不肯离开、卡在原地建"的由来。3 秒足够分清"卡住了"和"在绕路"。
+     */
+    private static final int MOVE_PATIENCE_TICKS = 60;
+    /** 让开时从她脚下往外找这么多格。给得宽：结构外面常常挤满机器，得往外多找几圈 */
+    private static final int ESCAPE_RADIUS = 16;
+    /** 让开时往上找几层（她可能在结构里的高台上） */
+    private static final int ESCAPE_UP = 3;
+    /** 让开时往下找几层（结构外面往往是更低的平地） */
+    private static final int ESCAPE_DOWN = 6;
+    /** 一次"让开"没走成之后，隔多久再请一次（她站在结构里这件事不会自己好，得反复请） */
+    private static final int STEP_ASIDE_RETRY = 200;
+    /**
+     * "她在干什么"要连着报这么多**包**才改口（见 {@link #publishPhase}）。
+     * <p>
+     * 注意单位是包不是 tick：这个方法是在推送那一步（半秒一包）里调用的。
+     * 一开始写成"20 tick"就变成了 20 包 = **十秒**才肯改口——
+     * 开场那包要是"前往站位"，接下来十秒都在说她"前往站位"，哪怕她正在放方块。
+     * 2 包 = 一秒。
+     */
+    private static final int PHASE_SETTLE_PACKETS = 2;
     /** 站位离结构最外围一圈往外留几格 */
     private static final int STAND_MARGIN = 2;
     /** 偏离站位超过这么远就算被别的 AI 拽走了，得回岗位 */
@@ -162,6 +185,10 @@ public class BlueprintBuildController {
     private static final Map<UUID, Long> SAID_SHORTFALL_AT = new HashMap<>();
     /** 缺料提示之间的最小间隔（同一次尝试里好几条路都想说话时，只放第一条出去） */
     private static final long SHORTFALL_QUIET_MS = 3_000L;
+    /** "找不到取料来源"那行诊断日志的最小间隔，见 {@code logNoProvider} */
+    private static final long NO_PROVIDER_LOG_COOLDOWN_MS = 30_000L;
+    /** 每只女仆上次写那行日志的时间 */
+    private static final Map<UUID, Long> NO_PROVIDER_LOGGED_AT = new HashMap<>();
     /** 这一 tick 在驱动哪只女仆：账本按她存，见 {@link #SAID_SHORTFALL} */
     private UUID currentMaidId;
     private UUID activeId;
@@ -175,6 +202,45 @@ public class BlueprintBuildController {
      * 不叫 moveTicks：那个名字已经被"走向某个目标"那套逻辑用了，两处语义不同，别混。
      */
     private int spotSearchTicks = 0;
+    /** 这一趟去站位时"离它最近到过多少"（平方距离）：不再变小就说明走不动了 */
+    private double bestSpotDistance = Double.MAX_VALUE;
+    /**
+     * 距离下一次"请她让开"还要等多少 tick（见 {@link #stepAside}）。
+     * <p>
+     * 不搞"只让一次"了：她站在结构里这件事不会自己好，走不到就过一会儿再请一次。
+     * 走得到的话第一次就出去了，这个冷却根本用不上。
+     */
+    private int stepAsideCooldown;
+    /**
+     * 这一处工地的身份（同一张图 + 同锚点 + 朝向）。
+     * <p>
+     * 手工地重扫、会话重建都不会改它，**换工地才改**。客户端拿它判断
+     * "这是同一处工地还是新开的一处"——同一处工地的进度只往前不往回，
+     * 条才不会来回跳（见 {@code MaidBuildProgress}）。
+     */
+    private long siteId;
+    /** 上一次真的报出去的"她在干什么"（迟滞用，见 {@link #publishPhase}） */
+    private byte publishedPhase = -1;
+    /** 正在酝酿的新状态，以及它已经连着多少包了 */
+    private byte pendingPhase = -1;
+    private int pendingPhasePackets;
+    /**
+     * 距上一包这段时间里，她**真的放下了方块**吗。
+     * <p>
+     * "她在干什么"按这个算，而不是按当前的 {@link #state}：状态是每 tick 判定的，
+     * "去取料 → 回站位 → 放两块"几 tick 就能来回一趟，抓瞬时状态上报就会出现
+     * "明明在放方块，条上却写着前往站位"。
+     */
+    private boolean placedSincePacket;
+    /** 距上一包这段时间里她动过去取料 */
+    private boolean fetchedSincePacket;
+    /**
+     * 这个控制器一共重建过几次施工会话。
+     * <p>
+     * 纯粹为了诊断：它一路涨就说明"工地身份"在反复变（换了工地、或者判定不稳），
+     * 而每次重建都会把状态设回 MOVE_TO_SPOT——那正是进度条上字在跳、进度不动的样子。
+     */
+    private int sessionBuilds;
     /** 诊断日志的节拍：每 100 tick（约 5 秒）写一行"她卡在哪"，见 {@code tick} */
     private int debugTicks = 0;
     /** 这一趟要去取料的来源。可能是身边的箱子，也可能是绑定书指定的远程仓库 */
@@ -279,18 +345,20 @@ public class BlueprintBuildController {
         // 看起来就像终端坏了。**加载拿不到也照常施工**（施工优先），只是退到背包/地上
         TerminalChunkLoader.hold(level, maid.getUUID(), collectHeldStacks(maid));
 
-        // 每 5 秒把"她现在到底卡在哪一步"写一行日志。
+        // 每 30 秒（600 tick）把"她现在到底卡在哪一步"写一行日志。
         // 大结构上出问题时（站着不动、来回跑），光看现象猜不出来是哪个环节——
-        // 这一行能直接看出是状态没切、还是进度不动、还是站位到不了、还是在等取料
+        // 这一行能直接看出是状态没切、还是进度不动、还是站位到不了、还是在等取料。
+        // 末尾的"会话重建"是给"进度条上的字一直在跳"那类现象用的：
+        // 它一直涨就说明工地身份在反复变，状态被一次次设回 MOVE_TO_SPOT
         if (++debugTicks >= 600) {
             debugTicks = 0;
-            BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 状态={} 进度 {}/{} 锚点={} 图={} 站位={} 下一块={} 取料={} 冷却={} 站位计时={}",
+            BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 状态={} 进度 {}/{} 锚点={} 图={} 站位={} 下一块={} 取料={} 冷却={} 站位计时={} 会话重建={}",
                     maid.getUUID(), state, session.done(), session.total(), activeAnchor,
                     activeId == null ? "无" : activeId.toString().substring(0, 8),
                     standSpot,
                     session.peekNextTarget(level, activeAnchor),
                     fetchProvider == null ? "无" : fetchProvider.getClass().getSimpleName(),
-                    cooldown, spotSearchTicks);
+                    cooldown, spotSearchTicks, sessionBuilds);
         }
         // 这里不能清完工标记：重扫后 session 是刚重建的，还没走过一遍，
         // isFinished() 自然是 false，此时清标记会导致每次重扫都重新播报一遍"施工完毕"。
@@ -314,6 +382,20 @@ public class BlueprintBuildController {
         // 她在等冷却、在走路、去取料的路上，进度条都该照常显示——
         // 玩家想知道的是"建到哪了"，不是"她这一刻有没有在放方块"
         tickProgress(level, maid);
+
+        // **人在结构范围里，就先把自己挪出去**：在里头建，放的都是自己身边那几块——
+        // 轻则被方块顶来顶去，重则闷在墙里出不来。
+        // 判据是"在不在结构的水平范围里"，**不是**"她脚下那格要不要放方块"：
+        // 结构内部的大厅是空气、不用放方块，可那一样是在投影里施工。
+        // <p>
+        // **只在她真的动手建（BUILD）这一刻岔她**：取料那一步不能被打断。
+        // 尤其是无线终端那种不用走动的取料，它是"tickBuild 里把状态置成 FETCH、
+        // 下一 tick 由 tickFetch 一进函数就取完"——中间只隔一 tick。
+        // 这里要是连 FETCH 也拦（之前就是这么写的），那一下就永远轮不到：
+        // 表现就是"她不去终端拿材料了"。
+        if (state == State.BUILD && insideFootprint(maid) && stepAside(level, maid)) {
+            return;
+        }
 
         if (cooldown > 0) {
             cooldown--;
@@ -429,6 +511,13 @@ public class BlueprintBuildController {
         moveTarget = null;
         standSpot = null;
         spotSearchTicks = 0;
+        bestSpotDistance = Double.MAX_VALUE;
+        stepAsideCooldown = 0;
+        publishedPhase = -1;
+        pendingPhase = -1;
+        pendingPhasePackets = 0;
+        placedSincePacket = false;
+        fetchedSincePacket = false;
         state = State.MOVE_TO_SPOT;
         cooldown = 0;
         rescanTimer = RESCAN_INTERVAL;
@@ -515,18 +604,25 @@ public class BlueprintBuildController {
         int total = session.total();
 
         // 她此刻在干什么。这个字段是给进度条上那行字用的：
-        // 玩家最需要的不是"建到几成"，而是"她这会儿是在取料、在走路，还是在发呆"
-        byte phase;
-        if (state == State.FETCH) {
-            phase = S2CBuildProgressPacket.PHASE_FETCH;
-        } else if (state == State.MOVE_TO_SPOT) {
-            phase = S2CBuildProgressPacket.PHASE_WALK;
+        // 玩家最需要的不是"建到几成"，而是"她这会儿是在取料、在走路，还是在发呆"。
+        // **按"这一段时间她干了什么"算，不是按当前 state**：这半秒里真的放下了方块，
+        // 那就是在建——别让条上那行字去说她"前往站位"（她确实可能正一边走一边放）
+        byte raw;
+        if (placedSincePacket) {
+            raw = S2CBuildProgressPacket.PHASE_BUILD;
         } else if (!shortfall.isEmpty() && fetchProvider == null) {
             // 缺料、又没处可去（没找到来源）：这就是"发呆"的实情
-            phase = S2CBuildProgressPacket.PHASE_STUCK;
+            raw = S2CBuildProgressPacket.PHASE_STUCK;
+        } else if (fetchedSincePacket || state == State.FETCH) {
+            raw = S2CBuildProgressPacket.PHASE_FETCH;
+        } else if (state == State.MOVE_TO_SPOT) {
+            raw = S2CBuildProgressPacket.PHASE_WALK;
         } else {
-            phase = S2CBuildProgressPacket.PHASE_BUILD;
+            raw = S2CBuildProgressPacket.PHASE_BUILD;
         }
+        placedSincePacket = false;
+        fetchedSincePacket = false;
+        byte phase = publishPhase(raw);
         double radius = BlueprintConfig.progressRadius() + PROGRESS_RADIUS_MARGIN;
         double radiusSqr = radius * radius;
         double x = maid.getX();
@@ -537,8 +633,38 @@ public class BlueprintBuildController {
                 continue;
             }
             ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                    new S2CBuildProgressPacket(maid.getId(), maid.getUUID(), done, total, phase));
+                    new S2CBuildProgressPacket(maid.getId(), maid.getUUID(), siteId, done, total, phase));
         }
+    }
+
+    /**
+     * "她此刻在干什么"的迟滞：只有连续 {@value #PHASE_SETTLE_TICKS} tick 都是新状态才改口。
+     * <p>
+     * 状态机是每 tick 判定的："走去取料 → 回站位 → 放两块"几 tick 就能来回一趟。
+     * 把瞬时状态直接推出去，条上那行字就在几种说法之间乱跳，
+     * 看着就像上面有两条记录在抢——而它其实一直是同一个人。
+     */
+    private byte publishPhase(byte raw) {
+        if (publishedPhase < 0) {
+            publishedPhase = raw; // 第一次开口：有什么说什么
+            pendingPhase = raw;
+            return publishedPhase;
+        }
+        if (raw == publishedPhase) {
+            pendingPhase = raw;
+            pendingPhasePackets = 0;
+            return publishedPhase;
+        }
+        if (raw != pendingPhase) {
+            pendingPhase = raw;
+            pendingPhasePackets = 1;
+            return publishedPhase;
+        }
+        if (++pendingPhasePackets >= PHASE_SETTLE_PACKETS) {
+            publishedPhase = raw;
+            pendingPhasePackets = 0;
+        }
+        return publishedPhase;
     }
 
     private void stashFinishedBlueprint(EntityMaid maid) {
@@ -607,20 +733,28 @@ public class BlueprintBuildController {
 
         double dx = maid.getX() - x;
         double dz = maid.getZ() - z;
-        if (dx * dx + dz * dz <= ARRIVE_DISTANCE_SQR && Math.abs(maid.getY() - y) <= ARRIVE_DY) {
+        double distance = dx * dx + dz * dz;
+        if (distance <= ARRIVE_DISTANCE_SQR && Math.abs(maid.getY() - y) <= ARRIVE_DY) {
             spotSearchTicks = 0;
+            bestSpotDistance = Double.MAX_VALUE;
             state = State.BUILD;
             return;
         }
 
-        // 找了太久还没到岗：多半是这个站位寻路到不了（取料回来时尤其常见——
-        // 她停下的地方离站位就差那么两三格，寻路却再不肯往前）。
-        // 施工本来就没有距离限制，站着不动照样能建，
-        // 所以干脆放弃站位就地开工，好过在这儿一圈圈地转
-        if (++spotSearchTicks > MOVE_PATIENCE_TICKS) {
-            BlueprintMod.LOGGER.info("女仆 {} 找了 {} tick 还没走到站位 {}，就地开工",
+        // 耐心按**有没有在靠近**算，不按"找了多久"算：大结构里她要绕一大圈才走得出去，
+        // 死按时间判的话，她走到一半就被判"到不了"、就地开工——那正是
+        // "怎么也不肯离开建造范围、卡在原地建"的由来。只要还在靠近就继续走
+        if (distance < bestSpotDistance - 0.25D) {
+            bestSpotDistance = distance;
+            spotSearchTicks = 0;
+        } else if (++spotSearchTicks > MOVE_PATIENCE_TICKS) {
+            // 连着这么久都没再靠近过：多半是寻路到不了
+            // （她停下的地方离站位就差那么两三格，寻路却再不肯往前）。
+            // 施工本来就没有距离限制，站着不动照样能建，所以放弃站位就地开工
+            BlueprintMod.LOGGER.info("女仆 {} 连着 {} tick 没靠近站位 {}，就地开工",
                     maid.getUUID(), spotSearchTicks, standSpot);
             spotSearchTicks = 0;
+            bestSpotDistance = Double.MAX_VALUE;
             // 置空很关键：tickBuild 里还有一条"离站位 8 格以上就回岗位"，
             // 不清掉的话她刚开工又会被踢回来，还是互踢
             standSpot = null;
@@ -629,32 +763,153 @@ public class BlueprintBuildController {
         }
 
         if (!moveTowards(level, maid, x, y, z)) {
-            // 到不了站位也无所谓，站着不动照样能建
+            // 走不过去：**连站位一起放弃**，站着不动照样能建。
+            // standSpot 必须置空，理由和上面那条出口一样（那里写着"置空很关键"）：
+            // tickBuild 开头有一条"离站位 8 格以上就回岗位"，留着它的话她刚进 BUILD
+            // 就被踢回 MOVE_TO_SPOT，两处每 tick 互踢、谁也走不掉
             spotSearchTicks = 0;
+            bestSpotDistance = Double.MAX_VALUE;
+            standSpot = null;
             state = State.BUILD;
         }
     }
 
     /**
-     * 在结构最外围一圈之外一点找个落脚点。
+     * 她正站在"马上要放方块"的那几格上：**先让她让开**，别把自己砌进墙里。
      * <p>
-     * 要求很简单：脚能着地就行（脚下实心、身体没被埋）。
-     * 站在外圈之外，建造时才不会被自己正在放的方块埋住。
+     * 让到结构外圈去（外圈在结构外两格，站上去压不着任何一块）。
+     * 找不到落脚点（外圈悬空、站不住人）就作罢——被挡下的那几格仍在重试队列里，
+     * 等她去取料、被别的事挪开，自然就放上了。
+     *
+     * @return true 表示已经安排她往站位走了，这一 tick 就别再干别的
      */
-    private BlockPos resolveStandSpot(ServerLevel level, BlockPos anchor, Vec3i size) {
-        int minX = anchor.getX() - STAND_MARGIN;
-        int maxX = anchor.getX() + size.getX() - 1 + STAND_MARGIN;
-        int minZ = anchor.getZ() - STAND_MARGIN;
-        int maxZ = anchor.getZ() + size.getZ() - 1 + STAND_MARGIN;
+    private boolean stepAside(ServerLevel level, EntityMaid maid) {
+        if (stepAsideCooldown > 0) {
+            stepAsideCooldown--;
+            return false;
+        }
+        // 先找"离她最近的结构**外**落脚点"（通常迈几步就出去了），
+        // 找不到再退到结构外圈上最近的那个
+        BlockPos spot = escapeSpot(level, maid);
+        if (spot == null) {
+            spot = nearestStandSpot(level, maid);
+        }
+        if (spot == null) {
+            stepAsideCooldown = STEP_ASIDE_RETRY;
+            return false;
+        }
+        BlueprintMod.LOGGER.info("女仆 {} 站在结构范围里，先让开去 {}", maid.getUUID(), spot);
+        standSpot = spot;
+        spotSearchTicks = 0;
+        bestSpotDistance = Double.MAX_VALUE; // 换了个目标：耐心从"离它最近过多少"重新算
+        stepAsideCooldown = STEP_ASIDE_RETRY; // 万一走不到，过一会儿再请一次
+        state = State.MOVE_TO_SPOT;
+        return true;
+    }
 
-        for (BlockPos column : outerRing(minX, maxX, minZ, maxZ)) {
-            BlockPos spot = findGroundSpot(level, column, anchor.getY());
-            if (spot != null) {
-                return spot;
+    /**
+     * 离她最近的一个"压不着蓝图"的落脚点（让开用）。
+     * <p>
+     * 和 {@link #nearestStandSpot}（结构外圈上离她最近的那个）的分工：
+     * 这里是**从她脚下往外一圈圈找**，判据只有一条——**站那儿不会占住蓝图要放的格子**
+     * （脚、头顶两格都算，见 {@link #blocksPlanned}）。
+     * <p>
+     * 特意**不拿"在不在结构的 X/Z 大框里"当判据**：结构内部的空档（大厅、走道、天井）
+     * 本来就站得，用大框去框会把它们全判成"在结构里"，于是明明迈两步就有地方站，
+     * 却算成"找不到落脚点"，只能让她原地开工。外圈那个（可能在对角几十格开外）只当兜底。
+     */
+    @Nullable
+    private BlockPos escapeSpot(ServerLevel level, EntityMaid maid) {
+        if (session == null || activeAnchor == null) {
+            return null;
+        }
+        int baseX = (int) Math.floor(maid.getX());
+        int baseY = (int) Math.floor(maid.getY());
+        int baseZ = (int) Math.floor(maid.getZ());
+
+        for (int radius = 1; radius <= ESCAPE_RADIUS; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
+                        continue; // 只看当前这一圈：近的先找到就先给
+                    }
+                    for (int dy = ESCAPE_UP; dy >= -ESCAPE_DOWN; dy--) {
+                        BlockPos candidate = new BlockPos(baseX + dx, baseY + dy, baseZ + dz);
+                        if (insideFootprint(candidate)) {
+                            continue; // 还在结构的水平范围里：站这儿等于接着在投影里建
+                        }
+                        if (canStandAt(level, candidate)) {
+                            return candidate;
+                        }
+                    }
+                }
             }
         }
-        // 外圈全是悬空的（比如把建筑挂在半空），退回中心
-        return new BlockPos(anchor.getX() + size.getX() / 2, anchor.getY(), anchor.getZ() + size.getZ() / 2);
+        return null;
+    }
+
+    /**
+     * 结构外圈上**离她最近**的那个落脚点。
+     * <p>
+     * 让开时用这个，而不是 {@link #resolveStandSpot}（它取外圈的第一个格子）：
+     * 大结构上"第一个格子"可能在对角几十格开外，而躲开自己脚下这一格，
+     * 本来就只需要挪出去两三步。
+     */
+    @Nullable
+    private BlockPos nearestStandSpot(ServerLevel level, EntityMaid maid) {
+        if (session == null || activeAnchor == null) {
+            return null;
+        }
+        int minX = activeAnchor.getX() - STAND_MARGIN;
+        int maxX = activeAnchor.getX() + session.size().getX() - 1 + STAND_MARGIN;
+        int minZ = activeAnchor.getZ() - STAND_MARGIN;
+        int maxZ = activeAnchor.getZ() + session.size().getZ() - 1 + STAND_MARGIN;
+
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (BlockPos column : outerRing(minX, maxX, minZ, maxZ)) {
+            BlockPos spot = findGroundSpot(level, column, activeAnchor.getY());
+            if (spot == null) {
+                continue;
+            }
+            double distance = maid.distanceToSqr(spot.getX() + 0.5D, spot.getY(), spot.getZ() + 0.5D);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = spot;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * 这一格在不在结构的**水平范围**里。
+     * <p>
+     * 判"要不要请她出去"就认它。**不是**"这一格要不要放方块"——
+     * 结构内部的空气（大厅、房间）当然不需要放方块，可她站在那儿同样是在投影里施工：
+     * 放的都是自己身边那几块，轻则被方块顶来顶去，重则闷在墙里出不来。
+     * 这两件事我上一版混为一谈了，于是"站在大厅里"被当成"没挡路"，她自然就不肯挪窝。
+     */
+    private boolean insideFootprint(BlockPos pos) {
+        if (session == null || activeAnchor == null) {
+            return false;
+        }
+        Vec3i size = session.size();
+        return pos.getX() >= activeAnchor.getX() && pos.getX() < activeAnchor.getX() + size.getX()
+                && pos.getZ() >= activeAnchor.getZ() && pos.getZ() < activeAnchor.getZ() + size.getZ();
+    }
+
+    /** 她**此刻**在不在结构的水平范围里 */
+    private boolean insideFootprint(EntityMaid maid) {
+        return insideFootprint(new BlockPos((int) Math.floor(maid.getX()), 0,
+                (int) Math.floor(maid.getZ())));
+    }
+
+    /** 同上，但按传进来的锚点和尺寸算（换工地那一步要在 activeAnchor 更新前用它） */
+    private static boolean insideFootprint(EntityMaid maid, BlockPos anchor, Vec3i size) {
+        int x = (int) Math.floor(maid.getX());
+        int z = (int) Math.floor(maid.getZ());
+        return x >= anchor.getX() && x < anchor.getX() + size.getX()
+                && z >= anchor.getZ() && z < anchor.getZ() + size.getZ();
     }
 
     /** 外圈上的柱子，y 先统一填 0，具体高度后面再找 */
@@ -718,11 +973,22 @@ public class BlueprintBuildController {
             maid.getLookControl().setLookAt(target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
         }
 
-        // 回收可以在配置里关掉：那时传 null，被顶掉的方块照老样子直接消失
+        // 回收可以在配置里关掉：那时传 null，被顶掉的方块照老样子直接消失。
+        // 还要把她自己的碰撞箱一起传进去：落在她身上的格子一个都不放，
+        // 否则就是把女仆砌进自己正在建的墙里（见 BuildSession#step）
         BuildSession.StepResult result = session.step(level, activeAnchor, new MaidItemSource(maid), 1,
-                BlueprintConfig.salvageEnabled() ? new MaidSalvage(maid) : null);
+                BlueprintConfig.salvageEnabled() ? new MaidSalvage(maid) : null,
+                maid.getBoundingBox());
+
+        // 自己挡着要放的格子：先出结构。主判据在 tick 里那道
+        // "人在结构范围里就先出去"，这里保一道——防这一趟刚好走到她那两格而主判据那会儿没触发。
+        // 注意顺序：它在"没材料 → 去取料"之前，所以只影响"放"这件事，不挡取料
+        if (result.selfBlocked() > 0 && stepAside(level, maid)) {
+            return;
+        }
 
         if (result.placed() > 0) {
+            placedSincePacket = true;
             // 真的动工了，说明这处工地还没完工
             if (MaidBlueprint.isCompleted(level, stack)) {
                 MaidBlueprint.setCompleted(level, stack, false);
@@ -766,7 +1032,14 @@ public class BlueprintBuildController {
         ItemProvider provider = findProvider(level, maid);
         if (provider == null) {
             cooldown = NO_SOURCE_COOLDOWN;
-            notifyMissingMaterials(level, maid);
+            // 带着终端却接不上网络：这句话比"我找不到建造要用的材料"准得多——
+            // 材料就在网络里，玩家该去看的是无线访问点，而不是去翻箱子
+            if (Ae2Compat.carriesTerminal(collectHeldStacks(maid))
+                    && findWirelessProvider(level, maid) == null) {
+                notifyTerminalOffline(level, maid);
+            } else {
+                notifyMissingMaterials(level, maid);
+            }
             return;
         }
         fetchProvider = provider;
@@ -874,6 +1147,7 @@ public class BlueprintBuildController {
     }
 
     private void tickFetch(ServerLevel level, EntityMaid maid) {
+        fetchedSincePacket = true; // 这一段时间她在忙取料：条上那行字照这个来说
         if (fetchProvider == null) {
             state = State.MOVE_TO_SPOT;
             return;
@@ -1022,8 +1296,44 @@ public class BlueprintBuildController {
         ItemProvider bound = findBoundProvider(level, maid);
         if (bound != null) {
             BlueprintMod.LOGGER.info("女仆 {} 改用绑定书指定的目标：{}", maid.getUUID(), bound.interactPos());
+            return bound;
         }
-        return bound;
+        logNoProvider(maid);
+        return null;
+    }
+
+    /**
+     * 三条取料来源都没找到时，把"为什么"写进日志。
+     * <p>
+     * 玩家只会听到一句"我找不到建造要用的材料"，而这句话背后至少有五六种原因：
+     * 她身上压根没带终端 / 整合包没装 AE2 / 终端没连上网络 / 网络所在区块没加载 /
+     * 附近箱子是空的 / 绑定书没绑。全都不写出来，玩家只能干瞪眼。
+     * <p>
+     * **最有用的一条是"她身上有什么"**：一看就知道终端到底有没有被她带着
+     * （在手上、在背包、当饰品，这三种都算"带着"）。
+     */
+    private void logNoProvider(EntityMaid maid) {
+        // 节流：找不到来源时会走冷却重试（5 秒一轮），不节流就是每 5 秒一行、一直刷下去
+        long now = System.currentTimeMillis();
+        Long last = NO_PROVIDER_LOGGED_AT.get(maid.getUUID());
+        if (last != null && now - last < NO_PROVIDER_LOG_COOLDOWN_MS) {
+            return;
+        }
+        NO_PROVIDER_LOGGED_AT.put(maid.getUUID(), now);
+
+        StringBuilder held = new StringBuilder();
+        for (ItemStack stack : collectHeldStacks(maid)) {
+            if (!stack.isEmpty()) {
+                held.append(stack.getHoverName().getString()).append(' ');
+            }
+        }
+        BlueprintMod.LOGGER.warn("女仆 {} 找不到取料来源：AE2 已装={}，缺口 {} 种，"
+                        + "需求前几样={}，她身上和背包里=[{}]",
+                maid.getUUID(), Ae2Compat.isLoaded(), shortfall.size(),
+                shortfall.keySet().stream().limit(3)
+                        .map(item -> item.getDescription().getString())
+                        .collect(java.util.stream.Collectors.joining("、")),
+                held.toString().trim());
     }
 
     /**
@@ -1412,6 +1722,9 @@ public class BlueprintBuildController {
         activeId = id;
         activeAnchor = anchor;
         activeRotation = rotation;
+        // 工地身份：同一张图 + 同锚点 + 朝向。重扫（会话重建）不改它，**换工地才改**——
+        // 客户端拿它决定"这是同一处工地还是新开的一处"，同一处只往前不往回
+        siteId = ((long) Objects.hash(id, anchor) << 32) | (Objects.hash(rotation) & 0xFFFFFFFFL);
         // **换了工地**才重新记账：上处说过"这块我拆不动"，不代表这处也免开尊口。
         // 同一处工地反复重建会话（重扫、进度重建）**不算换工地**——
         // 以前这里无条件清账，于是每隔几秒的重扫都把"说过了"重置一遍，
@@ -1426,10 +1739,32 @@ public class BlueprintBuildController {
         // **站哪都行**：施工本来就没有距离限制（见类注释），她已经到工地附近就就地开工，
         // 不必再去找一个"合适"的站位——大结构外圈那一圈，走过去又远、路上还容易卡，
         // 表现就是"一直在找站位"。只有她离得还远时，才给她一个落脚方向
+        // 但**站在结构的水平范围里**不算"就在工地附近"：那是在投影里施工，
+        // 放的都是自己身边那几块。判据就是"在不在结构的水平范围里"，
+        // 不看她脚下那格要不要放方块——结构内部的大厅同样是结构里
         boolean alreadyNearby =
-                maid.distanceToSqr(anchor.getX() + 0.5D, maid.getY(), anchor.getZ() + 0.5D) <= 256.0D;
-        standSpot = alreadyNearby ? null : resolveStandSpot(level, anchor, schematic.getSize());
-        spotSearchTicks = 0; // 换了工地，找站位的耐心重新算
+                maid.distanceToSqr(anchor.getX() + 0.5D, maid.getY(), anchor.getZ() + 0.5D) <= 256.0D
+                        && !insideFootprint(maid, anchor, schematic.getSize());
+        BlockPos newSpot = null;
+        if (!alreadyNearby) {
+            // 优先"离她最近的结构外落脚点"（迈两步就出去了），其次结构外圈上最近的那个。
+            // 两个都找不到就**不给站位**：宁可让她就地建（她那几格由 step 跳过），
+            // 也不要指一个结构里面的位置给她——那正是"把自己埋了"的老路
+            newSpot = escapeSpot(level, maid);
+            if (newSpot == null) {
+                newSpot = nearestStandSpot(level, maid);
+            }
+        }
+        // 耐心只在**站位真的变了**才清零。
+        // 之前无条件清零：会话只要被重建（哪怕重建出来是同一个站位），
+        // "找 40 tick 就就地开工"那道兜底就永远攒不满——
+        // 她于是永远停在 MOVE_TO_SPOT，进度条上也永远是"前往站位"
+        if (!Objects.equals(newSpot, standSpot)) {
+            spotSearchTicks = 0;
+        }
+        standSpot = newSpot;
+        bestSpotDistance = Double.MAX_VALUE;
+        sessionBuilds++;
         fetchProvider = null;
         returnProvider = null;
         returnFinished = false;
@@ -1550,6 +1885,20 @@ public class BlueprintBuildController {
      * {@link Component} 传而不是先转成字符串——那样会在服务端就固定成某种语言，
      * 客户端换成别的语言也翻不动了。
      */
+    /**
+     * 她带着无线终端、可网络解析不出来（访问点被拆、没电、或者所在区块没加载）时说一句。
+     */
+    private void notifyTerminalOffline(ServerLevel level, EntityMaid maid) {
+        // 附近没人就先不说，也别记成"已说"——否则玩家赶回来反而听不到（同 notifyMissingMaterials）
+        if (level.getNearestPlayer(maid, 16.0D) == null) {
+            return;
+        }
+        if (!shouldReportShortfall("no-network", shortfall)) {
+            return;
+        }
+        notify(level, maid, "message.blueprint.maid_terminal_offline");
+    }
+
     private void notifyMissingMaterials(ServerLevel level, EntityMaid maid) {
         // 附近没人就先不说，也别记成"已播报"——否则玩家赶回来时反而听不到
         Player nearby = level.getNearestPlayer(maid, 16.0D);

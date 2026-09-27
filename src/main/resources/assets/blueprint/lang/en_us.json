@@ -17,6 +17,7 @@
   "task.blueprint.industry.desc": "Works through the orders placed in her study pool: fetches materials from storage, crafts them by hand, and only during her working hours",
 
   "gui.blueprint.build_progress": "%s left · %s%%",
+  "gui.blueprint.build_progress_others": "%s more building nearby",
   "gui.blueprint.study.title": "Study Pool",
   "gui.blueprint.study.search": "Search",
   "gui.blueprint.study.search_hint": "Filter products (name or item id)",
@@ -78,6 +79,7 @@
   "message.blueprint.capture_failed": "Failed to capture the structure",
   "message.blueprint.cleared": "Blueprint cleared, ready to record again",
   "message.blueprint.maid_no_material": "I cannot find the materials for the build",
+  "message.blueprint.maid_terminal_offline": "My wireless terminal cannot reach the network",
   "message.blueprint.maid_missing_materials": "I cannot find these materials: %s",
   "message.blueprint.maid_need_tool": "I cannot break the %s — it needs a proper tool, so I will leave it for now",
   "message.blueprint.maid_unbreakable": "I cannot touch the %s — it is not something that can be broken, so I will leave it for now",

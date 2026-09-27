@@ -1,65 +1,74 @@
 package com.example.blueprint.client;
 
 import javax.annotation.Nullable;
-import java.util.HashMap;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * 客户端记着"哪个女仆建到哪了、此刻在干什么"，给进度条当数据源。
+ * 客户端记着"哪位女仆建到哪了、此刻在干什么"，给进度条当数据源。
  * <p>
- * 数据是服务端推来的（{@code S2CBuildProgressPacket}），只在施工期间推、而且节流。
- * 所以这里也**按时效作废**：超过 {@link #STALE_MS} 没有新进度就当这条没用了。
+ * 数据是服务端推来的（{@code S2CBuildProgressPacket}），只在施工期间推、而且节流；
+ * 超过 {@link #STALE_MS} 没有新进度就当这条没用了。
  * <p>
- * 键是**实体 id**（客户端要拿它 {@code level.getEntity(id)} 找到她本人、算离玩家多远），
- * 但**每条里都存着她的 UUID**：实体 id 会被游戏复用，光按 id 认人会留下一条过期的进度，
- * 看着就是"两条进度条来回覆盖"。渲染时拿 UUID 一比对，不是同一个人就当场删掉
- * （见 {@link #removeIfNot(UUID)} 的用法）。
+ * <b>键是她的 UUID，不是实体 id。</b>实体 id 会被游戏复用（区块卸载重载、女仆移除再放出来
+ * 都会换 id，旧 id 还可能被别的实体拿走）——按 id 记账时，一条已经没人更新的旧进度
+ * 会一直挂在屏幕上跟真身抢位置。按 UUID 记账之后，"同一个人的新进度"永远覆盖旧的，
+ * 这类幽灵记录从根上不存在。实体 id 只当"去哪儿找她本人"的线索用，
+ * 每一包都会刷新（见 {@link Entry#maidId()}）。
+ * <p>
+ * <b>进度只往前不往回。</b>服务端把进度算得很认真（会话重建时有 fastForward 顶着，
+ * 见 {@code BuildSession}），但那终究是"这一刻世界的扫描结果"，会因为重扫、方块被拆、
+ * 会话重建而抖动。进度条是给人看的：同一处工地上只认更大的那个数，
+ * 换工地（{@link Entry#site()} 变了）才从头开始。这样条永远不会"跳回去"。
  */
 public final class MaidBuildProgress {
 
-    /** 超过这么久没有新进度就作废（约两秒：比她一站就是几秒的节奏短，但够撑过丢包） */
+    /** 超过这么久没有新进度就作废（约两秒：比推的节拍长得多，够撑过丢包） */
     private static final long STALE_MS = 2000L;
 
-    private static final Map<Integer, Entry> ENTRIES = new HashMap<>();
+    private static final Map<UUID, Entry> ENTRIES = new LinkedHashMap<>();
 
     private MaidBuildProgress() {
     }
 
-    public static void put(int maidId, UUID maidUuid, int done, int total, byte phase) {
-        ENTRIES.put(maidId, new Entry(maidUuid, done, total, phase, System.currentTimeMillis()));
+    /**
+     * 收到一条进度。
+     *
+     * @param site 工地身份：同一处工地（同一张图 + 同一个锚点 + 朝向）每次重扫都一样，
+     *             换个位置重新开工就是另一个值
+     */
+    public static void put(int maidId, UUID maidUuid, long site, int done, int total, byte phase) {
+        Entry old = ENTRIES.get(maidUuid);
+        // 同一处工地：认更大的那个数（进度不回退）；换了工地：从这一包重新算
+        int shown = old != null && old.site() == site ? Math.max(old.done(), done) : done;
+        ENTRIES.put(maidUuid,
+                new Entry(maidUuid, maidId, site, shown, total, phase, System.currentTimeMillis()));
     }
 
     /**
      * 现在还作数的那些进度，顺手把过期的清掉。
      *
-     * @return 女仆实体 id → 进度（调用方只读，别改）
+     * @return 记录（调用方只读，别改）
      */
-    public static Map<Integer, Entry> active() {
+    public static Collection<Entry> active() {
         long now = System.currentTimeMillis();
         ENTRIES.entrySet().removeIf(entry -> now - entry.getValue().at() > STALE_MS);
-        return ENTRIES;
+        return ENTRIES.values();
     }
 
-    /**
-     * 这个实体 id 上的记录**不是**这个 UUID 的（实体 id 被复用了），当场删掉。
-     * <p>
-     * 少了这一步，旧记录会一直挂到超时：那两秒里屏幕上就有两条，数字来回覆盖。
-     */
-    public static void removeIfNot(int maidId, UUID expected) {
-        Entry entry = ENTRIES.get(maidId);
-        if (entry != null && !entry.maidUuid().equals(expected)) {
-            ENTRIES.remove(maidId);
+    /** 全清（换存档、断线时用） */
+    public static void clear(@Nullable UUID maidUuid) {
+        if (maidUuid == null) {
+            ENTRIES.clear();
+        } else {
+            ENTRIES.remove(maidUuid);
         }
     }
 
-    /** 实体查不到了（她被卸载、被移除）：立刻删，别等超时 */
-    public static void remove(int maidId) {
-        ENTRIES.remove(maidId);
-    }
-
-    /** 一次施工的快照：是谁、已完成多少、一共多少、此刻在干什么 */
-    public record Entry(UUID maidUuid, int done, int total, byte phase, long at) {
+    /** 一次施工的快照：是谁（UUID + 去哪找她）、建在哪一处、已完成多少、一共多少、此刻在干什么 */
+    public record Entry(UUID maidUuid, int maidId, long site, int done, int total, byte phase, long at) {
 
         /** 还剩多少块（不会小于 0） */
         public int left() {
@@ -82,15 +91,6 @@ public final class MaidBuildProgress {
                 case 3 -> "hud.blueprint.maid_phase.stuck";
                 default -> "hud.blueprint.maid_phase.build";
             };
-        }
-    }
-
-    /** 全清（换存档、断线时用） */
-    public static void clear(@Nullable Integer maidId) {
-        if (maidId == null) {
-            ENTRIES.clear();
-        } else {
-            ENTRIES.remove(maidId);
         }
     }
 }

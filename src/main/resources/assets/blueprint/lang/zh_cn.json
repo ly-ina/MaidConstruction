@@ -16,6 +16,7 @@
   "task.blueprint.industry.desc": "照主人在学习池里下的单开工：自己去仓库取料、手搓，做好放回背包；只在她的工作时间内干活",
 
   "gui.blueprint.build_progress": "还剩 %s 块 · %s%%",
+  "gui.blueprint.build_progress_others": "附近还有 %s 位在建",
   "gui.blueprint.study.title": "学习池",
   "gui.blueprint.study.search": "搜索",
   "gui.blueprint.study.search_hint": "搜索产物（名字或物品 id）",
@@ -78,6 +79,7 @@
   "message.blueprint.capture_failed": "记录失败",
   "message.blueprint.cleared": "已清空蓝图，可以重新录制",
   "message.blueprint.maid_no_material": "我找不到建造要用的材料",
+  "message.blueprint.maid_terminal_offline": "我身上的无线终端连不上网络",
   "message.blueprint.maid_missing_materials": "我找不到这些材料：%s",
   "message.blueprint.maid_need_tool": "%s 我拆不动——得有对应的工具才挖得开，这块我先留着",
   "message.blueprint.maid_unbreakable": "%s 我动不了——那不是能挖掉的东西，这块我先留着",

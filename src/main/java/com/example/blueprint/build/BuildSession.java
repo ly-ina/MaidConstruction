@@ -3,6 +3,7 @@ package com.example.blueprint.build;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.schematic.Schematic;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -11,10 +12,12 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,9 +45,13 @@ public class BuildSession {
     private final int total;
     private List<Schematic.BlockEntry> order;
     private List<Schematic.BlockEntry> deferred;
+    /** "蓝图在这些位置有方块"，按需建一次（见 {@link #planned}） */
+    private java.util.Set<BlockPos> planned;
     private int cursor = 0;
     private int pass = 0;
     private boolean finished = false;
+    /** 工地上已经是目标状态的方块数：进度条的数字（见 {@link #countBuilt}） */
+    private int built;
 
     /**
      * @param level  用来看工地上**已经到位**的方块
@@ -55,7 +62,27 @@ public class BuildSession {
         this.order = plan(schematic);
         this.deferred = new ArrayList<>();
         this.total = order.size();
+        this.built = countBuilt(level, origin);
         fastForward(level, origin);
+    }
+
+    /**
+     * 工地上**已经是目标状态**的方块有多少块。
+     * <p>
+     * 进度条的数字就认它，不再拿"游标还剩多少"去倒算——那笔账会随趟数推进而变：
+     * 一趟结束时会 {@code order = deferred}（清单换成"这一趟没放成的那些"），
+     * 同一座立刻算出来的"还剩多少"就缩水一大截，倒算出来的"已建多少"于是忽高忽低。
+     * 玩家看到的正是"进度条来来回回"。数世界本身就不会有这个问题：
+     * 它只跟工地的实际样子有关，跟内部账怎么记无关。
+     */
+    private int countBuilt(ServerLevel level, BlockPos origin) {
+        int count = 0;
+        for (Schematic.BlockEntry entry : order) {
+            if (level.getBlockState(origin.offset(entry.pos())).equals(entry.state())) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /**
@@ -81,9 +108,12 @@ public class BuildSession {
 
     /**
      * @param lastPlaced 本次最后放置的方块位置，调用方用它播放放置动作和音效
+     * @param selfBlocked 这一趟里"她正站在那格里"而跳过多少块（见 {@link #step}）。
+     *                    调用方拿它决定要不要让她先让开；它不是"放不下"，
+     *                    只是这一刻不能放，所以也算进 {@link #remaining()}
      */
     public record StepResult(int placed, int missing, boolean finished, int remaining,
-                             @Nullable BlockPos lastPlaced) {
+                             @Nullable BlockPos lastPlaced, int selfBlocked) {
     }
 
     // ------------------------------------------------------------------
@@ -180,13 +210,14 @@ public class BuildSession {
     }
 
     /**
-     * 已经到位多少块。
+     * 已经到位多少块（工地上"已经是目标状态"的方块数）。
      * <p>
-     * 含**开工前就已经正确**的那些：续建、被拆后重扫都会重建会话，而幂等推进会把
-     * 已经建好的部分一路掠过——进度因此从那个位置接着往上走，不会从零重来。
+     * 含**开工前就已经正确**的那些：续建、被拆后重扫都会重建会话，
+     * 而构造时会整个工地点一遍（{@link #countBuilt}），所以进度接着往上走、不会从零重来；
+     * 也**不随趟数推进而变**，进度条因此不会来回跳。
      */
     public int done() {
-        return Math.max(0, total - remaining());
+        return built;
     }
 
     /**
@@ -194,18 +225,23 @@ public class BuildSession {
      *
      * @param salvage 位置上原有方块的去处（可为 null，那时拆下来的东西照旧凭空消失——
      *                只有"没人来收"的场合才这么传，女仆那边永远有一个实现）
+     * @param selfBox 施工者本人的碰撞箱（可为 null）。**正在放方块的人**用的：
+     *                落在她身上的格子一律跳过，见下面那段的说明
      */
     public StepResult step(ServerLevel level, BlockPos origin, ItemSource source, int maxBlocks,
-                           @Nullable Salvage salvage) {
+                           @Nullable Salvage salvage, @Nullable AABB selfBox) {
         if (finished) {
-            return new StepResult(0, 0, true, 0, null);
+            return new StepResult(0, 0, true, 0, null, 0);
         }
 
         int placed = 0;
         int missing = 0;
+        int selfBlocked = 0;
         BlockPos lastPlaced = null;
         /** 这一趟里有没有"因为料不够"而跳过方块 */
         boolean materialShort = false;
+        // 扩只做一次：逐块扩就等于每个方块白造一个 AABB，这类垃圾对象最后都要渲染线程来还
+        AABB body = selfBox == null ? null : selfBox.inflate(0.001D);
 
         while (placed < maxBlocks) {
             if (cursor >= order.size()) {
@@ -233,6 +269,19 @@ public class BuildSession {
 
             // 幂等：已经和目标状态一致就跳过
             if (level.getBlockState(world).equals(entry.state())) {
+                cursor++;
+                continue;
+            }
+
+            // **这一格正好是她自己站着的地方**：放下去就是把自己砌进墙里
+            // （轻则被方块顶开、在墙里乱撞，重则闷在里面出不来——"给自己埋死"）。
+            // 跳过它、留到重试队列：她多半会走去取料、或者让开一下，那时自然就放上了。
+            // 不丢进"放不下"那份：那是"这块没救"，而这里只是"这一刻不能放"
+            if (body != null && body.intersects(
+                    world.getX(), world.getY(), world.getZ(),
+                    world.getX() + 1.0D, world.getY() + 1.0D, world.getZ() + 1.0D)) {
+                selfBlocked++;
+                deferred.add(entry);
                 cursor++;
                 continue;
             }
@@ -300,10 +349,33 @@ public class BuildSession {
 
             cursor++;
             placed++;
+            built++;
             lastPlaced = world;
         }
 
-        return new StepResult(placed, missing, finished, remaining(), lastPlaced);
+        return new StepResult(placed, missing, finished, remaining(), lastPlaced, selfBlocked);
+    }
+
+    /** 这座结构的尺寸。让开用的："结构外圈"得按它算 */
+    public Vec3i size() {
+        return schematic.getSize();
+    }
+
+    /**
+     * 这一格里蓝图有没有要放的方块（世界坐标）。
+     * <p>
+     * 判"她站的地方会不会挡住施工"要用它，而不是拿"结构的 X/Z 范围"去框：
+     * 结构里面的空档（大厅、走道、天井）本来就站得——站那儿一块都压不着。
+     * 只有"她身体占着的格子正好是蓝图要放的"才是真挡路。
+     */
+    public boolean planned(BlockPos origin, BlockPos world) {
+        if (planned == null) {
+            planned = new HashSet<>(schematic.entries().size() * 2);
+            for (Schematic.BlockEntry entry : schematic.entries()) {
+                planned.add(origin.offset(entry.pos()));
+            }
+        }
+        return planned.contains(world);
     }
 
     /**

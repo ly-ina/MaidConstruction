@@ -8,9 +8,8 @@ import com.example.blueprint.schematic.Schematic;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.example.blueprint.BlueprintConfig;
-import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.example.blueprint.integration.maid.MaidCompat;
 import net.minecraft.client.Camera;
-import net.minecraft.world.InteractionHand;
 
 import javax.annotation.Nullable;
 import net.minecraft.client.Minecraft;
@@ -287,42 +286,15 @@ public class ProjectionRenderer {
             return held;
         }
 
-        double radius = BlueprintConfig.maidProjectionRadius();
-        ItemStack best = ItemStack.EMPTY;
-        double bestDistance = radius * radius;
-        for (EntityMaid maid : mc.level.getEntitiesOfClass(EntityMaid.class,
-                mc.player.getBoundingBox().inflate(radius))) {
-            ItemStack stack = maidBuildingBlueprint(maid);
-            if (stack == null) {
-                continue;
-            }
-            double distance = maid.distanceToSqr(mc.player);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = stack;
-            }
+        // 女仆模组没装就到此为止。**这个方法自己的字节码里只要出现一次
+        // EntityMaid 的名字**，没装女仆的客户端执行到那儿就是一次
+        // NoClassDefFoundError（1.6.3 的客户端崩溃就是这么来的：那会儿女仆那段
+        // 就写在这个方法里）。现在真正的女仆代码关在 MaidClientBridge 里，
+        // 到这一句为止只碰过一个纯 ModList 判断——没装就永远不会被加载
+        if (!MaidCompat.isLoaded()) {
+            return ItemStack.EMPTY;
         }
-        return best;
-    }
-
-    /**
-     * 女仆手上那张**还没建完**的蓝图。
-     * <p>
-     * 只认主手和副手，不去翻她的背包：蓝图在她手上才说明她正打算建它。
-     * 背包里躺着好几张时照顺序挑一张画出来，玩家会看到一座跟自己毫无关系的建筑浮在眼前。
-     */
-    @Nullable
-    private static ItemStack maidBuildingBlueprint(EntityMaid maid) {
-        for (InteractionHand hand : InteractionHand.values()) {
-            ItemStack stack = maid.getItemInHand(hand);
-            if (stack.getItem() instanceof BlueprintItem
-                    && BlueprintItem.hasSchematic(stack)
-                    && BlueprintItem.hasAnchor(stack)
-                    && !BlueprintItem.isCompleted(stack)) {
-                return stack;
-            }
-        }
-        return null;
+        return MaidClientBridge.nearestBuildingBlueprint(mc);
     }
 
     /**
