@@ -8,6 +8,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.entity.Entity;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -190,11 +191,15 @@ public class BuildProgressHud {
         }
         graphics.renderOutline(x, y, BAR_WIDTH, BAR_HEIGHT, COLOR_EDGE);
 
-        // 第二行：**建筑**。只有还剩几块和百分比，没有人的名字——
-        // 这一行是慢变量，半分钟才动一下
+        // 第二行：**建筑**——它的名字 + 还剩几块 + 百分比。没有人的名字：
+        // 这一行是慢变量，半分钟才动一下；"她此刻在干什么"在下一行
         int percent = total <= 0 ? 0 : (int) Math.round(done * 100.0D / total);
-        Component building = Component.translatable("gui.blueprint.build_progress",
-                Math.max(0, total - done), percent);
+        int left = Math.max(0, total - done);
+        Component building = progress.name().isEmpty()
+                // 没起名就说"未命名建筑"：不显示名字的话，多工地时认不出是哪一座
+                ? Component.translatable("gui.blueprint.build_progress_unnamed", left, percent)
+                : Component.translatable("gui.blueprint.build_progress_named",
+                        progress.name(), left, percent);
         graphics.drawString(mc.font, building,
                 centerX - mc.font.width(building) / 2, y + BAR_HEIGHT + 4,
                 COLOR_BUILDING_TEXT, true);
@@ -227,5 +232,17 @@ public class BuildProgressHud {
         lastLoggedAt = now;
         lastLoggedId = maid.getId();
         BlueprintMod.LOGGER.info("[施工进度条] 改画 {}（附近在建 {} 位）", maid.getUUID(), visible);
+    }
+
+    /**
+     * 断线时把记下来的进度全清掉。
+     * <p>
+     * 不清的话，换存档重连之后，旧记录要等两秒超时才作废——那两秒里屏幕上会飘出
+     * 一条跟当前存档毫无关系的进度条。顺带把"锁住的那位"也松开。
+     */
+    @SubscribeEvent
+    public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        MaidBuildProgress.clear(null);
+        pinnedUuid = null;
     }
 }

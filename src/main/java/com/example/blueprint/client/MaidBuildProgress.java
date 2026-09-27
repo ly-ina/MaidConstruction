@@ -39,12 +39,15 @@ public final class MaidBuildProgress {
      * @param site 工地身份：同一处工地（同一张图 + 同一个锚点 + 朝向）每次重扫都一样，
      *             换个位置重新开工就是另一个值
      */
-    public static void put(int maidId, UUID maidUuid, long site, int done, int total, byte phase) {
+    public static void put(int maidId, UUID maidUuid, long site, String name,
+                           int done, int total, byte phase) {
         Entry old = ENTRIES.get(maidUuid);
-        // 同一处工地：认更大的那个数（进度不回退）；换了工地：从这一包重新算
+        // 同一处工地：认更大的那个数（进度不回退）；换了工地：从这一包重新算。
+        // 名字每包都跟着最新的一包走（玩家中途改名要立刻反映出来）
         int shown = old != null && old.site() == site ? Math.max(old.done(), done) : done;
         ENTRIES.put(maidUuid,
-                new Entry(maidUuid, maidId, site, shown, total, phase, System.currentTimeMillis()));
+                new Entry(maidUuid, maidId, site, name == null ? "" : name,
+                        shown, total, phase, System.currentTimeMillis()));
     }
 
     /**
@@ -67,17 +70,30 @@ public final class MaidBuildProgress {
         }
     }
 
-    /** 一次施工的快照：是谁（UUID + 去哪找她）、建在哪一处、已完成多少、一共多少、此刻在干什么 */
-    public record Entry(UUID maidUuid, int maidId, long site, int done, int total, byte phase, long at) {
+    /**
+     * 一次施工的快照：是谁（UUID + 去哪找她）、建在哪一处、那处叫什么、已完成多少、一共多少、此刻在干什么。
+     *
+     * @param name 建筑名（玩家给蓝图起的名字），空串表示没起名——由 HUD 翻成"未命名"，见 {@code BuildProgressHud}
+     */
+    public record Entry(UUID maidUuid, int maidId, long site, String name,
+                        int done, int total, byte phase, long at) {
 
         /** 还剩多少块（不会小于 0） */
         public int left() {
             return Math.max(0, total - done);
         }
 
-        /** 完成度百分比 */
+        /**
+         * 完成度百分比。
+         * <p>
+         * 上限卡在 100：{@code done} 是**数世界**得来的，有可能大于 {@code total}
+         * （图纸记的块数比工地上实际的多、或者中途被拆过又补上），不卡的话条上会写"106%"。
+         */
         public int percent() {
-            return total <= 0 ? 0 : (int) Math.round(done * 100.0D / total);
+            if (total <= 0) {
+                return 0;
+            }
+            return Math.min(100, (int) Math.round(done * 100.0D / total));
         }
 
         /**

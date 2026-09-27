@@ -71,6 +71,11 @@ public class MaidCraftTickHandler {
 
     /** 每个女仆的步进节拍 */
     private static final Map<UUID, Integer> COOLDOWN = new HashMap<>();
+    /** 手搓这一步连续抛异常的次数（成功一步就清零，见 {@link #tickMaid}） */
+    private static final Map<UUID, Integer> FAIL_COUNT = new HashMap<>();
+    /** 每只女仆上次把异常写进日志的时间（半分钟一行，坏配方别刷屏） */
+    private static final Map<UUID, Long> FAIL_LOGGED_AT = new HashMap<>();
+    private static final long FAIL_LOG_COOLDOWN_MS = 30_000L;
     /** 每个女仆上次提示的时间 */
     private static final Map<UUID, Long> LAST_WARN = new HashMap<>();
     /** 刚说完"下班"之后这么久内不再念"还没到上班时间"（同一个意思别说两遍） */
@@ -207,7 +212,22 @@ public class MaidCraftTickHandler {
             return;
         }
         COOLDOWN.put(uuid, ACTION_INTERVAL_TICKS);
-        step(level, maid);
+        // **一步一兜**：这一步里会调第三方配方的代码（getIngredients / matches / assemble…），
+        // 它们一个算错就是这个 tick 抛出去、整台服务器陪葬。兜住之后只是"她这一步白干"。
+        // 施工那边早就是这么兜的（见 MaidBuildTickHandler），手搓这边以前漏了
+        try {
+            step(level, maid);
+            FAIL_COUNT.remove(uuid);
+        } catch (Throwable t) {
+            int fails = FAIL_COUNT.merge(uuid, 1, Integer::sum);
+            long now = System.currentTimeMillis();
+            Long last = FAIL_LOGGED_AT.get(uuid);
+            if (fails == 1 || last == null || now - last >= FAIL_LOG_COOLDOWN_MS) {
+                FAIL_LOGGED_AT.put(uuid, now);
+                BlueprintMod.LOGGER.error("女仆 {} 的手搓这一步抛异常（累计 {} 次，已单独兜住，"
+                        + "服务器不受影响）", uuid, fails, t);
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -287,36 +307,85 @@ public class MaidCraftTickHandler {
         }
     }
 
+    /**
+     * 配方自己抛异常时的兜底：**还料、撤单、留一行日志**。
+     * <ul>
+     *   <li><b>还料</b>：assemble 在扣料之后，炸在那儿就是白扣（玩家看不见东西少在哪）；</li>
+     *   <li><b>撤单</b>：同一个配方每次都会炸，留着就是一秒一次的空转，
+     *       而且玩家看着像"她卡住了"——撤掉并说一声，比让她一直试好；</li>
+     *   <li><b>日志</b>：按女仆节流（半分钟一行），坏配方不会把日志刷穿。</li>
+     * </ul>
+     */
+    private static void onRecipeFailure(ServerLevel level, EntityMaid maid, IItemHandler backpack,
+                                        Map<Item, Integer> bill, boolean consumed, Throwable t) {
+        if (consumed) {
+            for (Map.Entry<Item, Integer> entry : bill.entrySet()) {
+                give(level, maid, backpack, new ItemStack(entry.getKey(), entry.getValue()));
+            }
+        }
+        MaidCraftOrder.Order order = MaidCraftOrder.first(maid);
+        ItemStack product = order == null ? ItemStack.EMPTY : order.product();
+        MaidCraftOrder.removeAt(maid, 0);
+
+        UUID uuid = maid.getUUID();
+        int fails = FAIL_COUNT.merge(uuid, 1, Integer::sum);
+        long now = System.currentTimeMillis();
+        Long last = FAIL_LOGGED_AT.get(uuid);
+        if (fails == 1 || last == null || now - last >= FAIL_LOG_COOLDOWN_MS) {
+            FAIL_LOGGED_AT.put(uuid, now);
+            BlueprintMod.LOGGER.error("女仆 {} 手搓 {} 时配方自己抛了异常（已撤单、材料已还；"
+                            + "这张单先不做了，可以换个做法或换个产物）",
+                    uuid, product.getHoverName().getString(), t);
+        }
+        if (!product.isEmpty()) {
+            warn(level, maid, false, "message.blueprint.craft.recipe_error", product.getHoverName());
+        }
+    }
+
     /** 料齐了：摆一遍、合成、把产物和余料收进背包、单子减一 */
     private static void craftOne(ServerLevel level, EntityMaid maid, Recipe<CraftingContainer> recipe,
                                  Map<Item, Integer> bill, MaidItemSource self, IItemHandler backpack) {
         // 先按她**手上真有**的材料摆出来，再让配方自己认一遍。
         // 先摆后扣：摆不出/认不出就什么都不扣，不存在"扣了料才失败"要回滚的情形
         CraftingGrid grid = new CraftingGrid(3, 3);
-        List<ItemStack> layout = StudyRecipeCapture.layout(recipe,
-                ingredient -> firstOwned(ingredient, self));
-        for (int i = 0; i < layout.size(); i++) {
-            grid.place(i, layout.get(i));
-        }
-        if (!recipe.matches(grid, level)) {
-            MaidCraftOrder.Order stuck = MaidCraftOrder.first(maid);
-            warn(level, maid, true, "message.blueprint.craft.make_failed",
-                    stuck == null ? ItemStack.EMPTY.getHoverName() : stuck.product().getHoverName());
-            return;
-        }
-
-        // 确认全都够再动手（跟施工那边同一个规矩：中途失败会白扣掉前面那些）
-        for (Map.Entry<Item, Integer> entry : bill.entrySet()) {
-            if (self.available(entry.getKey()) < entry.getValue()) {
+        // 这一段里除了我们自己的几行，**其余全是第三方配方的代码**：
+        // getIngredients / matches / assemble / getRemainingItems 都由它自己实现，
+        // 一个算错就会抛出来——而这是服务端 tick，抛出去就是整台服务器陪葬。
+        // 所以整段兜住；并且记住"料扣了没有"：assemble 在扣料**之后**，
+        // 真炸在那儿得把料还回去，不然玩家的东西就凭空少了
+        boolean consumed = false;
+        ItemStack result;
+        NonNullList<ItemStack> remaining;
+        try {
+            List<ItemStack> layout = StudyRecipeCapture.layout(recipe,
+                    ingredient -> firstOwned(ingredient, self));
+            for (int i = 0; i < layout.size(); i++) {
+                grid.place(i, layout.get(i));
+            }
+            if (!recipe.matches(grid, level)) {
+                MaidCraftOrder.Order stuck = MaidCraftOrder.first(maid);
+                warn(level, maid, true, "message.blueprint.craft.make_failed",
+                        stuck == null ? ItemStack.EMPTY.getHoverName() : stuck.product().getHoverName());
                 return;
             }
-        }
-        for (Map.Entry<Item, Integer> entry : bill.entrySet()) {
-            self.consume(entry.getKey(), entry.getValue());
-        }
 
-        ItemStack result = recipe.assemble(grid, level.registryAccess());
-        NonNullList<ItemStack> remaining = recipe.getRemainingItems(grid);
+            // 确认全都够再动手（跟施工那边同一个规矩：中途失败会白扣掉前面那些）
+            for (Map.Entry<Item, Integer> entry : bill.entrySet()) {
+                if (self.available(entry.getKey()) < entry.getValue()) {
+                    return;
+                }
+            }
+            for (Map.Entry<Item, Integer> entry : bill.entrySet()) {
+                self.consume(entry.getKey(), entry.getValue());
+            }
+            consumed = true;
+
+            result = recipe.assemble(grid, level.registryAccess());
+            remaining = recipe.getRemainingItems(grid);
+        } catch (Throwable t) {
+            onRecipeFailure(level, maid, backpack, bill, consumed, t);
+            return;
+        }
         List<ItemStack> produced = new ArrayList<>(remaining.size() + 1);
         produced.add(result);
         give(level, maid, backpack, result);

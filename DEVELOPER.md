@@ -858,7 +858,10 @@ Recipe(@Nullable ResourceLocation id, List<ItemStack> grid)   // 配方身份 + 
 **界面入口：`InteractMaidEvent` 的 `post` 返回值就是"要不要跳过它自己的女仆界面"。**
 女仆那边的顺序是"post 事件 → 手里物品的 `interactLivingEntity` → `openMaidGui`"，
 而 `post()` 返回的是"事件被取消了"，所以**取消它 = 直接 SUCCESS 收场**（TLM 自己也这么用）。
-条件是"**蹲下 + 空手**"：女仆界面是主人最常用的东西，普通右键、拿东西右键都得让给 TLM。
+条件是"**蹲下 + 手里拿着木棍**"（`MaidStudyInteractHandler.TRIGGER_ITEM`）。
+原来用的是"蹲下 + 空手"，但那个手势被 TLM 自己占了——**空手蹲下右键 = 亲亲女仆**，
+两边抢同一个动作的结果是玩家想开学习池却亲了她一口。木棍没人拿它跟人互动，不会撞车；
+普通右键、拿别的东西右键仍然都归 TLM。
 事件两端都会走一遍（右键本来就有客户端预测），所以界面在客户端开就行，
 不需要额外发一个"打开界面"的包。
 

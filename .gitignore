@@ -31,6 +31,15 @@
 # 提交信息临时文件（Windows 下 cmd 会吞引号，只能走文件）
 /commit_msg.txt
 
+# AI 助手的工作目录：提交信息临时文件、随手记的草稿都在这里。
+# 它们描述的是"某一次改动的过程"，不是这个模组的源码，所以不进仓库
+# （目录本身该留着——下次提交还要往里写临时文件）。
+/.codebuddy/
+
+# publishing 的目标目录（build.gradle 里 maven { url "file://.../$mcmodsrepo" }）：
+# 那是给本地测试用的产物，不是源码
+/mcmodsrepo/
+
 # 系统
 .DS_Store
 Thumbs.db

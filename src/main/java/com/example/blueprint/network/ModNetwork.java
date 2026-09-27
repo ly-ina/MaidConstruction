@@ -27,8 +27,9 @@ public class ModNetwork {
     // 再之后进度包带上她的 UUID（实体 id 会被复用，光按 id 认人会留下过期进度），升到 6。
     // 1.6.5 进度包带上"工地身份"（site）：同一处工地上进度只往前不往回，
     // 光有"已建多少"没法判断"这是新工地还是同一处重扫"，条就会来回跳。升到 7。
+    // 再之后进度包带上"建筑名"（玩家给这张蓝图起的名字），条上要写出来，升到 8。
     // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
-    private static final String PROTOCOL_VERSION = "7";
+    private static final String PROTOCOL_VERSION = "8";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(BlueprintMod.MOD_ID, "main"),

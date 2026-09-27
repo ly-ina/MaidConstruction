@@ -40,15 +40,23 @@ public class S2CBuildProgressPacket {
     private final UUID maidUuid;
     /** 工地身份：同一处工地（同一张图 + 同一锚点 + 朝向）不随重扫改变 */
     private final long site;
+    /**
+     * 建筑名：玩家给这张蓝图起的名字（没有就是空串）。
+     * <p>
+     * 空串由客户端翻成"未命名"，**不在这儿翻**：包是服务端发的，
+     * 服务端把中文写进来，玩家切成英文也还是中文。
+     */
+    private final String buildingName;
     private final int done;
     private final int total;
     private final byte phase;
 
-    public S2CBuildProgressPacket(int maidId, UUID maidUuid, long site,
+    public S2CBuildProgressPacket(int maidId, UUID maidUuid, long site, String buildingName,
                                   int done, int total, byte phase) {
         this.maidId = maidId;
         this.maidUuid = maidUuid;
         this.site = site;
+        this.buildingName = buildingName == null ? "" : buildingName;
         this.done = done;
         this.total = total;
         this.phase = phase;
@@ -58,20 +66,21 @@ public class S2CBuildProgressPacket {
         buf.writeInt(msg.maidId);
         buf.writeUUID(msg.maidUuid);
         buf.writeLong(msg.site);
+        buf.writeUtf(msg.buildingName);
         buf.writeInt(msg.done);
         buf.writeInt(msg.total);
         buf.writeByte(msg.phase);
     }
 
     public static S2CBuildProgressPacket decode(FriendlyByteBuf buf) {
-        return new S2CBuildProgressPacket(buf.readInt(), buf.readUUID(), buf.readLong(),
+        return new S2CBuildProgressPacket(buf.readInt(), buf.readUUID(), buf.readLong(), buf.readUtf(),
                 buf.readInt(), buf.readInt(), buf.readByte());
     }
 
     public static void handle(S2CBuildProgressPacket msg, Supplier<NetworkEvent.Context> ctx) {
         NetworkEvent.Context context = ctx.get();
         context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                () -> () -> MaidBuildProgress.put(msg.maidId, msg.maidUuid, msg.site,
+                () -> () -> MaidBuildProgress.put(msg.maidId, msg.maidUuid, msg.site, msg.buildingName,
                         msg.done, msg.total, msg.phase)));
         context.setPacketHandled(true);
     }

@@ -107,6 +107,20 @@ dependencies {
     // 相关代码全部关在 integration.ae2 包里，运行时由 Ae2Compat 把关，
     // 避免没装 AE2 时触发 NoClassDefFoundError。
     compileOnly fg.deobf("maven.modrinth:ae2:${ae2_version}")
+
+    // 单元测试：只测**不碰 Minecraft 运行时**的那部分纯逻辑。
+    // 这一轮反复改错的几处（客户端进度记账、站位判据、进度只往前不往回）恰好都是纯逻辑，
+    // 喂假数据就能测——有测试就不必每次都进游戏里试出来。
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
 }
 
 jar {

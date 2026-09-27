@@ -3,6 +3,7 @@ package com.example.blueprint.registry;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.integration.ae2.Ae2Compat;
 import com.example.blueprint.integration.ae2.Ae2TerminalRegistry;
+import com.example.blueprint.item.ManualBook;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.CreativeModeTab;
@@ -29,6 +30,9 @@ public final class ModCreativeTabs {
                     .icon(() -> ModItems.BLUEPRINT.get().getDefaultInstance())
                     .displayItems((params, output) -> {
                         output.accept(ModItems.BLUEPRINT.get());
+                        // 说明书只能"送"（新玩家第一次进世界，见 ManualGiveaway），
+                        // 但玩家把它弄丢之后总得有个地方再拿一本——就摆在这儿
+                        output.accept(ManualBook.create());
                         output.accept(ModItems.BINDING_BOOK.get());
                         // 终端物品只在 AE2 存在时才有注册对象：访问这个字段会初始化
                         // Ae2TerminalRegistry 的静态字段，未装 AE2 时那是个 NoClassDefFoundError

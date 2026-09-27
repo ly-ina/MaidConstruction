@@ -4,12 +4,14 @@ import com.example.blueprint.client.MaidStudyScreenOpener;
 import com.github.tartaricacid.touhoulittlemaid.api.event.InteractMaidEvent;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.DistExecutor;
 
 /**
- * 打开学习池界面的入口：**蹲下 + 空手右键自己的女仆**。
+ * 打开学习池界面的入口：**蹲下 + 拿着木棍右键自己的女仆**。
  * <p>
  * 为什么走 {@link InteractMaidEvent}：女仆那边的处理顺序是
  * "先 post 这个事件 → 手里物品的 {@code interactLivingEntity} → 打开它自己的女仆界面"，
@@ -17,19 +19,29 @@ import net.minecraftforge.fml.DistExecutor;
  * <b>我们取消掉这个事件，TLM 就不会再打开它自己的界面</b>——这是它留出来的口子，
  * 它自己也拿它做背包之类的交互。
  * <p>
- * 条件是"蹲下 + 空手"两条同时满足，理由是女仆界面是主人最常用的东西：
- * 普通右键、拿东西右键都照旧归 TLM，只有这个明确没人用的组合归我们。
+ * **为什么是木棍，不是空手**：空手蹲下右键被车万女仆自己占了——那是**亲亲女仆**。
+ * 两边抢同一个手势的结果，是玩家想开学习池、结果亲了她一口。
+ * 木棍则是个没人拿它跟人互动的东西（便宜、没别的用处），拿在手里蹲下右键
+ * 不会跟 TLM 任何一条动作撞上。
  * <p>
  * 界面在客户端开（右键本来就两端都会走一遍预测），服务端不需要额外发"打开"的包；
  * 池子本身由 TLM 的 {@code TASK_DATA_SYNC} 同步，界面直接读她身上的数据。
  */
 public class MaidStudyInteractHandler {
 
+    /**
+     * 触发用的物品：木棍。
+     * <p>
+     * 单独拎出来，是因为"换个触发物"是最可能被改的一句话——换掉这个常量就够了，
+     * 别的判断都是拿它比的。
+     */
+    public static final Item TRIGGER_ITEM = Items.STICK;
+
     @SubscribeEvent
     public static void onInteractMaid(InteractMaidEvent event) {
         Player player = event.getPlayer();
         EntityMaid maid = event.getMaid();
-        if (!player.isShiftKeyDown() || !event.getStack().isEmpty()) {
+        if (!player.isShiftKeyDown() || !event.getStack().is(TRIGGER_ITEM)) {
             return;
         }
         if (maid.getOwner() != player) {
