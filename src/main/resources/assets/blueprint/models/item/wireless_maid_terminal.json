@@ -1,6 +1,6 @@
 {
   "parent": "item/generated",
   "textures": {
-    "layer0": "ae2:item/wireless_terminal"
+    "layer0": "blueprint:item/wireless_maid_terminal"
   }
 }

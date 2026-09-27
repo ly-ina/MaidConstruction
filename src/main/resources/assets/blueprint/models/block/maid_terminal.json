@@ -1,6 +1,7 @@
 {
   "parent": "minecraft:block/cube_all",
   "textures": {
-    "all": "ae2:part/terminal"
+    "all": "blueprint:block/maid_terminal",
+    "particle": "blueprint:block/maid_terminal"
   }
 }

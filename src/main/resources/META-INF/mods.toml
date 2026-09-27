@@ -7,6 +7,9 @@ issueTrackerURL = ""
 modId = "${mod_id}"
 version = "${mod_version}"
 displayName = "女仆建筑"
+# 模组列表里显示的那个图标：由 docs/logo-source.jpg（画好的原图）经 tools/make_logo.py
+# 裁边 + 圆角后生成 256×256 版本，游戏内"模组"列表会显示它
+logoFile = "logo.png"
 credits = "Inspired by Create's Schematic"
 authors = "${mod_authors}"
 description = '''
