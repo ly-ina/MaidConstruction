@@ -33,6 +33,10 @@ public final class ManualGiveaway {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
+        if (!BlueprintConfig.giveGuideBookOnFirstJoin()) {
+            // 关掉了就不发，而且**不记账**：以后把开关打开，这位玩家还能补上一本
+            return;
+        }
         CompoundTag data = player.getPersistentData();
         if (data.getBoolean(GIVEN_TAG)) {
             return;
@@ -48,6 +52,8 @@ public final class ManualGiveaway {
         }
         player.sendSystemMessage(Component.translatable("manual.blueprint.given")
                 .withStyle(ChatFormatting.GOLD));
+        // 顺手点亮"拿到说明书"那条进度（以及它的根）：这是玩家与本模组的第一次照面
+        Advancements.grant(player, Advancements.GUIDE_BOOK);
     }
 
     private ManualGiveaway() {

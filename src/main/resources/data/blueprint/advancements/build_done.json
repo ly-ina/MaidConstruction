@@ -1,0 +1,22 @@
+{
+  "parent": "blueprint:build_start",
+  "display": {
+    "icon": {
+      "item": "minecraft:bell"
+    },
+    "title": {
+      "translate": "advancements.blueprint.build_done.title"
+    },
+    "description": {
+      "translate": "advancements.blueprint.build_done.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

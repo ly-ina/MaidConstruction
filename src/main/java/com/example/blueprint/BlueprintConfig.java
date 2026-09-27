@@ -32,6 +32,9 @@ public final class BlueprintConfig {
     private static ForgeConfigSpec.IntValue MAID_PROJECTION_RADIUS;
     private static ForgeConfigSpec.IntValue PROGRESS_RADIUS;
     private static ForgeConfigSpec.ConfigValue<String> CREATIVE_ITEM_MODE;
+    private static ForgeConfigSpec.IntValue STEP_OUT_GRACE_TICKS;
+    private static ForgeConfigSpec.BooleanValue ALLOW_HARD_MOVE;
+    private static ForgeConfigSpec.BooleanValue GIVE_GUIDE_BOOK;
 
     /**
      * 出厂设置。取不到配置时就用这些，别让"配置没加载"变成"功能坏掉"。
@@ -47,6 +50,9 @@ public final class BlueprintConfig {
     private static final boolean DEF_PROJECTION = true;
     private static final int DEF_PROJECTION_RADIUS = 32;
     private static final int DEF_PROGRESS_RADIUS = 16;
+    private static final int DEF_STEP_OUT_GRACE_TICKS = 40;
+    private static final boolean DEF_ALLOW_HARD_MOVE = true;
+    private static final boolean DEF_GIVE_GUIDE_BOOK = true;
     private static final String DEF_CREATIVE_ITEM_MODE = "blocks";
     /** 创造女仆接口可以列出的范围（{@code blueprint-common.toml} 里那一项的取值） */
     private static final List<String> CREATIVE_ITEM_MODES = List.of("blocks", "all");
@@ -113,6 +119,28 @@ public final class BlueprintConfig {
                 .comment("站在女仆多少格内显示进度条（同时也是服务端推送的距离）。")
                 .defineInRange("radius", DEF_PROGRESS_RADIUS, 4, 64);
         builder.pop();
+
+        builder.comment("开工前先站到投影外").push("step_out");
+        STEP_OUT_GRACE_TICKS = builder
+                .comment("她站在结构范围里的时候，先**专心往外走**这么多 tick，这一段时间一块都不放；",
+                        "走出去之后才开始放。40 = 2 秒。",
+                        "为什么要留这一段：在里头开工，放的都是她身边那几块，她占着的格子会被跳过",
+                        "（墙里空一块），所以先让位再动工是划算的。",
+                        "填 0 就是不给让位时间：她站在哪儿就在哪儿开工（1.6.6 之前的老行为）。")
+                .defineInRange("grace_ticks", DEF_STEP_OUT_GRACE_TICKS, 0, 200);
+        ALLOW_HARD_MOVE = builder
+                .comment("让位时间用完了她还没走出去时，直接把她挪到那个落脚点上。",
+                        "落脚点是现找的、结构外的、站得住的那一格，所以挪过去是安全的。",
+                        "关掉的话她就就地开工：好处是绝不会看见瞬移，坏处是可能在自己砌的墙里留个洞。")
+                .define("allow_hard_move", DEF_ALLOW_HARD_MOVE);
+        builder.pop();
+
+        builder.comment("说明书").push("guide_book");
+        GIVE_GUIDE_BOOK = builder
+                .comment("玩家第一次进这个存档时，发一本《女仆建筑说明书》（原版成书，能翻页）。",
+                        "关掉也不会让人抓瞎：说明书可以用「一本书 + 一张纸」自己合成。")
+                .define("give_on_first_join", DEF_GIVE_GUIDE_BOOK);
+        builder.pop();
     }
 
     /** 施工是否按作息表来 */
@@ -148,6 +176,21 @@ public final class BlueprintConfig {
     /** 进度条的显示 / 推送距离（格） */
     public static int progressRadius() {
         return read(PROGRESS_RADIUS, DEF_PROGRESS_RADIUS);
+    }
+
+    /** 开工前"先站到投影外"的让位时间（tick，0 表示不让位） */
+    public static int stepOutGraceTicks() {
+        return read(STEP_OUT_GRACE_TICKS, DEF_STEP_OUT_GRACE_TICKS);
+    }
+
+    /** 让位时间用完她还没走出去时，允不允许直接把她挪到落脚点上 */
+    public static boolean allowHardMove() {
+        return read(ALLOW_HARD_MOVE, DEF_ALLOW_HARD_MOVE);
+    }
+
+    /** 新玩家第一次进这个存档时，发不发说明书 */
+    public static boolean giveGuideBookOnFirstJoin() {
+        return read(GIVE_GUIDE_BOOK, DEF_GIVE_GUIDE_BOOK);
     }
 
     /** 创造女仆接口只申报可放置的方块吗（false 就是申报全部物品） */

@@ -1,0 +1,22 @@
+{
+  "display": {
+    "icon": {
+      "item": "blueprint:blueprint"
+    },
+    "title": {
+      "translate": "advancements.blueprint.root.title"
+    },
+    "description": {
+      "translate": "advancements.blueprint.root.description"
+    },
+    "frame": "task",
+    "background": "minecraft:textures/gui/advancements/backgrounds/stone.png",
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

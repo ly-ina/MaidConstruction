@@ -111,6 +111,34 @@ public class MaidBuildTickHandler {
     }
 
     /**
+     * 正在施工的女仆（跨维度）。给 {@code /blueprint} 命令用。
+     * <p>
+     * 判据是"控制器表里有她"而不是"她拿着蓝图"：表里有，说明她真的被驱动过；
+     * 只是拿着图、任务不对的女仆不该出现在"正在施工"的名单里。
+     */
+    public static java.util.List<EntityMaid> buildingMaids(net.minecraft.server.MinecraftServer server) {
+        java.util.List<EntityMaid> maids = new java.util.ArrayList<>();
+        for (net.minecraft.server.level.ServerLevel level : server.getAllLevels()) {
+            for (Entity entity : level.getAllEntities()) {
+                if (entity instanceof EntityMaid maid && maid.isAlive()
+                        && isBuildTask(maid) && CONTROLLERS.containsKey(maid.getId())) {
+                    maids.add(maid);
+                }
+            }
+        }
+        return maids;
+    }
+
+    /**
+     * 她那台控制器对外报的一眼状态。没有控制器（刚好还没被驱动过）就报一份空的，
+     * 让调用方（命令）不用到处判空。
+     */
+    public static BlueprintBuildController.Snapshot snapshotOf(EntityMaid maid) {
+        BlueprintBuildController controller = CONTROLLERS.get(maid.getId());
+        return controller == null ? BlueprintBuildController.EMPTY : controller.snapshot(maid);
+    }
+
+    /**
      * 施工驱动抛异常了：记一笔、节流地喊一声，连续出错太多次就先停她的工。
      * <p>
      * 三个考虑：

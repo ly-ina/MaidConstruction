@@ -1,10 +1,12 @@
 package com.example.blueprint.integration.maid;
 
+import com.example.blueprint.Advancements;
 import com.example.blueprint.BlueprintConfig;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.build.BlockContainerProvider;
 import com.example.blueprint.build.BuildSession;
 import com.example.blueprint.build.StandSpotSearch;
+import com.example.blueprint.build.StepOutPolicy;
 import com.example.blueprint.build.ItemProvider;
 import com.example.blueprint.build.Salvage;
 import com.example.blueprint.integration.ae2.Ae2Compat;
@@ -68,6 +70,19 @@ public class BlueprintBuildController {
     private enum State { MOVE_TO_SPOT, BUILD, FETCH }
 
     /**
+     * 一眼状态：给 {@code /blueprint} 命令看的（也方便以后做别的只读界面）。
+     * <p>
+     * 只报**事实**（在不在投影里、建到几成、站在哪、状态名），不做翻译——
+     * 译文由命令那边查，语言跟着玩家的客户端走。
+     */
+    public record Snapshot(boolean insideProjection, boolean building, int done, int total,
+                           @Nullable BlockPos anchor, @Nullable BlockPos spot, String state) {
+    }
+
+    /** 拿不到控制器时对外报的那一份：命令那边就不用判空了 */
+    public static final Snapshot EMPTY = new Snapshot(false, false, 0, 0, null, null, "BUILD");
+
+    /**
      * 放置速度的**基准**（块/秒）。
      * <p>
      * 5 块/秒就是原先那个节奏（`PLACE_COOLDOWN = 4`，4 tick 一块）。
@@ -111,7 +126,6 @@ public class BlueprintBuildController {
      * 那正是"怎么也不肯离开、卡在原地建"的由来。3 秒足够分清"卡住了"和"在绕路"。
      */
     private static final int MOVE_PATIENCE_TICKS = 60;
-    /** 让开时从她脚下往外找多少格、上下找几层：见 {@link StandSpotSearch} */
     /** 一次"让开"没走成之后，隔多久再请一次（她站在结构里这件事不会自己好，得反复请） */
     private static final int STEP_ASIDE_RETRY = 200;
     /**
@@ -122,17 +136,6 @@ public class BlueprintBuildController {
      * 才认"她确实出不去"（外圈悬空、四面围死），那就只能就地开工（她那几格由 step 跳过）。
      */
     private static final int MAX_ESCAPE_TRIES = 3;
-    /**
-     * **开工前先让位的宽限期**（tick）。
-     * <p>
-     * 她人在投影里的时候，先专心往外走这么久，**一块都不放**；2 秒够她迈出墙外了。
-     * 走不出去（四面围死、外圈悬空）才会带着一行日志就地开工。
-     * <p>
-     * 为什么要有这么一段"什么都不干"的时间，而不是边走边放：边走边放的话，
-     * 她每放一块就被自己脚下那格绊一下（那几格被跳过），看起来就是
-     * "她自己把自己当障碍物、又不动"——先把位置站对，再动工，干净。
-     */
-    private static final int STEP_OUT_GRACE_TICKS = 40;
     /**
      * "她在干什么"要连着报这么多**包**才改口（见 {@link #publishPhase}）。
      * <p>
@@ -458,24 +461,30 @@ public class BlueprintBuildController {
         // 表现就是"她不去终端拿材料了"。
         if (state == State.BUILD && insideFootprint(maid)) {
             insideTicks++;
-            if (insideTicks <= STEP_OUT_GRACE_TICKS) {
+            int grace = BlueprintConfig.stepOutGraceTicks();
+            // "该走、该挪、还是就地开工"由纯逻辑定（见 StepOutPolicy，那边有单测）；
+            // 这里只负责把事实凑齐（在不在投影里、宽限还剩多少、有没有落脚点、挪过没有），
+            // 然后执行它给的动作
+            StepOutPolicy.Move what = StepOutPolicy.decide(true, grace - insideTicks + 1,
+                    ensureStandSpot(level, maid), insideForced, BlueprintConfig.allowHardMove());
+            if (what == StepOutPolicy.Move.WALK_OUT) {
                 // 宽限期内：专心往外走。这一 tick 就直接驱动她走，不设状态、不等下一 tick
-                if (ensureStandSpot(level, maid)) {
-                    state = State.MOVE_TO_SPOT;
-                    tickMoveToSpot(level, maid);
-                    return;
-                }
-            } else if (!insideForced && standSpot != null) {
-                // 给了 2 秒她还是没出去：**直接把她落到那个落脚点上**，然后再开工。
+                state = State.MOVE_TO_SPOT;
+                tickMoveToSpot(level, maid);
+                return;
+            }
+            if (what == StepOutPolicy.Move.HARD_MOVE) {
+                // 宽限期用完她还在里头：**直接把她落到那个落脚点上**，然后再开工。
                 // 落脚点是现找的、结构外的、站得住的那一格，所以这一下是安全的
                 insideForced = true;
                 moveMaidTo(maid, standSpot);
                 return;
-            } else if (!insideGaveUp) {
+            }
+            if (!insideGaveUp) {
                 insideGaveUp = true;
                 BlueprintMod.LOGGER.info("[蓝图施工] 女仆 {} 在投影里待满 {} tick 还没站出去，就地开工"
                                 + "（她自己占着的格子会被跳过）",
-                        maid.getUUID(), insideTicks);
+                        maid.getUUID(), grace);
             }
         } else {
             insideTicks = 0;
@@ -668,6 +677,8 @@ public class BlueprintBuildController {
         // 完工标记写在蓝图上，所以"施工完毕"只会播报一次
         if (!MaidBlueprint.isCompleted(level, stack)) {
             MaidBlueprint.setCompleted(level, stack, true);
+            // 第一座建完：给主人点一条进度（同一个工地上只可能进这里一次）
+            Advancements.grant(maid.getOwner(), Advancements.BUILD_DONE);
             if (leftover > 0) {
                 BlueprintMod.LOGGER.info("女仆 {} 完工，但有 {} 块放不下（缺支撑或位置被占）",
                         maid.getUUID(), leftover);
@@ -878,6 +889,16 @@ public class BlueprintBuildController {
     // 站位
     // ------------------------------------------------------------------
 
+    /**
+     * 对外的一眼状态（见 {@link Snapshot}）。**纯字段**，不碰世界；
+     * 唯一算一下的是"她在不在投影里"，那也只是拿锚点框一下她的坐标。
+     */
+    public Snapshot snapshot(EntityMaid maid) {
+        return new Snapshot(insideFootprint(maid), session != null && !session.isFinished(),
+                session == null ? 0 : session.done(), session == null ? 0 : session.total(),
+                activeAnchor, standSpot, state.name());
+    }
+
     private void tickMoveToSpot(ServerLevel level, EntityMaid maid) {
         if (standSpot == null) {
             state = State.BUILD;
@@ -913,7 +934,8 @@ public class BlueprintBuildController {
             // 换到头了才认命
             spotSearchTicks = 0;
             bestSpotDistance = Double.MAX_VALUE;
-            if (retryEscape(level, maid)) {
+            if (StepOutPolicy.shouldRetryElsewhere(insideFootprint(maid), escapeTries, MAX_ESCAPE_TRIES)
+                    && retryEscape(level, maid)) {
                 return;
             }
             BlueprintMod.LOGGER.info("女仆 {} 连着 {} tick 没靠近站位 {}，就地开工",
@@ -931,7 +953,8 @@ public class BlueprintBuildController {
             // 就被踢回 MOVE_TO_SPOT，两处每 tick 互踢、谁也走不掉
             spotSearchTicks = 0;
             bestSpotDistance = Double.MAX_VALUE;
-            if (retryEscape(level, maid)) {
+            if (StepOutPolicy.shouldRetryElsewhere(insideFootprint(maid), escapeTries, MAX_ESCAPE_TRIES)
+                    && retryEscape(level, maid)) {
                 return;
             }
             giveUpSpot(maid);
@@ -1000,9 +1023,6 @@ public class BlueprintBuildController {
      * @return true 表示已经换了新目标，这一 tick 接着走
      */
     private boolean retryEscape(ServerLevel level, EntityMaid maid) {
-        if (!insideFootprint(maid) || escapeTries >= MAX_ESCAPE_TRIES) {
-            return false;
-        }
         escapeTries++;
         stepAsideCooldown = 0; // 这一趟本来就是"走不到"，别让冷却挡住补救
         return stepAside(level, maid);
@@ -2067,6 +2087,9 @@ public class BlueprintBuildController {
         insideTicks = 0;
         insideForced = false;
         insideGaveUp = false;
+        // 她手上真的配齐了一张能建的图（有结构、有锚点）：给主人点一条"开工"的进度。
+        // 放在这里而不是"放下第一块"那一步，是因为"她开始干了"本来就该从这一刻算
+        Advancements.grant(maid.getOwner(), Advancements.BUILD_START);
         sessionBuilds++;
         fetchProvider = null;
         returnProvider = null;

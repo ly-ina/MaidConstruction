@@ -1,0 +1,22 @@
+{
+  "parent": "blueprint:guide_book",
+  "display": {
+    "icon": {
+      "item": "minecraft:iron_pickaxe"
+    },
+    "title": {
+      "translate": "advancements.blueprint.build_start.title"
+    },
+    "description": {
+      "translate": "advancements.blueprint.build_start.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

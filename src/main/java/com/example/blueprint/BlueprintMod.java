@@ -28,6 +28,9 @@ public class BlueprintMod {
 
         ModItems.ITEMS.register(modBus);
         ModCreativeTabs.TABS.register(modBus);
+        // 说明书的配方：产物里带 NBT（正文、书名），普通 JSON 配方写不出来，
+        // 只能自己注册一个配方类型（见 GuideBookRecipe）
+        com.example.blueprint.item.ModRecipeSerializers.SERIALIZERS.register(modBus);
 
         // AE2 的终端方块只在装了 AE2 时才注册：注册类会引用 AE2 的类型，
         // 没装的情况下触碰它就是一个 NoClassDefFoundError
