@@ -173,8 +173,6 @@ public class BlueprintBuildController {
     private static final int CONTAINER_SEARCH_HEIGHT = 4;
     /** 连续走这么多 tick 还没到就认为过不去（约 6 秒） */
     private static final int MOVE_TIMEOUT = 120;
-    /** 施工期间每隔多久重扫一遍（约 5 秒），用来发现中途被拆掉的方块 */
-    private static final int RESCAN_INTERVAL = 100;
     /** 容器开合动画持续多少 tick */
     private static final int CONTAINER_ANIMATION_TICKS = 30;
     /** 同一类提示的最小间隔，别把聊天栏刷满 */
@@ -235,6 +233,14 @@ public class BlueprintBuildController {
     private static final long SPOT_LOG_COOLDOWN_MS = 5_000L;
     /** 每只女仆上次写"让位"相关日志的时间 */
     private static final Map<UUID, Long> SPOT_LOGGED_AT = new HashMap<>();
+    /**
+     * 上面那几张账本最多记这么多只女仆，超了就**整体清空**。
+     * <p>
+     * 它们记的都是"这句话说过没有"，清掉最坏也就是同一句话说第二遍；
+     * 而放着不管，这些表会随"这辈子见过的女仆数"一直涨——收工、换任务、
+     * 实体被移除都不销账（见 {@link #forgetLedgers} 里那一条是怎么补上的）。
+     */
+    private static final int LEDGER_CAP = 512;
     /** 这一 tick 在驱动哪只女仆：账本按她存，见 {@link #SAID_SHORTFALL} */
     private UUID currentMaidId;
     private UUID activeId;
@@ -311,7 +317,6 @@ public class BlueprintBuildController {
     private int cooldown = 0;
     /** 攒着"这一 tick 该放几块"的份额（见 {@link #takePlaceBudget}）：不足一块就留到下一 tick */
     private double placeBudget;
-    private int rescanTimer = RESCAN_INTERVAL;
     /** 离下一次推施工进度还有多少 tick */
     private int progressTimer = 0;
     private long lastMessageAt = 0;
@@ -420,13 +425,10 @@ public class BlueprintBuildController {
         // isFinished() 自然是 false，此时清标记会导致每次重扫都重新播报一遍"施工完毕"。
         // 只在真的放下方块时才清（见 tickBuild）。
         //
-        // 施工期间定期重扫：session 的游标只往前走，已经放好的方块要是被人拆了，
-        // 光靠顺序推进是发现不了的，得从头再扫一遍才能补上。
-        // 这里以前每 RESCAN_INTERVAL tick 就重扫一次（重建会话、从头比对世界）。
-        // 那个做法有两个毛病：**她放几块就被打断一次重头比对**，而且每几秒就要
-        // 重新判定一遍"哪些放不下"——玩家看到的就是"隔一会儿又检测一次、又念一遍"。
-        // 改成：**一趟从头放到尾**，放完了由 BuildSession 自己收尾（isFinished），
-        // 缺料当场停在那一块上、放不下的进 deferred 到最后一起交代。
+        // 施工期间**不**定期重扫，一趟从头放到尾就够了：放完了由 BuildSession 自己收尾
+        // （isFinished），缺料当场停在那一块上、放不下的进 deferred 到最后一起交代。
+        // （以前每隔几秒重扫一遍：**她放几块就被打断一次重头比对**，还要把"哪些放不下"
+        // 重判一遍——玩家看到的就是"隔一会儿又检测一次、又念一遍"。）
         // 工地中途被人拆了几块怎么办：重新定位或改朝向会清掉完工标记，她会从头再走一遍。
         if (session == null) {
             setWorkingHomeMode(maid, false);
@@ -618,7 +620,6 @@ public class BlueprintBuildController {
         fetchedSincePacket = false;
         state = State.MOVE_TO_SPOT;
         cooldown = 0;
-        rescanTimer = RESCAN_INTERVAL;
         progressTimer = 0;
         toolWarned.clear();
     }
@@ -632,7 +633,30 @@ public class BlueprintBuildController {
      */
     public void detach(EntityMaid maid) {
         setWorkingHomeMode(maid, false);
+        forgetLedgers(maid.getUUID());
         reset();
+    }
+
+    /**
+     * 她不再由本控制器驱动了：把这几位"说过没有"的账从静态表里销掉。
+     * <p>
+     * 这几张表是**故意**放静态的（控制器会被丢掉重建，账跟着一起没就成了无限复读，
+     * 见 {@link #SAID_SHORTFALL}），可静态也意味着**没人替它们回收**——收工、换任务、
+     * 实体被移除之后条目还留着，开一整天服下来表就随"见过的女仆数"一直涨。
+     * 销掉之后最坏的结果只是"下次再见她时同一句话再说一遍"，比一直涨着强。
+     */
+    private static void forgetLedgers(UUID maidId) {
+        SAID_SHORTFALL.remove(maidId);
+        SAID_SHORTFALL_AT.remove(maidId);
+        NO_PROVIDER_LOGGED_AT.remove(maidId);
+        SPOT_LOGGED_AT.remove(maidId);
+    }
+
+    /** 账本记满了就整体清空（见 {@link #LEDGER_CAP}）：写之前调一次就够 */
+    private static void capLedger(Map<?, ?> ledger) {
+        if (ledger.size() > LEDGER_CAP) {
+            ledger.clear();
+        }
     }
 
     private void onCompleted(ServerLevel level, EntityMaid maid, ItemStack stack) {
@@ -1060,6 +1084,7 @@ public class BlueprintBuildController {
         if (last != null && now - last < SPOT_LOG_COOLDOWN_MS) {
             return false;
         }
+        capLedger(SPOT_LOGGED_AT);
         SPOT_LOGGED_AT.put(maid.getUUID(), now);
         return true;
     }
@@ -1587,6 +1612,7 @@ public class BlueprintBuildController {
         if (last != null && now - last < NO_PROVIDER_LOG_COOLDOWN_MS) {
             return;
         }
+        capLedger(NO_PROVIDER_LOGGED_AT);
         NO_PROVIDER_LOGGED_AT.put(maid.getUUID(), now);
 
         StringBuilder held = new StringBuilder();
@@ -2219,6 +2245,7 @@ public class BlueprintBuildController {
         if (currentMaidId == null) {
             return true; // 认不出是谁就别记账（正常驱动下一定认得）
         }
+        capLedger(SAID_SHORTFALL);
         Map<String, String> said =
                 SAID_SHORTFALL.computeIfAbsent(currentMaidId, id -> new HashMap<>());
         String signature = shortfallSignature(list);
@@ -2231,6 +2258,7 @@ public class BlueprintBuildController {
             return false; // 同一次尝试里另一条路刚说过，这次先让给它（且不记账）
         }
         said.put(kind, signature);
+        capLedger(SAID_SHORTFALL_AT);
         SAID_SHORTFALL_AT.put(currentMaidId, now);
         // 留一行日志：以后再说"她怎么老是重复同一句"，一眼就能看出是哪条路、什么内容
         BlueprintMod.LOGGER.info("缺料提示（{}）：{}", kind, signature);
