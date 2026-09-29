@@ -36,6 +36,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -249,6 +250,7 @@ public class BlueprintBuildController {
     private UUID activeId;
     private BlockPos activeAnchor;
     private Rotation activeRotation = Rotation.NONE;
+    private Mirror activeMirror = Mirror.NONE;
     private State state = State.MOVE_TO_SPOT;
     /** 女仆的施工站位，站定后不再挪窝 */
     private BlockPos standSpot;
@@ -878,7 +880,7 @@ public class BlueprintBuildController {
         if (base == null) {
             return;
         }
-        Schematic schematic = base.rotate(activeRotation);
+        Schematic schematic = base.mirror(activeMirror).rotate(activeRotation);
         // 带上工地现状：新会话的游标直接推到"第一块还没到位"的地方，
         // 进度条不会因为这次重扫掉回 0（见 BuildSession#fastForward）
         session = new BuildSession(schematic, level, activeAnchor);
@@ -2012,13 +2014,15 @@ public class BlueprintBuildController {
         UUID id = MaidBlueprint.id(stack);
         BlockPos anchor = MaidBlueprint.anchor(stack);
         Rotation rotation = MaidBlueprint.rotation(stack);
+        Mirror mirror = MaidBlueprint.mirror(stack);
 
         if (id == null || anchor == null) {
             return;
         }
         if (session != null && Objects.equals(id, activeId)
                 && Objects.equals(anchor, activeAnchor)
-                && rotation == activeRotation) {
+                && rotation == activeRotation
+                && mirror == activeMirror) {
             return;
         }
 
@@ -2028,17 +2032,19 @@ public class BlueprintBuildController {
             return;
         }
 
-        // 女仆按蓝图当前朝向施工
-        Schematic schematic = base.rotate(rotation);
+        // 女仆按蓝图当前朝向施工（先翻面、后旋转）
+        Schematic schematic = MaidBlueprint.oriented(base, stack);
 
         session = new BuildSession(schematic, level, anchor);
         bill = BuildSession.bill(schematic);
         activeId = id;
         activeAnchor = anchor;
         activeRotation = rotation;
-        // 工地身份：同一张图 + 同锚点 + 朝向。重扫（会话重建）不改它，**换工地才改**——
-        // 客户端拿它决定"这是同一处工地还是新开的一处"，同一处只往前不往回
-        siteId = ((long) Objects.hash(id, anchor) << 32) | (Objects.hash(rotation) & 0xFFFFFFFFL);
+        activeMirror = mirror;
+        // 工地身份：同一张图 + 同锚点 + 朝向（旋转与翻面都算）。重扫（会话重建）不改它，
+        // **换工地才改**——客户端拿它决定"这是同一处工地还是新开的一处"，同一处只往前不往回
+        siteId = ((long) Objects.hash(id, anchor) << 32)
+                | (Objects.hash(rotation, mirror) & 0xFFFFFFFFL);
         // 写一行放置速度：它的依据是她的好感度，玩家想核对"为什么她放得这么快/这么慢"时，
         // 这行里三个数（速度、基准、好感度）一目了然
         BlueprintMod.LOGGER.info("女仆 {} 的放置速度：{} 块/秒（基准 {} + 好感度 {} ÷ {}，上限 {}）",
@@ -2050,7 +2056,8 @@ public class BlueprintBuildController {
         // 同一块基岩就被她一遍遍地念叨
         if (!Objects.equals(id, activeId)
                 || !Objects.equals(anchor, activeAnchor)
-                || rotation != activeRotation) {
+                || rotation != activeRotation
+                || mirror != activeMirror) {
             toolWarned.clear();
             // 缺料那几句**不在这里销账**：她身上可能同时有两张图、或者一轮里结构数据抖一下，
             // 那都不该让"同一批缺料"重新说一遍。换了缺的种类它自己会再说（指纹按种类算）

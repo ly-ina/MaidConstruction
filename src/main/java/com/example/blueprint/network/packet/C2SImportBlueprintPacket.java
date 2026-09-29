@@ -69,6 +69,7 @@ public class C2SImportBlueprintPacket {
                 BlueprintItem.setSchematic(stack, id, schematic.getSize(), msg.name);
                 BlueprintItem.clearAnchor(stack);
                 BlueprintItem.setRotation(stack, net.minecraft.world.level.block.Rotation.NONE);
+                BlueprintItem.setMirror(stack, net.minecraft.world.level.block.Mirror.NONE);
 
                 ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new S2CSchematicDataPacket(id, msg.name, schematic.write(new CompoundTag())));

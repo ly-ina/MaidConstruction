@@ -5,6 +5,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -58,7 +59,8 @@ public final class CableBusOutline {
      * 坐标是结构内的相对坐标，和 {@link Schematic} 的取值方式一致。
      */
     @Nullable
-    public static List<Outline> outlinesOf(Schematic schematic, int x, int y, int z, Rotation rotation) {
+    public static List<Outline> outlinesOf(Schematic schematic, int x, int y, int z,
+                                           Rotation rotation, Mirror mirror) {
         // 调用方来自渲染循环，手上那份坐标未必和这里的结构对得上
         // （比如蓝图刚转过向），越界就直接当不是线缆处理
         if (!schematic.inBounds(x, y, z) || !isCableBus(schematic.stateAt(x, y, z))) {
@@ -92,9 +94,11 @@ public final class CableBusOutline {
                     // 键名不是方向，那就是中心的线缆本体，已经画过了
                     continue;
                 }
-                // 结构旋转时 BlockState 会跟着转，但方块实体 NBT 是原样搬运的，
-                // 键名里记的方向还停在原朝向——所以这里得自己补上同样的旋转
-                result.add(outline(partPlate(Schematic.rotateDirection(side, rotation)),
+                // 结构换朝向时 BlockState 会跟着走，但方块实体 NBT 是原样搬运的，
+                // 键名里记的方向还停在原朝向——所以这里得自己补上同样的变换，
+                // 顺序也与结构那边一致：先翻面、后旋转
+                result.add(outline(partPlate(
+                                Schematic.rotateDirection(Schematic.mirrorDirection(side, mirror), rotation)),
                         colorOf(part.getString("id"))));
             }
         }

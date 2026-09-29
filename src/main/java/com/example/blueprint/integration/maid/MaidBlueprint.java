@@ -7,6 +7,7 @@ import com.example.blueprint.schematic.SchematicStorage;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 
 import javax.annotation.Nullable;
@@ -96,6 +97,29 @@ public final class MaidBlueprint {
             return BlueprintItem.getRotation(stack);
         }
         return CreateSchematic.rotation(stack);
+    }
+
+    /** 翻面状态。与旋转一样，两种蓝图各读各的 NBT */
+    public static Mirror mirror(ItemStack stack) {
+        if (stack.getItem() instanceof BlueprintItem) {
+            return BlueprintItem.getMirror(stack);
+        }
+        return CreateSchematic.mirror(stack);
+    }
+
+    /**
+     * 把结构摆到这张蓝图当前的朝向上：**先翻面、后旋转**。
+     * <p>
+     * 我们自己那张图：蓝图库里存的是**原始**结构，朝向写在物品 NBT 上，这里现翻。
+     * 机械动力那张：它换算成我们的格式时就已经按自己 NBT 上的朝向翻过了
+     * （见 {@code CreateSchematic.build}），这里再翻一次就等于转两圈——
+     * 所以那条路原样返回，朝向的事交给它自己。
+     */
+    public static Schematic oriented(Schematic base, ItemStack stack) {
+        if (!(stack.getItem() instanceof BlueprintItem)) {
+            return base;
+        }
+        return base.mirror(BlueprintItem.getMirror(stack)).rotate(BlueprintItem.getRotation(stack));
     }
 
     /** 取这份结构本身。机械动力那张是现翻的（翻好按内容缓存，不是每 tick 重来） */

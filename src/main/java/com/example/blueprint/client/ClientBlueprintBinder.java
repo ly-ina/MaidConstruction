@@ -5,6 +5,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -38,6 +39,7 @@ public class ClientBlueprintBinder {
         BlueprintItem.clearSelection(stack);
         BlueprintItem.clearAnchor(stack);
         BlueprintItem.setRotation(stack, Rotation.NONE);
+        BlueprintItem.setMirror(stack, Mirror.NONE);
         BlueprintItem.setCompleted(stack, false);
     }
 }

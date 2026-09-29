@@ -1,6 +1,7 @@
 package com.example.blueprint.build;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -25,15 +26,15 @@ public final class BlockEntityRotationResolver {
         ROTATORS.add(rotator);
     }
 
-    /** 没有旋转（NONE）或没人认领时，原样返回，不产生复制 */
-    public static CompoundTag rotate(BlockState state, CompoundTag tag, Rotation rotation) {
-        if (rotation == Rotation.NONE) {
+    /** 既没旋转也没镜像、或者没人认领时，原样返回，不产生复制 */
+    public static CompoundTag transform(BlockState state, CompoundTag tag, Rotation rotation, Mirror mirror) {
+        if (rotation == Rotation.NONE && mirror == Mirror.NONE) {
             return tag;
         }
         for (BlockEntityRotation rotator : ROTATORS) {
-            CompoundTag rotated = rotator.rotate(state, tag, rotation);
-            if (rotated != null) {
-                return rotated;
+            CompoundTag transformed = rotator.transform(state, tag, rotation, mirror);
+            if (transformed != null) {
+                return transformed;
             }
         }
         return tag;

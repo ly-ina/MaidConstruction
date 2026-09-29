@@ -12,6 +12,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -67,6 +68,7 @@ public class BlueprintMaterialsScreen extends Screen {
     private final Screen parent;
     private final UUID schematicId;
     private final Rotation rotation;
+    private final Mirror mirror;
 
     private Schematic schematic;
     /** 收到"结构数据到了"的通知：手上那份可能过期了，下一帧重新取一次 */
@@ -88,15 +90,18 @@ public class BlueprintMaterialsScreen extends Screen {
     }
 
     /**
-     * @param parent     返回时回到哪个界面（蓝图面板）
+     * @param parent      返回时回到哪个界面（蓝图面板）
      * @param schematicId 结构数据的 id，取自手上那张蓝图
-     * @param rotation   当前朝向：清单本身和朝向无关，但和面板预览取的是同一份数据
+     * @param rotation    当前旋转，取自同一张蓝图
+     * @param mirror      当前翻面，同上：清单里的种类和数量与朝向无关，
+     *                    但只要它去缓存里取结构，就得报上完整的朝向，否则取到的是别的朝向那份
      */
-    public BlueprintMaterialsScreen(Screen parent, UUID schematicId, Rotation rotation) {
+    public BlueprintMaterialsScreen(Screen parent, UUID schematicId, Rotation rotation, Mirror mirror) {
         super(Component.translatable("gui.blueprint.materials.title"));
         this.parent = parent;
         this.schematicId = schematicId;
         this.rotation = rotation;
+        this.mirror = mirror;
     }
 
     /** 界面开着的时候女仆还要干活，别暂停世界（与面板、学习池一致） */
@@ -136,7 +141,7 @@ public class BlueprintMaterialsScreen extends Screen {
         if (this.schematic != null && !this.stale) {
             return this.schematic;
         }
-        Schematic cached = ClientSchematicCache.get(schematicId, rotation);
+        Schematic cached = ClientSchematicCache.get(schematicId, rotation, mirror);
         if (cached == null) {
             long now = System.currentTimeMillis();
             if (now - lastRequestAt > REQUEST_INTERVAL_MS) {

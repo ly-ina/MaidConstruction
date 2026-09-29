@@ -9,7 +9,7 @@ import com.example.blueprint.network.packet.C2SMaidCraftOrderPacket;
 import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetNamePacket;
-import com.example.blueprint.network.packet.C2SSetRotationPacket;
+import com.example.blueprint.network.packet.C2SSetOrientationPacket;
 import com.example.blueprint.network.packet.C2SForgetStudyPacket;
 import com.example.blueprint.network.packet.C2SSelectStudyRecipePacket;
 import com.example.blueprint.network.packet.S2CBuildProgressPacket;
@@ -44,8 +44,8 @@ public class ModNetwork {
                 C2SCapturePacket::encode, C2SCapturePacket::decode, C2SCapturePacket::handle);
         CHANNEL.registerMessage(id++, C2SSetAnchorPacket.class,
                 C2SSetAnchorPacket::encode, C2SSetAnchorPacket::decode, C2SSetAnchorPacket::handle);
-        CHANNEL.registerMessage(id++, C2SSetRotationPacket.class,
-                C2SSetRotationPacket::encode, C2SSetRotationPacket::decode, C2SSetRotationPacket::handle);
+        CHANNEL.registerMessage(id++, C2SSetOrientationPacket.class,
+                C2SSetOrientationPacket::encode, C2SSetOrientationPacket::decode, C2SSetOrientationPacket::handle);
         CHANNEL.registerMessage(id++, C2SClearBlueprintPacket.class,
                 C2SClearBlueprintPacket::encode, C2SClearBlueprintPacket::decode, C2SClearBlueprintPacket::handle);
         CHANNEL.registerMessage(id++, C2SRequestSchematicPacket.class,

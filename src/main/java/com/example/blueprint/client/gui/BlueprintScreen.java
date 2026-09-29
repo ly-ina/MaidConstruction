@@ -10,7 +10,7 @@ import com.example.blueprint.network.packet.C2SImportBlueprintPacket;
 import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetNamePacket;
-import com.example.blueprint.network.packet.C2SSetRotationPacket;
+import com.example.blueprint.network.packet.C2SSetOrientationPacket;
 import com.example.blueprint.schematic.Schematic;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -162,8 +162,13 @@ public class BlueprintScreen extends Screen {
         int buttonX = left + PREVIEW_WIDTH + 8;
         int y = top + HEADER_HEIGHT + 6;
 
+        // 「旋转」与「镜像」并排：都是同一件"把它摆到哪个方向"的事，各占半行。
+        // 面板高度已经排满，再占一整行就会顶到状态行上
+        int halfWidth = (BUTTON_WIDTH - 4) / 2;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.rotate"), b -> onRotate())
-                .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
+                .bounds(buttonX, y, halfWidth, 20).build());
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.mirror"), b -> onMirror())
+                .bounds(buttonX + halfWidth + 4, y, halfWidth, 20).build());
         y += 22;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.clear_anchor"), b -> onClearAnchor())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
@@ -336,8 +341,8 @@ public class BlueprintScreen extends Screen {
                 int y = entry.pos().getY();
                 int z = entry.pos().getZ();
                 // 线缆方块画成"芯 + 连接臂 + 部件标记"，其余画不出模型的退回整格
-                List<CableBusOutline.Outline> outlines =
-                        CableBusOutline.outlinesOf(schematic, x, y, z, BlueprintItem.getRotation(getStack()));
+                List<CableBusOutline.Outline> outlines = CableBusOutline.outlinesOf(schematic, x, y, z,
+                        BlueprintItem.getRotation(getStack()), BlueprintItem.getMirror(getStack()));
 
                 pose.pushPose();
                 pose.translate(x, y, z);
@@ -400,7 +405,8 @@ public class BlueprintScreen extends Screen {
             return null;
         }
 
-        Schematic schematic = ClientSchematicCache.get(id, BlueprintItem.getRotation(stack));
+        Schematic schematic = ClientSchematicCache.get(id,
+                BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack));
         if (schematic == null) {
             // 本地还没这份数据，向服务端要一次
             long now = System.currentTimeMillis();
@@ -510,8 +516,24 @@ public class BlueprintScreen extends Screen {
     private void onRotate() {
         ItemStack stack = getStack();
         Rotation next = BlueprintItem.cycleRotation(stack);
-        ModNetwork.CHANNEL.sendToServer(new C2SSetRotationPacket(next));
+        // 翻面状态照原样带上：服务端那边朝向是"旋转 + 翻面"两个数，漏一个就等于把它复位了
+        ModNetwork.CHANNEL.sendToServer(new C2SSetOrientationPacket(next, BlueprintItem.getMirror(stack)));
         setStatus(Component.translatable("gui.blueprint.rotated_to", (next.ordinal() * 90) + "°"));
+    }
+
+    /**
+     * 翻面：把结构照镜子反过来，位置和方块朝向一起翻。
+     * <p>
+     * 与旋转一样当场发一次朝向包存进物品 NBT，投影下一帧就换过来。
+     * 只翻一根轴（左右）就够——翻面配四向旋转能凑出全部 8 种朝向，界面上因此是个开关。
+     */
+    private void onMirror() {
+        ItemStack stack = getStack();
+        BlueprintItem.toggleMirror(stack);
+        ModNetwork.CHANNEL.sendToServer(
+                new C2SSetOrientationPacket(BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack)));
+        setStatus(Component.translatable(BlueprintItem.isMirrored(stack)
+                ? "gui.blueprint.mirrored_on" : "gui.blueprint.mirrored_off"));
     }
 
     private void onClearAnchor() {
@@ -521,6 +543,9 @@ public class BlueprintScreen extends Screen {
     }
 
     private void onClearSchematic() {
+        // 还没用上的选点也一起清掉：这个按钮就是"从头来过"。
+        // （潜行右键现在是"取点击面外面的那一格"，不再兼任清除选点）
+        BlueprintItem.clearSelection(getStack());
         BlueprintItem.clearSchematic(getStack());
         ModNetwork.CHANNEL.sendToServer(C2SClearBlueprintPacket.INSTANCE);
         // 内容都没了，面板留着也没意义
@@ -541,8 +566,8 @@ public class BlueprintScreen extends Screen {
             return;
         }
         syncName();
-        Minecraft.getInstance().setScreen(
-                new BlueprintMaterialsScreen(this, id, BlueprintItem.getRotation(stack)));
+        Minecraft.getInstance().setScreen(new BlueprintMaterialsScreen(this, id,
+                BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack)));
     }
 
     /** 名字框和物品上的名字不一致时，同步给服务端存进 NBT */

@@ -26,6 +26,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -104,7 +105,8 @@ public class ProjectionRenderer {
         if (id == null) {
             return;
         }
-        Schematic schematic = ClientSchematicCache.get(id, BlueprintItem.getRotation(stack));
+        Schematic schematic = ClientSchematicCache.get(id,
+                BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack));
         if (schematic == null) {
             // 本地没有结构数据（例如物品 NBT 同步慢了一步），主动向服务端要一次
             requestSchematic(id);
@@ -164,7 +166,8 @@ public class ProjectionRenderer {
         buffers.endBatch(GHOST);
 
         if (unrenderable != null) {
-            renderOutlines(pose, buffers, schematic, BlueprintItem.getRotation(stack), unrenderable);
+            renderOutlines(pose, buffers, schematic,
+                    BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack), unrenderable);
         }
 
         pose.popPose();
@@ -223,12 +226,12 @@ public class ProjectionRenderer {
      * 画成芯、连接臂和部件标记，至少能分清哪段是线缆、哪个面挂了终端。
      */
     private static void renderOutlines(PoseStack pose, MultiBufferSource.BufferSource buffers,
-                                       Schematic schematic, Rotation rotation,
+                                       Schematic schematic, Rotation rotation, Mirror mirror,
                                        List<PendingBlock> blocks) {
         VertexConsumer lines = buffers.getBuffer(RenderType.LINES);
         for (PendingBlock block : blocks) {
             List<CableBusOutline.Outline> outlines =
-                    CableBusOutline.outlinesOf(schematic, block.x(), block.y(), block.z(), rotation);
+                    CableBusOutline.outlinesOf(schematic, block.x(), block.y(), block.z(), rotation, mirror);
 
             if (outlines == null) {
                 drawOutline(pose, lines, block.x(), block.y(), block.z(),

@@ -53,7 +53,7 @@ public final class BlockedSpotHighlighter {
      * {@code entries()} 每次调用都要**遍历整座结构**并新建一份列表：九千多元素的列表
      * 每帧重建一次，帧率就是这么被吃掉的。同一张图的内容不会变，缓存住就行。
      */
-    private static final java.util.Map<java.util.UUID, java.util.List<Schematic.BlockEntry>> ENTRY_CACHE =
+    private static final java.util.Map<String, java.util.List<Schematic.BlockEntry>> ENTRY_CACHE =
             new java.util.HashMap<>();
 
     private BlockedSpotHighlighter() {
@@ -98,12 +98,17 @@ public final class BlockedSpotHighlighter {
             if (id == null || anchor == null) {
                 continue;
             }
-            Schematic schematic = ClientSchematicCache.get(id, BlueprintItem.getRotation(stack));
+            Schematic schematic = ClientSchematicCache.get(id,
+                    BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack));
             if (schematic == null) {
                 continue;
             }
-            java.util.List<Schematic.BlockEntry> entries =
-                    ENTRY_CACHE.computeIfAbsent(id, key -> java.util.List.copyOf(schematic.entries()));
+            // 缓存键必须带上朝向：条目里存的是**变换后**那份结构的坐标，
+            // 只按 id 缓的话，转个向或翻个面，画出来的还是上一个朝向的位置
+            java.util.List<Schematic.BlockEntry> entries = ENTRY_CACHE.computeIfAbsent(
+                    id + "|" + BlueprintItem.getRotation(stack).ordinal()
+                            + "|" + BlueprintItem.getMirror(stack).ordinal(),
+                    key -> java.util.List.copyOf(schematic.entries()));
             for (Schematic.BlockEntry entry : entries) {
                 if (drawn >= MAX_BOXES) {
                     break;

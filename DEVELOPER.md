@@ -102,8 +102,10 @@ com.example.blueprint
 │   ├── ClientSchematicCache   结构缓存（LRU 24）
 │   ├── ClientBlueprintBinder  收到数据后当场绑定到手持物品
 │   ├── BlueprintTransfer   导入导出的文件读写
-│   ├── BlueprintScreenOpener
-│   └── gui/BlueprintScreen 蓝图面板
+│   ├── BlueprintScreenOpener   打开面板 + 结构数据到达的通知出口
+│   └── gui/
+│       ├── BlueprintScreen     蓝图面板
+│       └── BlueprintMaterialsScreen 建筑清单（按材料汇总）
 ├── network/
 │   ├── ModNetwork          频道 + 11 个包的注册
 │   └── packet/             10 个 C2S + 1 个 S2C
@@ -261,9 +263,23 @@ BlueprintItem.setSchematic(stack, id, size, name)
 S2CSchematicDataPacket（完整结构 NBT + id + 名字）
     ↓
 客户端 ClientSchematicCache.put + ClientBlueprintBinder.bind
+    ↓
+BlueprintScreenOpener.schematicArrived(id) → 正开着的界面当场刷新
 ```
 
 **`ClientBlueprintBinder` 为什么存在**：不走服务端物品 NBT 同步。那条路要经过容器槽位广播，慢半拍会让面板一直显示旧结构、得关掉重开才对。收到包就当场绑定，界面立刻正确。
+
+**界面刷新走通知，不走轮询**（1.7.1）。面板不该每帧去读物品 NBT 判断"结构到了没有"：
+那一次要读复合标签、现造一个 `UUID`，面板开着时每秒六十次纯属白做；而"数据什么时候到"
+只有服务端知道，到了叫一声最准。所以绑完就调 `BlueprintScreenOpener.schematicArrived`，
+面板据此点亮「建筑清单」按钮、把状态行从"正在导入…"换成结果（导入那趟另留 10 秒超时兜底）。
+两个客户端界面的分工也是这么定的：**清单**收到通知只置一个 `stale` 标记、下一帧重取；
+**面板**在 `init()` 里算一次按钮状态，之后只认这条通知。
+
+**面板开着时不暂停世界**（`isPauseScreen` 返回 false，1.7.1 之前漏了）。除了"女仆要干活"
+这条一贯的理由，面板还多一条硬的：**导入要服务端来回一趟**（请求 → 读文件 → 回包）。
+暂停世界等于把服务端停在那儿，回包只能等玩家关掉面板才到，表现是"点了导入没反应、
+关掉重开才看见"——这个现象当初就是被当成"界面不刷新"在查的。
 
 ### 5.2 投影链路
 
@@ -481,7 +497,7 @@ public class MyRotation implements BlockEntityRotation {
 
 **延伸**：`CableBusOutline` 用注册名 `ae2:cable_bus` 识别线缆，也就不需要引用 AE2 类型。
 
-### 7.3 旋转的两种失效（都是引擎层面的限制）
+### 7.3 换朝向的两种失效（旋转与镜像都适用）
 
 **失效一：方块状态没转**
 
@@ -517,6 +533,10 @@ for (Direction side : DIRECTIONS_WITH_NULL) {
 
 **为什么不能通用处理**：BlockState 有 `Property` 系统，引擎能按 `Rotation` 通用变换；而 NBT 是**没有 schema 的任意树**，引擎看到 `north: {...}` 不知道那是朝向、物品名还是自定义标签。**原版的 `StructureTemplate`（结构方块）同样做不到** —— 它旋转时也只处理 BlockState，NBT 原样搬运。
 
+**镜像走的是同一套**：翻面与旋转是同一件"换朝向"的两半，`Schematic.transform` 里**先翻面、后旋转**（与原版结构方块、机械动力那份换算的顺序一致；反了就是另一个结构），`base.mirror(m).rotate(r)` 就是它的调用口径。上面两条失效在翻面时同样成立，所以 `BlockEntityRotation#transform` 一次收旋转与翻面两个参数——各家的 NBT 搬运只写一遍，两处的顺序不会分叉。
+
+**坐标与方向必须同序**：`Schematic.transform` 里坐标是先镜像再旋转，那么 `mirrorDirection` 与 `rotateDirection` 的组合也得是这个顺序（见 `BlockEntityRotation` 的实现与 `CableBusOutline` 的部件补偿），否则方块位置转了 90°、朝向却按另一种顺序翻，落点对不上。
+
 ### 7.4 缓存与结构的一致性
 
 `ProjectionRenderer` 用静态 `PENDING` 列表缓存"待渲染方块"，坐标是**结构内的相对坐标**。它有四个失效条件：
@@ -528,7 +548,7 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 || schematic != cachedSchematic           // ★ 结构实例变了
 ```
 
-**最后一条是崩溃修复留下的**。旋转蓝图时，`ClientSchematicCache.get(id, rotation)` 会返回一个**宽长互换的新副本** —— 而 `id` 和 `origin` 都没变。沿用旧坐标去访问新结构就会 `ArrayIndexOutOfBoundsException`。
+**最后一条是崩溃修复留下的**。换朝向时，`ClientSchematicCache.get(id, rotation, mirror)` 会返回一个新的副本（旋转还会宽长互换） —— 而 `id` 和 `origin` 都没变。沿用旧坐标去访问新结构就会 `ArrayIndexOutOfBoundsException`。
 
 渲染线程上抛异常会**直接退出游戏**（日志里表现为一次 `Unreported exception` 紧跟 `Stopping server`）。
 
@@ -1260,10 +1280,19 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 - 物品/方块贴图：4 张**保留**，由 `python tools/make_textures.py` 从原版/AE2 底图改色生成
   （换配色只改脚本里那几张 ramp 表）。
 
-### 界面缺陷（发布前建议先修）
+### 界面缺陷（待确认归属）
 
-- **无线女仆终端 / 绑定书的升级槽两排显示重叠**（布局未做终审）。这是玩家一眼能看到的功能问题，
-  比贴图更伤评价，优先级排在美术之前。
+- ~~无线女仆终端 / 绑定书的升级槽两排显示重叠~~ **先别当成我们的缺陷**：核过代码，本模组
+  **没有给任何界面加槽位**——无线女仆终端直接继承 AE2 的 `WirelessTerminalItem`，
+  面板、槽位、布局全是官方的；女仆终端与创造女仆接口登记的是 3 个槽（AE2 标准终端的数量），
+  界面也走官方的 `MEStorageMenu`；绑定书**根本没有升级槽**（`BindingBookItem` 里没有任何槽位代码），
+  原来那句"绑定书也有槽位"是写错了。
+- 真正会多出第二排的，是**同样给 AE2 无线终端补槽位的附属模组**（AE2WTLib 那类，猜测）。
+  这类模组自己往同一个界面塞槽，位置由它负责排开；我们的界面就是 AE2 的界面，插不上手。
+- **怎么确认是谁加的**：只装 AE2 + 车万女仆 + 本模组，打开无线女仆终端——应当只有一排 3 个槽，
+  与官方无线终端一致；再把那个附属装回去，多出的一排若与原有槽位叠在一起，就是它的问题。
+  确认前不要改我们的界面：改了只会把官方布局也带歪。
+- 要动的话，唯一该做的是**在资料里说明这属于兼容现象**，别写成"本模组已知缺陷"。
 
 ### 对外说明（发布页/介绍文案）
 

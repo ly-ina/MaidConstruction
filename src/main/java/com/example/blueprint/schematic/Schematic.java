@@ -12,6 +12,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -284,14 +285,37 @@ public final class Schematic {
      * <p>
      * NONE 会直接返回自身，避免无谓的复制。
      * 旋转是绕 Y 轴的：方块位置重新映射，方块自身的状态（朝向、连接等）
-     * 交给 BlockState#rotate 处理，方块实体 NBT 原样搬运。
+     * 交给 {@link #transform} 处理。
+     * <p>
+     * 和镜像一起用时**先镜像后旋转**：{@code base.mirror(mirror).rotate(rotation)}。
+     * 顺序不能反，反了就不是同一个结构了（与原版结构方块、机械动力那份换算一致）。
+     */
+    public Schematic rotate(Rotation rotation) {
+        return rotation == Rotation.NONE ? this : transform(rotation, Mirror.NONE);
+    }
+
+    /**
+     * 按给定轴把整个结构翻过来，返回翻面后的新实例（原实例不变）。
+     * <p>
+     * 镜像不改变尺寸，只把一根轴反过来：{@code LEFT_RIGHT} 翻 Z 轴、{@code FRONT_BACK} 翻 X 轴
+     * （与原版 {@code Mirror} 的语义、以及机械动力那份换算一致）。
+     * <p>
+     * 只给一条轴的翻面就够了：翻面 + 四向旋转能凑出全部 8 种朝向
+     * （{@code FRONT_BACK} 等于 {@code LEFT_RIGHT} 再转 180°），
+     * 再多一个中间态只会让"现在到底是哪种朝向"更难认，界面上的按钮因此是个开关。
+     */
+    public Schematic mirror(Mirror mirror) {
+        return mirror == Mirror.NONE ? this : transform(Rotation.NONE, mirror);
+    }
+
+    /**
+     * 旋转与镜像的共同实现：**先镜像、后旋转**。
+     * <p>
+     * 两者是同一件"换朝向"的两半，分开写就得把坐标映射抄两遍，以后改一处漏一处；
+     * 合在一个方法里，顺序也只写死这一处。
      */
     @SuppressWarnings("deprecation")
-    public Schematic rotate(Rotation rotation) {
-        if (rotation == Rotation.NONE) {
-            return this;
-        }
-
+    private Schematic transform(Rotation rotation, Mirror mirror) {
         int sx = getWidth();
         int sy = getHeight();
         int sz = getLength();
@@ -311,33 +335,37 @@ public final class Schematic {
                 for (int x = 0; x < sx; x++) {
                     int oldIndex = index(x, y, z);
 
+                    // 先镜像：只反过来一根轴，尺寸不变，所以旋转那套公式照样能用
+                    int mirrorX = mirror == Mirror.FRONT_BACK ? sx - 1 - x : x;
+                    int mirrorZ = mirror == Mirror.LEFT_RIGHT ? sz - 1 - z : z;
+
                     int newX;
                     int newZ;
                     switch (rotation) {
                         case CLOCKWISE_90 -> {
-                            newX = sz - 1 - z;
-                            newZ = x;
+                            newX = sz - 1 - mirrorZ;
+                            newZ = mirrorX;
                         }
                         case CLOCKWISE_180 -> {
-                            newX = sx - 1 - x;
-                            newZ = sz - 1 - z;
+                            newX = sx - 1 - mirrorX;
+                            newZ = sz - 1 - mirrorZ;
                         }
                         case COUNTERCLOCKWISE_90 -> {
-                            newX = z;
-                            newZ = sx - 1 - x;
+                            newX = mirrorZ;
+                            newZ = sx - 1 - mirrorX;
                         }
                         default -> {
-                            newX = x;
-                            newZ = z;
+                            newX = mirrorX;
+                            newZ = mirrorZ;
                         }
                     }
 
-                    BlockState rotated = rotateState(palette.get(blocks[oldIndex]), rotation);
-                    Integer id = paletteLookup.get(rotated);
+                    BlockState transformed = transformState(palette.get(blocks[oldIndex]), rotation, mirror);
+                    Integer id = paletteLookup.get(transformed);
                     if (id == null) {
                         id = newPalette.size();
-                        newPalette.add(rotated);
-                        paletteLookup.put(rotated, id);
+                        newPalette.add(transformed);
+                        paletteLookup.put(transformed, id);
                     }
 
                     int newIndex = (y * newLength + newZ) * newWidth + newX;
@@ -346,7 +374,7 @@ public final class Schematic {
                     CompoundTag blockEntity = blockEntities.get(oldIndex);
                     if (blockEntity != null) {
                         newBlockEntities.put(newIndex,
-                                BlockEntityRotationResolver.rotate(rotated, blockEntity, rotation));
+                                BlockEntityRotationResolver.transform(transformed, blockEntity, rotation, mirror));
                     }
                 }
             }
@@ -356,22 +384,29 @@ public final class Schematic {
     }
 
     /**
-     * 旋转方块状态，连那些没覆写 {@code Block#rotate} 的方块一起转。
+     * 变换方块状态，连那些没覆写 {@code Block#rotate} / {@code Block#mirror} 的方块一起换。
      * <p>
-     * 原版 {@code BlockState#rotate} 是委托给 {@code Block#rotate} 的，而那个的默认实现
-     * 直接返回原状态——只有楼梯、箱子这类主动覆写过的方块才会真的动朝向。
+     * 那两个方法的默认实现都是"直接返回原状态"——只有楼梯、箱子这类主动覆写过的方块才会真的动朝向。
      * AE2 的机器（磁盘驱动器之类）继承的是它自己的基类，没覆写，于是朝向纹丝不动。
      * <p>
-     * 所以这里在方块自己转完之后，再按**原始状态**的值把所有朝向属性重设一遍。
-     * 用的是原值而不是转过之后的值，因此不会出现"转了两次"。
+     * 所以这里在方块自己换完之后，再按**原始状态**的值把所有朝向属性重设一遍。
+     * 用的是原值而不是换过之后的值，因此不会出现"换了两次"。
      */
     @SuppressWarnings("deprecation")
-    private static BlockState rotateState(BlockState state, Rotation rotation) {
-        BlockState result = state.rotate(rotation);
+    private static BlockState transformState(BlockState state, Rotation rotation, Mirror mirror) {
+        BlockState result = state;
+        // 方块自己那套（楼梯的 SHAPE、门轴之类）先走一遍
+        if (mirror != Mirror.NONE) {
+            result = result.mirror(mirror);
+        }
+        if (rotation != Rotation.NONE) {
+            result = result.rotate(rotation);
+        }
         for (Property<?> property : state.getProperties()) {
             if (property instanceof DirectionProperty directionProperty) {
+                Direction original = state.getValue(directionProperty);
                 result = result.setValue(directionProperty,
-                        rotateDirection(state.getValue(directionProperty), rotation));
+                        rotateDirection(mirrorDirection(original, mirror), rotation));
             }
         }
         return result;
@@ -390,6 +425,20 @@ public final class Schematic {
             case CLOCKWISE_90 -> direction.getClockWise();
             case COUNTERCLOCKWISE_90 -> direction.getCounterClockWise();
             case CLOCKWISE_180 -> direction.getOpposite();
+            default -> direction;
+        };
+    }
+
+    /**
+     * 把一个方向翻面，语义与坐标映射对齐（见 {@link #transform}）：
+     * {@code LEFT_RIGHT} 翻 Z 轴（南北互换），{@code FRONT_BACK} 翻 X 轴（东西互换），上下不变。
+     * <p>
+     * 与旋转组合时必须**先翻面、后旋转**，这样它和 {@link #transformState} 里的顺序才一致。
+     */
+    public static Direction mirrorDirection(Direction direction, Mirror mirror) {
+        return switch (mirror) {
+            case LEFT_RIGHT -> direction.getAxis() == Direction.Axis.Z ? direction.getOpposite() : direction;
+            case FRONT_BACK -> direction.getAxis() == Direction.Axis.X ? direction.getOpposite() : direction;
             default -> direction;
         };
     }

@@ -4,7 +4,7 @@ import com.example.blueprint.client.BlueprintScreenOpener;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.network.packet.C2SCapturePacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
-import com.example.blueprint.network.packet.C2SSetRotationPacket;
+import com.example.blueprint.network.packet.C2SSetOrientationPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
@@ -18,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
@@ -47,6 +48,8 @@ public class BlueprintItem extends Item {
     private static final String KEY_POS1 = "Pos1";
     private static final String KEY_ANCHOR = "Anchor";
     private static final String KEY_ROTATION = "Rotation";
+    /** 翻面状态。取值与机械动力那张图同名同格式（"Mirror"），两边的读法也就一致 */
+    private static final String KEY_MIRROR = "Mirror";
     private static final String KEY_COMPLETED = "Completed";
     private static final String KEY_MAID_BUILD = "MaidBuild";
 
@@ -145,6 +148,7 @@ public class BlueprintItem extends Item {
         tag.remove(KEY_SIZE);
         tag.remove(KEY_NAME);
         tag.remove(KEY_ROTATION);
+        tag.remove(KEY_MIRROR);
         tag.remove(KEY_ANCHOR);
     }
 
@@ -192,6 +196,37 @@ public class BlueprintItem extends Item {
         Rotation[] values = Rotation.values();
         Rotation next = values[(getRotation(stack).ordinal() + 1) % values.length];
         setRotation(stack, next);
+        return next;
+    }
+
+    /**
+     * 当前有没有翻面。
+     * <p>
+     * 只认"翻"与"没翻"两种：翻面 + 四向旋转已经能凑出全部 8 种朝向，界面上因此是个开关。
+     * 存的是原版 {@code Mirror} 的序号，读的时候防越界，越界当没翻。
+     */
+    public static Mirror getMirror(ItemStack stack) {
+        CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.contains(KEY_MIRROR)) {
+            return Mirror.NONE;
+        }
+        Mirror[] values = Mirror.values();
+        return values[Math.floorMod(tag.getInt(KEY_MIRROR), values.length)];
+    }
+
+    public static void setMirror(ItemStack stack, Mirror mirror) {
+        stack.getOrCreateTag().putInt(KEY_MIRROR, mirror.ordinal());
+    }
+
+    /** 翻面了没有。问"翻没翻"的地方比问"翻的是哪条轴"多得多，单独给一个 */
+    public static boolean isMirrored(ItemStack stack) {
+        return getMirror(stack) != Mirror.NONE;
+    }
+
+    /** 开关一次翻面，返回翻面后的状态 */
+    public static Mirror toggleMirror(ItemStack stack) {
+        Mirror next = getMirror(stack) == Mirror.NONE ? Mirror.LEFT_RIGHT : Mirror.NONE;
+        setMirror(stack, next);
         return next;
     }
 
@@ -266,16 +301,16 @@ public class BlueprintItem extends Item {
         Level level = context.getLevel();
         ItemStack stack = context.getItemInHand();
         BlockPos clicked = context.getClickedPos();
-
-        if (player.isShiftKeyDown()) {
-            if (level.isClientSide) {
-                clearSelection(stack);
-                player.displayClientMessage(Component.translatable("message.blueprint.selection_cleared"), true);
-            }
-            return InteractionResult.SUCCESS;
-        }
+        // **潜行＝取"点击面的相邻格"**（也就是你正对着的那一格空气）。
+        // 不规则建筑的外围往往是空的，那一格没有方块可点；不给这个办法，
+        // 想把范围框到建筑外面就得先放一块不相干的方块，录完还得拆掉。
+        // 想重来改用面板里的「清空录制」。
+        BlockPos target = player.isShiftKeyDown()
+                ? clicked.relative(context.getClickedFace())
+                : clicked;
 
         if (hasSchematic(stack)) {
+            // 锚点本来就是"点击面的相邻格"，所以这里不看潜行与否
             BlockPos anchor = clicked.relative(context.getClickedFace());
             if (level.isClientSide) {
                 ModNetwork.CHANNEL.sendToServer(new C2SSetAnchorPacket(anchor));
@@ -287,9 +322,9 @@ public class BlueprintItem extends Item {
 
         if (!hasPos1(stack)) {
             if (level.isClientSide) {
-                setPos1(stack, clicked);
+                setPos1(stack, target);
                 player.displayClientMessage(
-                        Component.translatable("message.blueprint.pos1_set", formatPos(clicked)), true);
+                        Component.translatable("message.blueprint.pos1_set", formatPos(target)), true);
             }
             return InteractionResult.SUCCESS;
         }
@@ -297,7 +332,7 @@ public class BlueprintItem extends Item {
         BlockPos pos1 = getPos1(stack);
         if (pos1 != null && level.isClientSide) {
             // 交给服务端扫描，客户端同时把自己的选点状态清掉
-            ModNetwork.CHANNEL.sendToServer(new C2SCapturePacket(pos1, clicked, getBlueprintName(stack)));
+            ModNetwork.CHANNEL.sendToServer(new C2SCapturePacket(pos1, target, getBlueprintName(stack)));
             clearSelection(stack);
         }
         return InteractionResult.SUCCESS;
@@ -320,9 +355,10 @@ public class BlueprintItem extends Item {
                 return InteractionResultHolder.success(stack);
             }
 
-            // 蓝图本身不能一键放置，右键空气只用来调整朝向
+            // 蓝图本身不能一键放置，右键空气只用来调整朝向。
+            // 只转不翻面：翻面是"这栋楼要不要照镜子"，比转个角度不常用得多，留给面板上的按钮。
             Rotation next = cycleRotation(stack);
-            ModNetwork.CHANNEL.sendToServer(new C2SSetRotationPacket(next));
+            ModNetwork.CHANNEL.sendToServer(new C2SSetOrientationPacket(next, getMirror(stack)));
             player.displayClientMessage(Component.translatable("message.blueprint.rotated", angleText(next)), true);
             return InteractionResultHolder.success(stack);
         }
@@ -354,6 +390,9 @@ public class BlueprintItem extends Item {
             if (rotation != Rotation.NONE) {
                 tooltip.add(Component.translatable("tooltip.blueprint.rotation", angleText(rotation)));
             }
+            if (getMirror(stack) != Mirror.NONE) {
+                tooltip.add(Component.translatable("tooltip.blueprint.mirror"));
+            }
             if (hasAnchor(stack)) {
                 tooltip.add(Component.translatable("tooltip.blueprint.anchor", formatPos(getAnchor(stack))));
                 tooltip.add(Component.translatable(isCompleted(stack)
@@ -373,6 +412,8 @@ public class BlueprintItem extends Item {
             } else {
                 tooltip.add(Component.translatable("tooltip.blueprint.hint_select"));
             }
+            // 空气里怎么选点：不规则建筑的外围没有方块可点，这一步不说玩家想不到
+            tooltip.add(Component.translatable("tooltip.blueprint.hint_select_outside"));
         }
     }
 
