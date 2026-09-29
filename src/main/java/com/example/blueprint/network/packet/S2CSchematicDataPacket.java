@@ -1,5 +1,6 @@
 package com.example.blueprint.network.packet;
 
+import com.example.blueprint.client.BlueprintScreenOpener;
 import com.example.blueprint.client.ClientBlueprintBinder;
 import com.example.blueprint.client.ClientSchematicCache;
 import com.example.blueprint.schematic.Schematic;
@@ -47,8 +48,11 @@ public class S2CSchematicDataPacket {
             Schematic schematic = Schematic.read(msg.data);
             ClientSchematicCache.put(msg.id, schematic);
 
-            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                    () -> () -> ClientBlueprintBinder.bind(msg.id, msg.name, schematic.getSize()));
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
+                ClientBlueprintBinder.bind(msg.id, msg.name, schematic.getSize());
+                // 绑定之后再通知界面刷新：面板要靠"手上这张图已经拿到 id"来判断是不是这张图的数据
+                BlueprintScreenOpener.schematicArrived(msg.id);
+            });
         });
         context.setPacketHandled(true);
     }

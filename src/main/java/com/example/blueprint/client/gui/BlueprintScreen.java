@@ -67,7 +67,12 @@ import java.util.UUID;
 public class BlueprintScreen extends Screen {
 
     private static final int WINDOW_WIDTH = 400;
-    private static final int WINDOW_HEIGHT = 230;
+    /**
+     * 面板高度。1.7.1 加了「建筑清单」之后按钮列排到了 218，
+     * 而状态那行写在 -11 处——230 的高度只剩 1px 间隙，挤在一起像要压上去。
+     * 加高 12px：按钮列下面留出十几像素，预览和文件列表也各松一点。
+     */
+    private static final int WINDOW_HEIGHT = 242;
     private static final int PREVIEW_WIDTH = 150;
     private static final int FILE_WIDTH = 128;
     private static final int BUTTON_WIDTH = 100;
@@ -86,6 +91,18 @@ public class BlueprintScreen extends Screen {
     private static final int COLOR_STATUS = 0x55FF55;
 
     private EditBox nameBox;
+    /**
+     * 「建筑清单」按钮。存下来是为了每帧重算它的可用状态——
+     * 导入结构之后蓝图才拿到 id，而 {@code init()} 只在打开面板时跑一次，
+     * 只在 init 里算的话按钮会一直是灰的，得关掉重开才亮。
+     */
+    private Button materialsButton;
+    /** 已经发出导入请求、还在等服务端把结构发回来（见 {@link #refreshDynamicState()}） */
+    private boolean importPending;
+    /** 那次导入请求是什么时候发的：超过 {@link #IMPORT_TIMEOUT_MS} 就当作失败了 */
+    private long importAskedAt;
+    /** 导入回包等多久算失败（失败时服务端只在聊天栏说话，面板这边得自己收起"正在导入…"） */
+    private static final long IMPORT_TIMEOUT_MS = 10_000L;
 
     private final List<Path> files = new ArrayList<>();
     private int selectedFile = -1;
@@ -105,6 +122,18 @@ public class BlueprintScreen extends Screen {
 
     public BlueprintScreen() {
         super(Component.translatable("gui.blueprint.title"));
+    }
+
+    /**
+     * 界面开着的时候女仆还要干活，别暂停世界（与学习池、建筑清单一致）。
+     * <p>
+     * 面板这边还多一条硬理由：<b>导入结构要服务端来回一趟</b>——请求发出去、服务端读文件、
+     * 再把结构发回来。暂停世界的话服务端就停在那儿，回包只能等玩家关掉面板才到，
+     * 表现就是"点了导入没反应，关掉重开才看见"。
+     */
+    @Override
+    public boolean isPauseScreen() {
+        return false;
     }
 
     /** 现取玩家手上的蓝图，别缓存 */
@@ -141,6 +170,16 @@ public class BlueprintScreen extends Screen {
         y += 22;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.clear_schematic"), b -> onClearSchematic())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
+        y += 22;
+        // 建筑清单：这座建筑要备多少料。摆在"清空录制"后面——上面三个都是改这张图的，
+        // 从这里往下是"拿它干点什么"（看清单、导出、导入）
+        this.materialsButton = Button.builder(Component.translatable("gui.blueprint.materials"),
+                        b -> onMaterials())
+                .bounds(buttonX, y, BUTTON_WIDTH, 20).build();
+        this.addRenderableWidget(this.materialsButton);
+        // 空图没什么好列的，按钮直接灰掉，别让玩家点进去看一句"还没有内容"；
+        // 之后导入或录制完成时由 onSchematicArrived 把它点亮
+        refreshDynamicState();
         y += 30;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.export_file"), b -> onExport())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
@@ -170,6 +209,11 @@ public class BlueprintScreen extends Screen {
         int top = (this.height - WINDOW_HEIGHT) / 2;
 
         graphics.fill(left, top, left + WINDOW_WIDTH, top + WINDOW_HEIGHT, COLOR_PANEL);
+        // 只有"等导入回包"这一趟需要每帧看一眼：数据到了要换状态，太久没到要收起那句话。
+        // 平时一帧都不做——按钮的可用状态交给 init() 与"结构数据到达"的通知（见 onSchematicArrived）
+        if (this.importPending) {
+            refreshDynamicState();
+        }
         graphics.fill(left + PREVIEW_WIDTH, top + HEADER_HEIGHT, left + PREVIEW_WIDTH + 1, top + WINDOW_HEIGHT, COLOR_DIVIDER);
         graphics.fill(this.fileListX - 6, top + HEADER_HEIGHT, this.fileListX - 5, top + WINDOW_HEIGHT, COLOR_DIVIDER);
 
@@ -191,6 +235,50 @@ public class BlueprintScreen extends Screen {
     // ------------------------------------------------------------------
     // 3D 预览
     // ------------------------------------------------------------------
+
+    /**
+     * 结构数据到了：手上这张图刚刚拿到 id（录制完成，或者导入回包），把面板当场刷新一遍。
+     * <p>
+     * <b>由 {@code S2CSchematicDataPacket} 收到数据后直接叫过来</b>，不是每帧去问物品 NBT：
+     * 那样一次要读复合标签、现造一个 {@code UUID}，面板开着时每秒六十次纯属白做；
+     * 而且数据什么时候到只有服务端知道，到了通知一声最省事也最准。
+     *
+     * @param id 刚到的结构 id；和手上这张图对不上就不动（防串台）
+     */
+    public void onSchematicArrived(UUID id) {
+        if (!id.equals(BlueprintItem.getSchematicId(getStack()))) {
+            return;
+        }
+        refreshDynamicState();
+    }
+
+    /**
+     * 重算按钮可用状态；正在等导入回包时，顺手把"正在导入…"换成结果。
+     * <p>
+     * 调用点只有三处：打开面板（{@code init()}）、结构数据到达（{@link #onSchematicArrived}）、
+     * 以及**等导入那一趟**的每帧兜底（见 {@code render}）——都不是常驻开销。
+     */
+    private void refreshDynamicState() {
+        ItemStack stack = getStack();
+        if (this.materialsButton != null) {
+            this.materialsButton.active = BlueprintItem.getSchematicId(stack) != null;
+        }
+        if (this.importPending) {
+            Schematic schematic = getPreview();
+            if (schematic != null) {
+                // 数据到了：把"正在导入…"换成结果，别让它挂在那儿
+                this.importPending = false;
+                Vec3i size = schematic.getSize();
+                setStatus(Component.translatable("message.blueprint.imported",
+                        size.getX(), size.getY(), size.getZ()));
+            } else if (System.currentTimeMillis() - this.importAskedAt > IMPORT_TIMEOUT_MS) {
+                // 这么久还没回来，多半是导入失败（文件坏了、太大）。服务端已经往聊天栏说过
+                // 原因了，这里把"正在导入…"收掉即可，别一直挂着让人以为还在转
+                this.importPending = false;
+                setStatus(Component.empty());
+            }
+        }
+    }
 
     private void drawPreview(GuiGraphics graphics, int left, int top) {
         Schematic schematic = getPreview();
@@ -439,6 +527,35 @@ public class BlueprintScreen extends Screen {
         onClose();
     }
 
+    /**
+     * 打开建筑清单。
+     * <p>
+     * 走之前**先把名字同步出去**：清单是另一个界面，从它返回时面板会重新 {@code init()}，
+     * 名字框的值是从物品 NBT 重读的——刚敲进去还没同步的名字会被打回原样。
+     */
+    private void onMaterials() {
+        ItemStack stack = getStack();
+        UUID id = BlueprintItem.getSchematicId(stack);
+        if (id == null) {
+            setStatus(Component.translatable("gui.blueprint.no_preview"));
+            return;
+        }
+        syncName();
+        Minecraft.getInstance().setScreen(
+                new BlueprintMaterialsScreen(this, id, BlueprintItem.getRotation(stack)));
+    }
+
+    /** 名字框和物品上的名字不一致时，同步给服务端存进 NBT */
+    private void syncName() {
+        if (nameBox == null) {
+            return;
+        }
+        String name = nameBox.getValue().trim();
+        if (!name.equals(BlueprintItem.getBlueprintName(getStack()))) {
+            ModNetwork.CHANNEL.sendToServer(new C2SSetNamePacket(name));
+        }
+    }
+
     private void onExport() {
         Schematic schematic = getPreview();
         if (schematic == null) {
@@ -476,6 +593,9 @@ public class BlueprintScreen extends Screen {
             String name = BlueprintTransfer.displayName(selected);
             nameBox.setValue(name);
             ModNetwork.CHANNEL.sendToServer(new C2SImportBlueprintPacket(data, name));
+            // 记一笔：结构回来之后由 refreshDynamicState 把这句话换成导入结果
+            this.importPending = true;
+            this.importAskedAt = System.currentTimeMillis();
             setStatus(Component.translatable("gui.blueprint.importing"));
         } catch (IOException e) {
             setStatus(Component.translatable("message.blueprint.import_failed"));
@@ -495,12 +615,7 @@ public class BlueprintScreen extends Screen {
     @Override
     public void onClose() {
         // 关闭时把名字同步给服务端，存进物品 NBT
-        if (nameBox != null) {
-            String name = nameBox.getValue().trim();
-            if (!name.equals(BlueprintItem.getBlueprintName(getStack()))) {
-                ModNetwork.CHANNEL.sendToServer(new C2SSetNamePacket(name));
-            }
-        }
+        syncName();
         super.onClose();
     }
 
