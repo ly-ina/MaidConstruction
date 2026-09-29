@@ -1,6 +1,7 @@
 package com.example.blueprint.build;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Vec3i;
 
 import javax.annotation.Nullable;
 import java.util.function.Predicate;
@@ -68,6 +69,29 @@ public final class StandSpotSearch {
             }
         }
         return null;
+    }
+
+    /**
+     * 这一格离结构够不够远：结构边界往外让出 {@code margin} 格才算合格。
+     * <p>
+     * 为什么不能只满足于"不在结构里"：紧贴着墙站，她的碰撞箱会压进结构那一列，
+     * 而那一列的方块会被判成"她占着"跳过（见 {@code BuildSession#step}），
+     * 于是她钉在墙边，墙永远补不完——玩家看到的就是"她挡着建造"。
+     * 中间留出一格空档（{@code margin = 2}）就没这回事。
+     * <p>
+     * 判据是"至少有一根轴离得够远"，与 {@code BlueprintBuildController} 取结构外圈的
+     * 做法一致：站在长墙侧面时，另一根轴本来就在墙的范围内。
+     *
+     * @param pos    落脚点（只取水平坐标，高度不参与）
+     * @param anchor 结构锚点：按定义是最小角
+     * @param size   结构尺寸
+     * @param margin 离结构边界的最小格数：1 表示可以贴边站，2 表示中间空一格
+     */
+    public static boolean clearOf(BlockPos pos, BlockPos anchor, Vec3i size, int margin) {
+        return pos.getX() <= anchor.getX() - margin
+                || pos.getX() >= anchor.getX() + size.getX() - 1 + margin
+                || pos.getZ() <= anchor.getZ() - margin
+                || pos.getZ() >= anchor.getZ() + size.getZ() - 1 + margin;
     }
 
     private StandSpotSearch() {

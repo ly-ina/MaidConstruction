@@ -1,13 +1,16 @@
 package com.example.blueprint.build;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Vec3i;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 找落脚点的**顺序**规则。这条逻辑这一轮改错两次（判错就变成"她站在投影里原地开工"），
@@ -46,6 +49,29 @@ class StandSpotSearchTest {
     @DisplayName("一个能站的都没有：返回 null，由调用方决定就地开工")
     void noneAcceptable() {
         assertNull(find(10, Set.of()));
+    }
+
+    @Test
+    @DisplayName("离结构要留出空档：贴着墙站不合格，再往外一格才合格")
+    void requiresAGapFromTheStructure() {
+        // 结构占 x 0..3、z 0..3
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        Vec3i size = new Vec3i(4, 3, 4);
+
+        assertFalse(StandSpotSearch.clearOf(new BlockPos(-1, 64, 1), anchor, size, 2),
+                "贴着西墙那一格（x = -1）会压住结构那一列，不合格");
+        assertTrue(StandSpotSearch.clearOf(new BlockPos(-2, 64, 1), anchor, size, 2),
+                "再往外一格（x = -2）中间正好空一格");
+        assertFalse(StandSpotSearch.clearOf(new BlockPos(1, 64, 1), anchor, size, 2),
+                "结构里面当然更不合格");
+        assertFalse(StandSpotSearch.clearOf(new BlockPos(1, 64, 4), anchor, size, 2),
+                "南北同理：z = 4 贴着");
+        assertTrue(StandSpotSearch.clearOf(new BlockPos(1, 64, 5), anchor, size, 2),
+                "z = 5 合格");
+        assertTrue(StandSpotSearch.clearOf(new BlockPos(-2, 64, 1), anchor, size, 2),
+                "站在长墙侧面时，另一根轴在墙的范围内不影响判定");
+        assertTrue(StandSpotSearch.clearOf(new BlockPos(-1, 64, 1), anchor, size, 1),
+                "margin = 1 就是允许贴边站——判据要按参数走，别写死");
     }
 
     @Test

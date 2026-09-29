@@ -1115,12 +1115,13 @@ public class BlueprintBuildController {
      * 离她最近的一个"压不着蓝图"的落脚点（让开用）。
      * <p>
      * 和 {@link #nearestStandSpot}（结构外圈上离她最近的那个）的分工：
-     * 这里是**从她脚下往外一圈圈找**，判据只有一条——**站那儿不会占住蓝图要放的格子**
-     * （脚、头顶两格都算，见 {@link #blocksPlanned}）。
+     * 这里是**从她脚下往外一圈圈找**。判据两条：**站那儿不会占住蓝图要放的格子**
+     * （脚、头顶两格都算，见 {@link #blocksPlanned}），以及**离结构留出一格空档**
+     * （见 {@link #clearOfFootprint}）。外圈那个（可能在对角几十格开外）只当兜底。
      * <p>
-     * 特意**不拿"在不在结构的 X/Z 大框里"当判据**：结构内部的空档（大厅、走道、天井）
-     * 本来就站得，用大框去框会把它们全判成"在结构里"，于是明明迈两步就有地方站，
-     * 却算成"找不到落脚点"，只能让她原地开工。外圈那个（可能在对角几十格开外）只当兜底。
+     * 后面这条是补上的：以前只要求"不在结构的水平范围里"，结果她常常**紧贴着墙**站定，
+     * 碰撞箱压进结构那一列，那几列被判成"她占着"而跳过——她就钉在墙边，谁也没法把墙补完。
+     * 空档按 {@link #STAND_MARGIN} 算，与结构外圈那条兜底路径保持同一个口径。
      */
     @Nullable
     private BlockPos escapeSpot(ServerLevel level, EntityMaid maid) {
@@ -1128,7 +1129,7 @@ public class BlueprintBuildController {
             return null;
         }
         // **顺序**（从近到远、同圈先看同层）交给 StandSpotSearch，那里是纯逻辑、有单测；
-        // 这里只回答"这一格行不行"：不在结构的水平范围里（站那儿不会接着在投影里建），而且站得住
+        // 这里只回答"这一格行不行"：离结构够远（不会接着在投影里建、也不会贴住某一列），而且站得住
         return StandSpotSearch.firstAcceptable(
                 (int) Math.floor(maid.getX()),
                 (int) Math.floor(maid.getY()),
@@ -1136,7 +1137,7 @@ public class BlueprintBuildController {
                 // 排除**刚才到不了的那一格**：走不到再试一次，要是还指同一格，
                 // 那就只是把同样的失败重演一遍（换落脚点的意义就在这儿，见 retryEscape）
                 candidate -> !candidate.equals(standSpot)
-                        && !insideFootprint(candidate) && canStandAt(level, candidate));
+                        && clearOfFootprint(candidate) && canStandAt(level, candidate));
     }
 
     /**
@@ -1196,6 +1197,26 @@ public class BlueprintBuildController {
     private boolean insideFootprint(EntityMaid maid) {
         return insideFootprint(new BlockPos((int) Math.floor(maid.getX()), 0,
                 (int) Math.floor(maid.getZ())));
+    }
+
+    /**
+     * 这一格离结构够不够远：要在水平范围外**再让出一格空档**。
+     * <p>
+     * 只要求"不在范围里"是不够的——紧贴墙站时她的碰撞箱会压进结构那一列，
+     * 那一列的方块被判成"她占着"跳过，她就贴在那儿把墙卡住（"挡建造了"）。
+     * 判据在 {@link StandSpotSearch#clearOf}，间距取 {@link #STAND_MARGIN}（2 = 中间空一格），
+     * 与结构外圈那条兜底路径一致。
+     */
+    private boolean clearOfFootprint(BlockPos pos) {
+        return session == null || activeAnchor == null
+                || StandSpotSearch.clearOf(pos, activeAnchor, session.size(), STAND_MARGIN);
+    }
+
+    /** 她**此刻**离结构够不够远（同上，但按传进来的锚点和尺寸算） */
+    private static boolean clearOfFootprint(EntityMaid maid, BlockPos anchor, Vec3i size) {
+        return StandSpotSearch.clearOf(
+                new BlockPos((int) Math.floor(maid.getX()), 0, (int) Math.floor(maid.getZ())),
+                anchor, size, STAND_MARGIN);
     }
 
     /** 同上，但按传进来的锚点和尺寸算（换工地那一步要在 activeAnchor 更新前用它） */
@@ -2065,12 +2086,13 @@ public class BlueprintBuildController {
         // **站哪都行**：施工本来就没有距离限制（见类注释），她已经到工地附近就就地开工，
         // 不必再去找一个"合适"的站位——大结构外圈那一圈，走过去又远、路上还容易卡，
         // 表现就是"一直在找站位"。只有她离得还远时，才给她一个落脚方向
-        // 但**站在结构的水平范围里**不算"就在工地附近"：那是在投影里施工，
-        // 放的都是自己身边那几块。判据就是"在不在结构的水平范围里"，
+        // 但**站在结构的水平范围里、或者紧贴着它**都不算"就在工地附近"：那是在投影里施工，
+        // 放的都是自己身边那几块；贴着墙站还会把墙那一列卡住（碰撞箱压进那一列，
+        // BuildSession 会把那几块跳过，见 clearOfFootprint）。判据是"离结构留出空档没有"，
         // 不看她脚下那格要不要放方块——结构内部的大厅同样是结构里
         boolean alreadyNearby =
                 maid.distanceToSqr(anchor.getX() + 0.5D, maid.getY(), anchor.getZ() + 0.5D) <= 256.0D
-                        && !insideFootprint(maid, anchor, schematic.getSize());
+                        && clearOfFootprint(maid, anchor, schematic.getSize());
         BlockPos newSpot = null;
         if (!alreadyNearby) {
             // 优先"离她最近的结构外落脚点"（迈两步就出去了），其次结构外圈上最近的那个。

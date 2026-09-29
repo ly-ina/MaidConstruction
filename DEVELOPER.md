@@ -308,7 +308,8 @@ MaidBuildTickHandler（LevelTickEvent.END，ServerLevel）
         └─ BlueprintBuildController.tick(level, maid)
 
 BlueprintBuildController 状态机：
-    MOVE_TO_SPOT   走到站位（锚点外扩 STAND_MARGIN=2 的一圈里找落脚点）
+    MOVE_TO_SPOT   走到站位（离结构边界至少 STAND_MARGIN=2 格，即中间空出一格；
+                   先从她脚下往外找，找不到退到结构外圈那一圈）
     BUILD          调 session.step(...)
                       ├─ placed > 0    → 挥手 + 音效，等 PLACE_COOLDOWN
                       ├─ finished      → 收工，走还料流程
@@ -580,7 +581,7 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 |---|---|---|
 | `CONTAINER_SEARCH_RADIUS` / `_HEIGHT` | 10 / 4 | 就近取料的搜索范围 |
 | 到位距离² | 4 | 到站判定的水平距离 |
-| `STAND_MARGIN` | 2 | 站位在锚点外扩多少格 |
+| `STAND_MARGIN` | 2 | 站位离结构边界至少几格（2 = 中间空出一格，见 `StandSpotSearch.clearOf`） |
 | 离岗距离² | 64 | 超过就重新走回站位 |
 | 导航放弃阈值² | 256 | 超过就不去了，就地取料 |
 | `PLACE_COOLDOWN` / `FETCH_COOLDOWN` | 4 / 20 | 放块、取料的间隔 tick |
