@@ -1,14 +1,13 @@
 package com.example.blueprint.client;
 
+import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.schematic.Schematic;
 import net.minecraft.client.Minecraft;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,21 +40,48 @@ public class BlueprintTransfer {
         return dir;
     }
 
+    /** 与 {@link Schematic#encode} 是同一份实现：文件与网络共用一种格式，只留一处定义 */
     public static byte[] encode(Schematic schematic) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        NbtIo.writeCompressed(schematic.write(new CompoundTag()), out);
-        return out.toByteArray();
+        return Schematic.encode(schematic);
     }
 
     public static Schematic decode(byte[] bytes) throws IOException {
-        return Schematic.read(NbtIo.readCompressed(new ByteArrayInputStream(bytes)));
+        return Schematic.decode(bytes);
     }
 
-    /** 文件名直接跟蓝图名对齐，同名就覆盖 */
+    /** 文件名直接跟图纸名对齐，同名就覆盖 */
     public static Path writeToFile(String name, byte[] data) throws IOException {
         Path file = getExportDirectory().resolve(sanitize(name) + FILE_EXTENSION);
         Files.write(file, data);
         return file;
+    }
+
+    /**
+     * 服务端扫好的一份图纸，落到目录里（录制走的就是这条）。
+     * <p>
+     * 为什么是"服务端扫、客户端写"：扫描只有服务端做得准（客户端的方块实体 NBT 常常是残的），
+     * 而文件只能写在**玩家自己这台机器**的游戏目录里——所以数据要在网络上来回一趟。
+     * <p>
+     * 同名覆盖：与面板里的导出同一条规矩；想留旧的那份就自己改名字。
+     */
+    public static void saveFromServer(String name, byte[] data) {
+        Player player = Minecraft.getInstance().player;
+        try {
+            Path file = writeToFile(name, data);
+            BlueprintLibrary.refresh();
+            if (player != null) {
+                // 录制完就在世界里（录制态没有界面），这句只能走动作栏
+                player.displayClientMessage(
+                        Component.translatable("message.blueprint.record.saved", file.getFileName().toString()),
+                        true);
+            }
+        } catch (IOException e) {
+            BlueprintMod.LOGGER.warn("图纸没能写进目录：{}", name, e);
+            if (player != null) {
+                player.displayClientMessage(
+                        Component.translatable("message.blueprint.record.save_failed"), false);
+            }
+        }
     }
 
     /** 列出可供导入的文件，按名字排序 */

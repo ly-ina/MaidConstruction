@@ -4,6 +4,7 @@ import com.example.blueprint.integration.ae2.Ae2Compat;
 import com.example.blueprint.integration.ae2.Ae2TerminalRegistry;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.registry.ModCreativeTabs;
+import com.example.blueprint.registry.ModBlocks;
 import com.example.blueprint.registry.ModItems;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.common.MinecraftForge;
@@ -27,6 +28,8 @@ public class BlueprintMod {
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, BlueprintConfig.SPEC);
 
         ModItems.ITEMS.register(modBus);
+        ModBlocks.BLOCKS.register(modBus);
+        ModBlocks.BLOCK_ENTITIES.register(modBus);
         ModCreativeTabs.TABS.register(modBus);
         // 说明书的配方：产物里带 NBT（正文、书名），普通 JSON 配方写不出来，
         // 只能自己注册一个配方类型（见 GuideBookRecipe）

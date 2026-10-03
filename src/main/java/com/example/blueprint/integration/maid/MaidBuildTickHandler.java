@@ -2,6 +2,7 @@ package com.example.blueprint.integration.maid;
 
 import com.example.blueprint.BlueprintConfig;
 import com.example.blueprint.BlueprintMod;
+import com.example.blueprint.server.CommandPostAssignments;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -11,6 +12,8 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -54,6 +57,10 @@ public class MaidBuildTickHandler {
             if (!(entity instanceof EntityMaid maid) || !maid.isAlive()) {
                 continue;
             }
+            // 先把"她被指挥台指派了没有"和"她的工作模式"对齐，再往下走：
+            // 下面那道闸门认的就是任务类型，不先切，指派了也没有人来驱动她
+            switchToAssignedMode(level, maid);
+
             if (!isBuildTask(maid)) {
                 BlueprintBuildController stopped = CONTROLLERS.remove(maid.getId());
                 if (stopped != null) {
@@ -88,6 +95,37 @@ public class MaidBuildTickHandler {
         if (++tickCounter >= CLEANUP_INTERVAL) {
             tickCounter = 0;
             cleanup(level);
+        }
+    }
+
+    /** 已经替她切过模式的（被指挥台指派的那些），见 {@link #switchToAssignedMode} */
+    private static final Set<UUID> EMPLOYED = new HashSet<>();
+
+    /**
+     * 让"被指挥台指派"与"她的工作模式"对上。
+     * <p>
+     * 指派只改指挥台那一侧的状态，她自己并不知道；而驱动只看任务类型。两边不对齐，
+     * 表现就是"在界面里指派了她，她照旧种地"。这里按**边沿**动一次：
+     * 刚被指派 → 切到「蓝图建造」；刚被撤单 → 还回原来的模式。
+     * <p>
+     * 为什么是边沿而不是每 tick 都掰：她干活期间主人手动给她换了模式，那是主人的意思，
+     * 我们不该一直把她按回来。（这也是"没放投影 = 待命"的实现方式：模式在建造、手上没活，
+     * 那个模式本来就是空转，不干扰别的活。）
+     */
+    private static void switchToAssignedMode(ServerLevel level, EntityMaid maid) {
+        UUID id = maid.getUUID();
+        boolean assigned = CommandPostAssignments.postPosIn(level, id) != null;
+        if (assigned == EMPLOYED.contains(id)) {
+            return;
+        }
+        if (assigned) {
+            EMPLOYED.add(id);
+            BlueprintBuildTask.employ(maid);
+            BlueprintMod.LOGGER.info("女仆 {} 被指挥台指派，已切到「蓝图建造」模式", id);
+        } else {
+            EMPLOYED.remove(id);
+            BlueprintBuildTask.release(maid);
+            BlueprintMod.LOGGER.info("女仆 {} 不再被指挥台指派，已还回原来的工作模式", id);
         }
     }
 

@@ -1,5 +1,8 @@
 package com.example.blueprint.client;
 
+import com.example.blueprint.client.gui.BlueprintLibraryScreen;
+import com.example.blueprint.client.gui.CommandPostScreen;
+import net.minecraft.core.BlockPos;
 import com.example.blueprint.client.gui.BlueprintMaterialsScreen;
 import com.example.blueprint.client.gui.BlueprintScreen;
 import net.minecraft.client.Minecraft;
@@ -21,6 +24,26 @@ public class BlueprintScreenOpener {
 
     public static void open() {
         Minecraft.getInstance().setScreen(new BlueprintScreen());
+    }
+
+    /**
+     * 打开蓝图终端（图纸库）。
+     * <p>
+     * 与蓝图面板分开是因为数据来源不同：面板围着"手上那张图"转（要问服务端拿结构），
+     * 而图纸库只读客户端的 {@code blueprints} 目录——所以它连服务端都不用惊动。
+     */
+    public static void openLibrary() {
+        Minecraft.getInstance().setScreen(new BlueprintLibraryScreen());
+    }
+
+    /**
+     * 打开某台指挥台。
+     * <p>
+     * 界面自己每帧去读那块方块实体，所以这里不需要把状态传进来——服务端在右键那一刻
+     * 已经补发过一份（见 {@code CommandPostBlock.use}）。
+     */
+    public static void openCommandPost(BlockPos pos) {
+        Minecraft.getInstance().setScreen(new CommandPostScreen(pos));
     }
 
     /**

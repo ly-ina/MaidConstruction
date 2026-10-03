@@ -182,7 +182,7 @@ blockEntities: Map<Integer, CompoundTag>   位置下标 → 方块实体 NBT（�
 |---|---|
 | `capture(Level, BlockPos a, BlockPos b)` | 扫描世界生成结构 |
 | `rotate(Rotation)` | 返回旋转后的**新实例**（`NONE` 返回自身） |
-| `rotateState(BlockState, Rotation)` | 私有，见 §7.3 |
+| `transformState(BlockState, Rotation, Mirror)` | 私有，见 §7.3 |
 | `rotateDirection(Direction, Rotation)` | **公开的**方向旋转工具，多处共用 |
 | `stateAt / blockEntityAt / inBounds / entries` | 访问 |
 | `write / read` | NBT 序列化 |
@@ -472,75 +472,36 @@ public class MyRotation implements BlockEntityRotation {
 
 ## 7. 关键陷阱与设计决策
 
-这一节是文档里最重要的部分。下面每一条都是实际踩过的坑。
+这一节是文档里最重要的部分。下面每一条都是实际踩过的坑，动这些代码之前先读一遍。
 
 ### 7.1 原版交互是「方块优先」
 
-**现象**：手持绑定书右键容器 → 容器打开了，绑定没生效。手持空白蓝图点容器 → 同样打不开选区。
+方块的 `use()` 先于物品的 `useOn()` 执行，方块返回 `CONSUME`/`SUCCESS` 时物品那个根本不会被调用——所以手持绑定书右键容器只会打开容器，手持空白蓝图点容器选不了角点。
 
-**原因**：原版的调用顺序是**方块的 `use()` 先执行**。方块返回 `CONSUME`/`SUCCESS` 时，物品的 `useOn()` 根本不会被调用。
-
-**解法**：覆写 `Item#onItemUseFirst(ItemStack, UseOnContext)` —— Forge 的这个钩子跑在方块处理**之前**，返回非 `PASS` 就能完整接管这次右键。
-
-`BlueprintItem` 和 `BindingBookItem` 都这么做了。`BindingBookEvents` 那个 `setUseBlock(DENY)` 是兜底（在物品自身抢不到时生效）。
+**解法**：覆写 `Item#onItemUseFirst(ItemStack, UseOnContext)`。Forge 这个钩子跑在方块处理**之前**，返回非 `PASS` 就能完整接管这次右键。`BlueprintItem` 与 `BindingBookItem` 都这么做；`BindingBookEvents` 里那个 `setUseBlock(DENY)` 只是自己抢不到时的兜底。
 
 ### 7.2 软依赖的隔离方式
 
-**TLM**：类上标 `@LittleMaidExtension`，只有 TLM 存在时才会被反射实例化。事件注册（`MaidBuildTickHandler`）放在 `addMaidTask` 回调里，用静态标志防重复。
+**TLM**：类上标 `@LittleMaidExtension`，只有 TLM 存在时才被反射实例化；事件注册（`MaidBuildTickHandler`）放在 `addMaidTask` 回调里，用静态标志防重复。
 
-**AE2**：三重隔离。
+**AE2**：三重隔离——① 代码全部关在 `integration.ae2` 包；② `Ae2Compat` 本身不引用任何 AE2 类型，只用 `ModList.get().isLoaded("ae2")` 判断（JVM 是懒加载的：方法体里提到的类要执行到那一行才解析，没装 AE2 就永远不会去解析 `Ae2ItemProvider`）；③ `build.gradle` 只给 `compileOnly`，不加 `runtimeOnly`。
 
-1. 全部代码关在 `integration.ae2` 包。
-2. `Ae2Compat` **本身不引用任何 AE2 类型**，只用 `ModList.get().isLoaded("ae2")` 判断。JVM 是懒加载的，方法体里提到的类要等真正执行到那一行才解析 —— 所以没装 AE2 时它永远不会去解析 `Ae2ItemProvider`。
-3. `build.gradle` 里**故意只给 `compileOnly`，不加 `runtimeOnly`**。
-
-**代价**：开发环境跑不了 AE2 功能，要测需临时加 runtimeOnly。
-
-**延伸**：`CableBusOutline` 用注册名 `ae2:cable_bus` 识别线缆，也就不需要引用 AE2 类型。
+代价是开发环境跑不了 AE2 功能，要测需临时加 `runtimeOnly`。同思路的延伸：`CableBusOutline` 用注册名 `ae2:cable_bus` 认线缆，也就不必引用 AE2 类型。
 
 ### 7.3 换朝向的两种失效（旋转与镜像都适用）
 
-**失效一：方块状态没转**
+**失效一：方块状态没转。** 原版 `Block.rotate` 的默认实现**直接返回原状态**，只有主动覆写过的方块（楼梯、箱子这类）才会真的转朝向；AE2 的机器（`DriveBlock` 等继承自己的 `AEBaseEntityBlock`）没覆写，`facing` 纹丝不动。
+**解法**：`Schematic.transformState` 在方块自己转完之后，按**原始状态的值**把所有 `DirectionProperty` 重设一遍。用的是原值，所以不会"转两次"。
 
-```java
-BlockState.rotate(Rotation)  →  Block.rotate(state, rotation)
-                                     ↑ 默认实现直接 return state
-```
+**失效二：NBT 里的朝向。** 有些方块的朝向压根不在 BlockState 里：AE2 线缆把"部件挂在哪个面"记在 NBT 的**键名**上（`north`、`east`，每个部件一个键），`CableBusContainer.readFromNBT` 的方向完全由键名决定，**没有别的通道**，想让部件跟着走只能搬这些键——这由 `Ae2BlockEntityRotation` 负责。**引擎帮不上忙**：BlockState 有 `Property` 系统、能按 `Rotation` 通用变换，而 NBT 是没有 schema 的任意树，看到 `north: {...}` 并不知道那是朝向、物品名还是自定义标签；原版 `StructureTemplate`（结构方块）同样只处理 BlockState。
 
-原版 `Block.rotate` 的**默认实现什么都不做**。只有主动覆写过的方块（楼梯、箱子这类继承 `HorizontalDirectionalBlock` 的）才会真的转朝向。
+**镜像走的是同一套。** 翻面与旋转是"换朝向"的两半，`Schematic.transform` 里**先翻面、后旋转**（与原版结构方块、机械动力那份换算一致；反了就是另一个结构），调用口径是 `base.mirror(m).rotate(r)`。上面两条失效在翻面时同样成立，所以 `BlockEntityRotation#transform` 一次收旋转与翻面两个参数——各家的 NBT 搬运只写一遍，顺序不会两边分叉。
 
-**AE2 的机器属于没覆写的那一类**（`DriveBlock` 等继承自己的 `AEBaseEntityBlock`），所以磁盘驱动器的 `facing` 纹丝不动。
-
-**解法**：`Schematic.rotateState` 在方块自己转完之后，**按原始状态的值**把所有 `DirectionProperty` 重设一遍。用原值算目标值，所以不会出现"转了两次"。
-
-**失效二：NBT 里的朝向**
-
-有些方块的朝向**压根不在 BlockState 里**。AE2 的线缆把"部件挂在哪个面"记在 NBT 的**键名**上：
-
-```json
-{ "cable": {...}, "north": {"id": "ae2:terminal"}, "east": {...} }
-```
-
-而 `CableBusContainer.readFromNBT` 是这么读的：
-
-```
-for (Direction side : DIRECTIONS_WITH_NULL) {
-    tag.get(NBT_KEY_SIDES[getSideIndex(side)])
-    loadPart(side, compound)      // 方向完全由键名决定
-}
-```
-
-**没有别的通道** —— 想让部件跟着转，只能搬这些键。这由 `Ae2BlockEntityRotation` 负责。
-
-**为什么不能通用处理**：BlockState 有 `Property` 系统，引擎能按 `Rotation` 通用变换；而 NBT 是**没有 schema 的任意树**，引擎看到 `north: {...}` 不知道那是朝向、物品名还是自定义标签。**原版的 `StructureTemplate`（结构方块）同样做不到** —— 它旋转时也只处理 BlockState，NBT 原样搬运。
-
-**镜像走的是同一套**：翻面与旋转是同一件"换朝向"的两半，`Schematic.transform` 里**先翻面、后旋转**（与原版结构方块、机械动力那份换算的顺序一致；反了就是另一个结构），`base.mirror(m).rotate(r)` 就是它的调用口径。上面两条失效在翻面时同样成立，所以 `BlockEntityRotation#transform` 一次收旋转与翻面两个参数——各家的 NBT 搬运只写一遍，两处的顺序不会分叉。
-
-**坐标与方向必须同序**：`Schematic.transform` 里坐标是先镜像再旋转，那么 `mirrorDirection` 与 `rotateDirection` 的组合也得是这个顺序（见 `BlockEntityRotation` 的实现与 `CableBusOutline` 的部件补偿），否则方块位置转了 90°、朝向却按另一种顺序翻，落点对不上。
+**坐标与方向必须同序。** 坐标是先镜像再旋转，那么 `mirrorDirection` 与 `rotateDirection` 的组合也得是这个顺序（见 `BlockEntityRotation` 的实现与 `CableBusOutline` 的部件补偿），否则方块位置转了 90°、朝向却按另一种顺序翻，落点对不上。
 
 ### 7.4 缓存与结构的一致性
 
-`ProjectionRenderer` 用静态 `PENDING` 列表缓存"待渲染方块"，坐标是**结构内的相对坐标**。它有四个失效条件：
+`ProjectionRenderer` 用静态 `PENDING` 列表缓存"待渲染方块"，坐标是**结构内的相对坐标**，因此有四个失效条件：
 
 ```java
 now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
@@ -549,11 +510,9 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 || schematic != cachedSchematic           // ★ 结构实例变了
 ```
 
-**最后一条是崩溃修复留下的**。换朝向时，`ClientSchematicCache.get(id, rotation, mirror)` 会返回一个新的副本（旋转还会宽长互换） —— 而 `id` 和 `origin` 都没变。沿用旧坐标去访问新结构就会 `ArrayIndexOutOfBoundsException`。
+最后一条是崩溃修复留下的：换朝向时 `ClientSchematicCache.get(id, rotation, mirror)` 会返回一个新副本（旋转还会宽长互换），而 `id` 与 `origin` 都没变——沿用旧坐标去访问新结构就是 `ArrayIndexOutOfBoundsException`。渲染线程上抛异常会**直接退出游戏**（日志末尾是 `Unreported exception` 紧跟 `Stopping server`）。
 
-渲染线程上抛异常会**直接退出游戏**（日志里表现为一次 `Unreported exception` 紧跟 `Stopping server`）。
-
-**防御**：`CableBusOutline.outlinesOf` 开头也做了 `inBounds` 检查。调用方来自渲染循环，坐标未必和传进来的结构对得上 —— 宁可少画，不能崩。
+**防御**：`CableBusOutline.outlinesOf` 开头也做了 `inBounds` 检查。调用方来自渲染循环，坐标未必和传进来的结构对得上——宁可少画，不能崩。
 
 ### 7.5 取料的三层数量账
 
@@ -565,39 +524,34 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 | `pendingBill` | 跳过已建成的方块后，**还缺多少** | 传给 `transferInto`（内部再减背包） |
 | `shortfall` | 再扣掉**背包已有**，真正要去拿的 | 判断"值不值得跑一趟" |
 
-**踩过的两个坑**：
+两个踩过的坑：用 `bill` 取料 → 每缺一次料就把整座建筑的量搬一遍（解法：`remainingBill`）；用 `pendingBill` 判来源 → 容器里只有"背包早就备齐的那几种"时 `hasAny` 也通过，她白跑一趟还报"背包满了"（解法：`shortfall`）。
 
-**坑一：用 `bill` 取料** → 每缺一次料都把整座建筑的量搬一遍。已建好的部分会被反复要一回，女仆来回跑不说，手上的材料还越堆越多。解法是 `remainingBill`。
-
-**坑二：用 `pendingBill` 判断来源** → 容器里只有"背包早就备齐的那几种"时，`hasAny` 通过，女仆白跑一趟，然后报"背包满了"（实际背包没满、容器里也没有她缺的）。解法是用 `shortfall` 判断。
-
-**另一个相关的**：取料上限原本硬编码 `MAX_PULL_SLOTS = 8`，建筑用超过 8 种材料就永远凑不齐，装了背包升级也不会多拿。现在传的是 `countEmptySlots(backpack)`。
+取料上限也别写死：原来是 `MAX_PULL_SLOTS = 8`，用超过 8 种材料的建筑永远凑不齐、装了背包升级也不多拿；现在传的是 `countEmptySlots(backpack)`。
 
 ### 7.6 数值与单位约定
 
-**所有距离比较都用平方距离**（`distanceToSqr` / `distSqr`），避免多余的 `sqrt`。常量的命名也跟着是 `XXX_SQR`。
+**所有距离比较都用平方距离**（`distanceToSqr` / `distSqr`），省掉多余的 `sqrt`；常量命名也跟着是 `XXX_SQR`。
 
 | 常量 | 值 | 含义 |
 |---|---|---|
 | `CONTAINER_SEARCH_RADIUS` / `_HEIGHT` | 10 / 4 | 就近取料的搜索范围 |
-| 到位距离² | 4 | 到站判定的水平距离 |
+| `ARRIVE_DISTANCE_SQR` | 12.25 | 到站判定（水平）：**故意宽松**，寻路常在两三格外就停下，卡太死会让她每 tick 在"没到岗"与"离岗"之间来回踢 |
+| `ARRIVE_DY` | 2.5 | 到站的垂直容差 |
 | `STAND_MARGIN` | 2 | 站位离结构边界至少几格（2 = 中间空出一格，见 `StandSpotSearch.clearOf`） |
-| 离岗距离² | 64 | 超过就重新走回站位 |
-| 导航放弃阈值² | 256 | 超过就不去了，就地取料 |
+| `LEAVE_SPOT_DISTANCE_SQR` | 64 | 超过就重新走回站位 |
+| `ABORT_DISTANCE_SQR` | 256 | 超过就不去了，就地取料 |
 | `PLACE_COOLDOWN` / `FETCH_COOLDOWN` | 4 / 20 | 放块、取料的间隔 tick |
 | `NO_SOURCE_COOLDOWN` | 100 | 找不到材料后的冷却 |
 | `RETURN_TIMEOUT` | 600 | 还料流程的超时兜底 |
-| `RESCAN_INTERVAL` | 100 | 施工期间重扫间隔 |
 | `MESSAGE_COOLDOWN_MS` | 30000 | 同一类提示的最小间隔 |
 | `MAX_REPORTED_MATERIALS` | 5 | 缺料提示最多列几种 |
 
 ### 7.7 提示信息的几个约定
 
-- **面向玩家的文本一律走翻译键**（`Component.translatable`），不硬编码。
-- **`Schematic` 抛的 `IllegalStateException` 消息本身就是翻译键**，上层直接 `Component.translatable(e.getMessage())`。
-- **物品名用 `Component` 传递，不预先 `.getString()`** —— 否则会在服务端固定成某种语言，客户端换语言也翻不动。
-- **缺料提示不走 `notify`**：那条路径有 30 秒冷却，会被其他消息挤掉。而且同一批缺料只播报一次（比较 `shortfall` 内容），女仆每隔几秒重试也不会刷屏。
-- **`lastReportedShortfall` 要在确认有玩家在附近之后才设置** —— 否则女仆在远处缺料时会先被标记成"说过了"，等玩家走过去反而听不到。
+- **面向玩家的文本一律走翻译键**（`Component.translatable`），不硬编码；`Schematic` 抛的 `IllegalStateException` 消息本身就是翻译键，上层直接 `Component.translatable(e.getMessage())`。
+- **物品名用 `Component` 传递，不预先 `.getString()`**，否则会在服务端固定成某种语言。
+- **缺料提示不走 `notify`**：那条路径有 30 秒冷却、会被其他消息挤掉；同一批缺料只播报一次（比较 `shortfall` 内容）。
+- **`lastReportedShortfall` 要在确认附近有玩家之后才设**，否则她在远处缺料时先被标记成"说过了"，玩家走过去反而听不到。
 
 ### 7.8 幂等性
 
@@ -605,8 +559,8 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 
 - `BuildSession.step` 跳过已是目标状态的方块。
 - `ClientBlueprintBinder.bind` 只在 id 不同时才写入。
-- `Schematic.rotate(NONE)` 和 `BlockEntityRotationResolver.rotate(NONE)` 直接返回自身，不产生复制。
-- `ClientSchematicCache.get(id, NONE)` 返回原始实例。
+- `Schematic.rotate(NONE)` / `Schematic.mirror(NONE)` 直接返回自身；`BlockEntityRotationResolver.transform` 在两个参数都是 NONE 时也直接返回，不产生复制。
+- `ClientSchematicCache.get(id, NONE, NONE)` 返回原始实例。
 - `MaidTerminalBlockEntity.ensureNodeCreated()` 可重复调用。
 
 ### 7.9 几个"看着奇怪但别改"的地方
@@ -614,7 +568,7 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 | 位置 | 说明 |
 |---|---|
 | `MaidTerminalBlockEntity` 待机功耗 `0.0` | **与 AE2 官方终端一致**，不是随手填的 |
-| `MaidItemSource.getBackpack()` 用 `getMaidInv()` | 不用 `ITEM_HANDLER` 能力 —— 那个是含主手/副手/盔甲的组合视图，往里面塞材料会让建筑方块跑到女仆装备栏里 |
+| `MaidItemSource.getBackpack()` 用 `getMaidInv()` | 不用 `ITEM_HANDLER` 能力——那个是含主手/副手/盔甲的组合视图，往里面塞材料会让建筑方块跑到女仆装备栏里 |
 | `MaidTerminalBlock.use` 覆写的是 `@Deprecated` 方法 | 1.20.1 没提供替代重载，覆写它仍是注册右键行为的标准做法 |
 | `BlueprintBuildTask.createBrainTasks` 返回空列表 | 施工不走 Brain 调度，见 §5.3 |
 | `MaidIndustryTask.createBrainTasks` 返回空列表 | 做单同样走服务端 tick，而且**干活时不能跟人**：跟随和取料共用一套导航，见 §7.16 |
@@ -630,280 +584,106 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 |---|---|---|---|
 | Forge 能力 `Capabilities.STORAGE` | **永远**是 `maidStorage`（`InfiniteItemStorage.forMaid()`） | 女仆取料与还料（`Ae2ItemProvider`） | 女仆要的保证是"什么材料都拿得到"，这个保证不该取决于方块有没有接网络、有没有通电、AE2 的挂载跑完没有 |
 | 挂到网格的 `mountInventories` | `gridStorage`（`InfiniteItemStorage.forGrid()`） | 整张 ME 网络 | 让任意终端都能取到所有物品 |
-| `ITerminalHost.getInventory()` | 接上网络就是**网络库存**，否则是 `maidStorage` | AE2 终端界面 | 上了网就该看到全网（其中已包含挂上去的创造库存）；没上网也不能是空的 |
+| `ITerminalHost.getInventory()` | 接上网络就是**网络库存**，否则是 `maidStorage` | AE2 终端界面 | 上了网就该看到全网（已含挂上去的创造库存）；没上网也不能是空的 |
 
-**两份 `InfiniteItemStorage` 实例，差别只在收不收东西**（`insert`）：
+两份 `InfiniteItemStorage` 的差别只在收不收东西：`forMaid()` **收下**（等于销毁）——女仆建完房要把剩料还回来，还料就是"从背包取出往来源里塞"，收下比让她抱着一堆材料干净；`forGrid()` **拒收**——AE2 的网络库存写东西时按优先级逐个问下来，挂上去的这份一旦答"我全要"，玩家往任意终端里放的东西就会被静默销毁。**别再合并回一个实例**：前者是我们主动清场，后者是物品蒸发。
 
-| 实例 | `insert` | 理由 |
-|---|---|---|
-| `forMaid()` | **收下**（等于销毁） | 女仆建完房会把剩料还回来，还料的流程是"从背包取出 → 往来源里塞"。收下比让她抱着一堆材料、或者塞到别的箱子里干净——反正这里什么都是无限的 |
-| `forGrid()` | **拒收**（返回 0） | AE2 的网络库存写东西时是按优先级逐个问下来的（`NetworkStorage.insert`）。挂上去的这份一旦答"我全要"，玩家往**任意**终端里放进去的东西就会被静默销毁，而且他自己不会知道 |
+**为什么不能统一成一个出口**：能力若也返回网络库存，会出现一个窗口期——节点已就绪但 `mountInventories` 还没跑，女仆这时来取料会看到"没有材料"，白跑一趟再等 100 tick 冷却；反过来，`getInventory` 只返回自己的库存，联网时右上角的搜索框就搜不到网络里别的东西了。
 
-**别再合并回一个实例**。这两件事看着都是"收下物品"，实际完全不同：前者是我们主动清场，后者是物品蒸发。要改成全网也收下，得先想清楚玩家能不能接受往终端里放东西会消失。
+**挂进网络的机制**：方块实体实现 `IStorageProvider`，并在构造函数里 `mainNode.addService(IStorageProvider.class, this)`——**这一句必须在节点 `create` 之前**（它是"这个节点能对外提供什么服务"的登记，等网格建起来再补登记就挂不上去了）；`mountInventories` 里 `mounts.mount(storage)`。申报数量用 `Integer.MAX_VALUE`（与 AE2 自己的创造存储一致），别改 `Long.MAX_VALUE`：网络库存是若干来源相加的，几张创造接口同处一网会加溢出，而且那个数字会原样显示在终端里。
 
-**为什么不能统一成一个**：如果能力也返回网络库存，就会出现一个窗口期——节点已就绪但 `mountInventories` 还没跑，女仆这时来取料会看到"没有材料"，白跑一趟再等 100 tick 冷却。反过来，如果 `getInventory` 只返回自己的库存，联网状态下右上角的搜索框就搜不到网络里别的东西了。
-
-**挂进网络的机制**：方块实体实现 `IStorageProvider`，并在构造函数里 `mainNode.addService(IStorageProvider.class, this)`。**这一句必须在节点 `create` 之前**——它是"这个节点能对外提供什么服务"的登记，等网格建起来再补登记，存储就挂不上去了。`mountInventories(IStorageMounts)` 里调 `mounts.mount(storage)` 即可。
-
-**申报数量**用 `Integer.MAX_VALUE`，与 AE2 自己的创造存储一致。别改成 `Long.MAX_VALUE`：网络库存是若干来源相加的，几张创造接口同处一网会把计数加溢出；而且那个数字会原样显示在终端里。
-
-**贴图是自己画的，没有沿用 AE2 的。** 女仆终端用的 `ae2:part/terminal` 是**部件**贴图——16×16 里只有 44 个像素不透明，画的是一个 12×12 的空心边框，连屏幕都没有。当整方块贴图（`cube_all`）用时，渲染出来是个透空的深灰框，既不是"终端"也改不成白色。所以这个方块的 `assets/blueprint/textures/block/creative_maid_interface.png` 是本 mod 唯一的自有贴图。
-
-**"发光"靠的是模型面级全亮**，不是 `lightLevel` 单独能做到的：
+**贴图是自己画的**：`ae2:part/terminal` 是**部件**贴图，16×16 里只有 44 个不透明像素（一个 12×12 的空心边框、连屏幕都没有），当整方块贴图（`cube_all`）用只会渲染出一个透空的深灰框。**"发光"要靠模型面级全亮**，不是 `lightLevel` 单独能做到的：
 
 ```json
 "forge_data": { "block_light": 15, "sky_light": 15 }
 ```
 
-这是 Forge 的 `ForgeFaceData`（1.20.1 有效，AE2 自己的终端屏幕也这么写）。只设 `lightLevel` 的话，方块能照亮周围，但它自己的六个面仍然按环境光照渲染，暗处看着是块灰砖。两个都设才是"发光方块"。
+这是 Forge 的 `ForgeFaceData`（1.20.1 有效，AE2 自己的终端屏幕也这么写）。只设 `lightLevel` 的话，方块能照亮周围，但它自己的六个面仍按环境光渲染，暗处看着是块灰砖。
 
 ### 7.11 无线女仆终端：只覆写取电、跨维度耗电与断开，其余照抄官方
 
-**必须继承 `WirelessTerminalItem`，不能自己写一个物品。** `WirelessTerminalMenuHost` 的构造函数里写死了：
-
-```java
-if (item instanceof WirelessTerminalItem terminal) { ... }
-else throw new IllegalArgumentException("Can only use this class with subclasses of WirelessTerminalItem");
-```
-
-不继承就拿不到 AE2 的终端界面。继承过来之后，面板、升级槽、"在物品栏里直接打开"的入口全是现成的。
+**必须继承 `WirelessTerminalItem`，不能自己写一个物品**：`WirelessTerminalMenuHost` 的构造函数里写死了 `instanceof WirelessTerminalItem` 检查，不满足直接抛 `IllegalArgumentException`。继承过来之后，面板、升级槽、"在物品栏里直接打开"的入口全是现成的。
 
 | 覆写 | 作用 |
 |---|---|
 | `use` | Shift + 右键空气断开链接，其余交给父类去开面板 |
-| `getAECurrentPower` | 插卡后对外声明满电（见下面"供电路径"） |
+| `getAECurrentPower` | 插卡后对外声明满电（见下"供电路径"） |
 | `hasPower` / `usePower` | 插卡后从网络取电 |
-| `getMenuHost` | **只为压住跨维度耗电**，且只在插卡时用自己的宿主（见下），判定逻辑全留在官方那边 |
+| `getMenuHost` | **只为压住跨维度耗电**，且只在插卡时用自己的宿主；判定逻辑全留在官方那边 |
 
-**其余一律不覆写。** 这一节最值钱的就是这句话，它是踩完坑之后的结论：
-原先为了让"没链接也能开面板"，把 `getLinkedGrid` / `checkPreconditions` /
-`getMenuHost` 三处都换成了自己那套，结果整台终端**右键没反应，而且没有任何提示**。
-逐个说清楚为什么不能碰：
+**其余一律不覆写。** 这是踩完坑的结论：早先为了让"没链接也能开面板"，把 `getLinkedGrid` / `checkPreconditions` / `getMenuHost` 三处都换成了自己那套，结果整台终端**右键没反应、而且没有任何提示**。三处各自的理由：
 
-**`getLinkedGrid`：提示就写在它里面。** 官方实现（javap 逐条读过）的分支是：
+- **`getLinkedGrid`：提示就写在它里面。** 官方实现的分支是"没链接 → 提示 `DeviceNotLinked`"、"链接的维度/方块找不到 → 提示 `LinkedNetworkNotFound`"。换成自己的解析等于把这些提示全吞掉——玩家右键之后什么都没发生。**要加自己的判定，就加在它返回 null 之后**，别在它前面截断。
+- **`checkPreconditions`：能不能开面板归官方。** 它负责"没链接 → 不吭声（提示已由 `getLinkedGrid` 发过）"与"没电 → 提示 `DeviceNotPowered`"。覆写任何一个分支都会让对应提示消失。
+- **`getMenuHost`：官方宿主并没有射程上限。** `WirelessTerminalMenuHost.rangeCheck()` 只做两件事——`targetGrid` 是否为 null、网格里还找不找得到一台 `WirelessAccessPointBlockEntity`；它把最近那台存进 `myWap`、把距离算出来给耗电速率用，**没有任何"超出射程就拒绝"的比较**。AE2 的无线终端本来就不限距离，真正的限制是"目标区块得加载着"。当初以为"官方宿主会按射程关面板"才换掉它，反而把官方的耗电与失效逻辑一起换掉了。
 
-```
-level 不是 ServerLevel          → 返回 null（客户端本来就不解析）
-没有链接                        → 提示 DeviceNotLinked（"设备未链接"）→ null
-链接的维度/方块找不到            → 提示 LinkedNetworkNotFound → null
-那台访问点的网格为 null          → 提示 LinkedNetworkNotFound → null
-```
+**唯一的例外：跨维度耗电必须压住，这只能靠换宿主。** 所以后来还是加回了 `getMenuHost`，但它只做一件事——覆写 `setPowerDrainPerTick(double)`（该方法在 `ItemMenuHost` 里是 `protected`，跨包覆写没问题），而且**只在插了女仆绑定卡时**才用自己的宿主。起因是 AE2 自己算不出跨维度的距离：`WirelessTerminalMenuHost.getWapSqDistance` 在"访问点跟玩家不同维度"和"访问点没在工作"两种情况下**直接返回 `Double.MAX_VALUE`**，于是 `currentDistanceFromGrid ≈ 1.3e154`，再乘 `wirelessTerminalDrainMultiplier` 就是**一 tick 把整张网络抽干**。取值直接照抄 AE2WTLib 的量子桥卡：**22.5 AE/tick**（它补的是同一个洞，做法也一样——判定过不去就不接受 AE2 给的速率）。**这个宿主只覆写这一个方法**，`rangeCheck()` / `onBroadcastChanges()` 一律不碰。
 
-把它换成"自己的解析"，等于把这些提示全部吞掉——玩家右键之后什么都没发生，
-连知道这个模组的人都只会以为坏了。**要加自己的判定，就加在它返回 null 之后**，
-不要在它前面截断。
+**`onBroadcastChanges` 的极性（万一以后真要覆写）**：它返回的是"菜单还算有效吗"，`AEBaseMenu.broadcastChanges` 里是 `if (!host.onBroadcastChanges(this)) setValidMenu(false);`——**`true` 才是继续开着**，返回 `false` 是当场关掉（表现："面板一闪而过"）。跟 `rangeCheck()`、`ItemProvider.requiresTravel()` 那种"返回 true 表示有问题"的直觉正好相反。
 
-**`checkPreconditions`：能不能开面板的判定归官方。** 官方实现（同样 javap 读过）：
+**`onItemUseFirst` / `useOn` 都不要碰，方块上的右键一律让给方块。** 这里踩过一次：为了让"对着方块右键也能开面板"而覆写了 `onItemUseFirst`，结果这台终端**再也放不进 AE2 的充能器**，也放不进无线访问点去链接。原因很实在——充能器**没有界面**（整个 AE2 里没有 `ChargerMenu`），它只有一个 `ChargerBlock.onActivated(...)`，右键把物品收进去是唯一入口；无线访问点自己开面板（`MenuOpener.open(WirelessAccessPointMenu.TYPE, …)`），只在玩家潜行时让位。结论：面板只从**右键空气**进，方块上的右键一律让给方块。想验证"是不是物品抢了右键"，把 `onItemUseFirst` 注释掉、空手右键同一个方块对比即可。
 
-```
-物品对不上                   → false（不吭声）
-getLinkedGrid(...) == null   → false（提示在 getLinkedGrid 里已经发过了）
-hasPower(player, 0.5, …) 不过 → 提示 DeviceNotPowered（"设备未通电"）→ false
-```
-
-"没链接"和"没电"两种提示是**分工**的，覆写任何一个都会让对应的提示消失。
-
-**`getMenuHost`：官方宿主并没有射程上限。** 一度以为"官方宿主会按射程把面板关掉"，
-才换成了自己的宿主。读过字节码发现不是这样：`WirelessTerminalMenuHost.rangeCheck()`
-只做两件事——`targetGrid` 是否为 null、以及**网格里还找不找得到一台
-`WirelessAccessPointBlockEntity`**；它把最近的那台存进 `myWap`、把距离算出来给耗电速率用，
-**没有任何"超出射程就拒绝"的比较**。AE2 的无线终端本来就不限距离，真正的限制是
-"目标区块得加载着"（`Platform.getTickingBlockEntity` 取不到方块实体就当没网络）。
-自己换宿主，反而把官方的耗电与失效逻辑一起换掉了。
-
-**唯一的例外：跨维度耗电必须压住，这只能靠换宿主。** 所以后来还是加回了 `getMenuHost`，
-但它只做一件事——覆写 `setPowerDrainPerTick(double)`，而且**只在插了女仆绑定卡时**才用自己的宿主。
-起因是 AE2 自己算不出跨维度的距离：
-
-```
-getWapSqDistance(wap):
-    访问点跟玩家不同维度   → 返回 Double.MAX_VALUE
-    访问点没在工作         → 返回 Double.MAX_VALUE
-```
-
-于是 `currentDistanceFromGrid = sqrt(MAX) ≈ 1.3e154`，`checkWirelessRange` 再拿它去
-`AEConfig.wireless_getDrainRate(...)`（实现就是 `wirelessTerminalDrainMultiplier * 距离`）
-——速率变成 1e154 量级，**一 tick 就能把整张网络抽干**，跨维度实际上没法用。
-
-**取值直接照抄 AE2WTLib 的量子桥卡：`22.5` AE/tick。** 它补的正是同一个洞，做法也一样——
-覆写 `setPowerDrainPerTick`，判定过不去时就不接受 AE2 给的速率。区别只在触发条件：
-它是"射程判定没过"（那边是靠量子网络桥连着的），我们是"距离算不出来"
-（跨维度，或者链接的那台访问点不在工作）。
-
-`setPowerDrainPerTick` 在 `ItemMenuHost` 里是 `protected`，跨包覆写没问题。
-**但这一个宿主只覆写这一个方法**：`rangeCheck()` / `onBroadcastChanges()` 一律不碰——
-"判定与失效逻辑留在官方那边"是上一轮刚换回来的教训（见上）。
-
-**`onBroadcastChanges` 的极性（万一以后真要覆写）。** 它返回的是"菜单还算有效吗"，
-`AEBaseMenu.broadcastChanges` 里是 `if (!host.onBroadcastChanges(this)) setValidMenu(false);`
-——**`true` 才是继续开着**，返回 `false` 是当场关掉，表现就是"面板一闪而过"。
-跟 `rangeCheck()`、`ItemProvider.requiresTravel()` 那种"返回 true 表示有问题"的直觉正好相反。
-
-**`onItemUseFirst` / `useOn` 都不要碰，方块上的右键一律让给方块。** 这里踩过一次：
-为了让"对着方块右键也能开面板"，覆写了 `onItemUseFirst`，结果这台终端
-**再也放不进 AE2 的充能器**，也放不进无线访问点去链接。原因很实在：
-
-- **充能器没有界面**（整个 AE2 里没有 `ChargerMenu` 这个类），它只有一个
-  `ChargerBlock.onActivated(...)`，**右键把物品收进去是唯一入口**；
-- **无线访问点是自己开面板的**（`WirelessAccessPointBlock.m_6227_` 里直接
-  `MenuOpener.open(WirelessAccessPointMenu.TYPE, …)`），只在玩家**潜行**时让位——
-  `InteractionUtil.isInAlternateUseMode(player)` 就是 `isSecondaryUseActive()`，
-  跟手里拿什么无关。
-
-结论：面板只从**右键空气**进（官方终端就是这么做的），方块上的右键一律让给方块。
-想验证"是不是物品抢了右键"，把 `onItemUseFirst` 注释掉、空手右键同一个方块对比即可。
-
-**链接必须走 AE2 原生的那套，而且要记得登记。** 链接是把终端放进 **ME 无线访问点**的槽位里完成的，
-槽位按 `RestrictedInputSlot$PlacableItemType.GRID_LINKABLE_ITEM` 放行，而它查的是
-`GridLinkables.get(item)` —— **每个物品都要显式登记处理器**：
+**链接必须走 AE2 原生那套，而且要记得登记。** 链接是把终端放进 **ME 无线访问点**的槽位完成的，槽位按 `RestrictedInputSlot$PlacableItemType.GRID_LINKABLE_ITEM` 放行，它查的是 `GridLinkables.get(item)`——**每个物品都要显式登记处理器**：
 
 ```java
 GridLinkables.register(WIRELESS_MAID_TERMINAL.get(), WirelessTerminalItem.LINKABLE_HANDLER);
 ```
 
-直接用官方那个处理器就行：它的 `canLink` 是 `instanceof WirelessTerminalItem`（我们的终端本来就是子类），
-`link`/`unlink` 读写的也是官方终端那套 NBT 键。**没登记的表现是"终端根本放不进访问点"**，
-而且同样没有任何提示。登记和升级卡关联一起放在 `registerItemHooks()`（`commonSetup` 里调）。
+直接用官方那个处理器就行（`canLink` 是 `instanceof WirelessTerminalItem`，我们的终端本来就是子类；`link`/`unlink` 读写的也是官方那套 NBT 键）。**没登记的表现是"终端根本放不进访问点"**，同样没有任何提示。它与升级卡关联一起放在 `registerItemHooks()`（`commonSetup` 里调）。
 
-**供电路径要看仔细。** 链路是
-`ItemMenuHost.drainPower() → WirelessTerminalMenuHost.extractAEPower() → WirelessTerminalItem.usePower(player, amount, stack)`，
-而 `extractAEPower` 里先用 `Math.min(amount, getAECurrentPower(stack))` 夹了一次上限。
-所以"插卡后从网络取电"必须**同时**覆写两个方法：只覆写 `usePower` 是不够的——
-电池空的时候，宿主算出来的上限就是 0，它压根不会来问 `usePower`。
+**供电路径要看仔细。** 链路是 `ItemMenuHost.drainPower() → WirelessTerminalMenuHost.extractAEPower() → WirelessTerminalItem.usePower(...)`，而 `extractAEPower` 先 `Math.min(amount, getAECurrentPower(stack))` 夹了一次上限——所以"插卡后从网络取电"必须**同时**覆写 `hasPower`/`usePower`/`getAECurrentPower`。两个容易写错的地方：
 
-两个容易写错的地方：
+- **`hasPower` 不能无条件返回 true。** 官方只是先问它，得到 true 就照常 `drainPower()`，扣不到照样把菜单判为失效——表现是**面板一闪而过**。插卡时拿网络 SIMULATE 一次如实回答，没电就会走到官方那条"设备未通电"的提示上。
+- **`usePower` 必须"先 SIMULATE 再 MODULATE"。** `extractAEPower` 是能抽多少抽多少，抽不满时我们会转去用内置电池，而**那半截已经先从网络里扣掉了**——等于凭空烧掉。先用 `Actionable.SIMULATE` 确认能给够，再真扣。
 
-- **`hasPower` 不能无条件返回 true。** 官方只是先问它，得到 true 就照常去 `drainPower()`，
-  扣不到照样把菜单判为失效——表现是**面板一闪而过**。插卡时拿网络 SIMULATE 一次如实回答，
-  没电就会走到官方那条"设备未通电"的提示上。
-- **`usePower` 必须"先 SIMULATE 再 MODULATE"。** `extractAEPower` 是能抽多少抽多少，
-  抽不满时我们会转去用内置电池，而**那半截已经被从网络里扣掉了**——等于凭空烧掉。
-  先用 `Actionable.SIMULATE` 确认能给够，再真扣。
+**升级槽能不能插一张卡，不看物品类型。** AE2 的过滤器只有一行 `getInstalledUpgrades(item) < getMaxInstalled(item)`，而后者的值来自 `Upgrades.add(卡, 机器, 张数)` 的登记——**没登记就是 0，卡会被默默拒绝**，也没有任何提示。`Upgrades.add` 的第二个参数是机器（map 的键取的是 `Association.upgradeCard()`，即第一个参数），登记必须放在**物品注册完成之后**（本项目在 `commonSetup`）。
 
-**升级槽能不能插一张卡，不看物品类型。** AE2 的过滤器只有一行：
+**无线来源不能让女仆走动。** `ItemProvider.requiresTravel()` 默认 `true`，无线终端返回 `false`，控制器的 `tickFetch` / `tickReturn` 据此跳过寻路与开箱动画；否则她会照着绑定坐标一路跑过去——那坐标可能在地图另一头，甚至在别的维度。
 
-```java
-return getInstalledUpgrades(item) < getMaxInstalled(item);
-```
+**"没电就不给开面板"这条原生规则保留，代价是刚做出来要先去充一次电。** `AEBasePoweredItem.getAECurrentPower` 读 NBT 里的 `internalCurrentPower`，**没有 NBT 就是 0**，所以合成出来的终端与官方无线终端一样是空的：右键提示「设备未通电」，在充能器里充一次就能开面板插卡。别为了跳过这一步去覆写 `checkPreconditions`（那正是让所有提示一起消失的原因）；真要跳过，正确做法是给合成产物直接充满（覆写 `onCraftedBy`）。**充能器本身没问题**，别去改物品的可充能性：`ChargerInvFilter.allowInsert` 的判据是 `Platform.isChargeable(stack)`，继承 `AEBasePoweredItem` 就自动满足；它显示"供能不足"是**它自己没接电**。
 
-`getMaxInstalled` 来自 `Upgrades.add(卡, 机器, 张数)` 的登记。**没登记就是 0，
-卡会被默默拒绝**，而且不会有任何提示。`Upgrades.add` 的第一个参数是卡、第二个是机器
-（map 的键取的是 `Association.upgradeCard()`，也就是第一个参数）。
-登记必须放在**物品注册完成之后**（本项目的调用点是 `commonSetup`），因为要取 `RegistryObject.get()`。
-
-**无线来源不能让女仆走动。** `ItemProvider.requiresTravel()` 默认 `true`，无线终端返回 `false`，
-控制器的 `tickFetch` / `tickReturn` 据此跳过寻路和开箱动画。
-不这么做的话，女仆会照着绑定坐标一路跑过去——那个坐标可能在地图另一头，甚至在别的维度。
-
-**"没电就不给开面板"这条原生规则保留了，代价是刚做出来要先去充一次电。**
-`AEBasePoweredItem.getAECurrentPower` 读的是 NBT 里的 `internalCurrentPower`，
-**没有 NBT 就是 0**（javap 读过），所以合成出来的终端和官方无线终端一样是空的：
-右键会提示「设备未通电」，在**充能器**里充一次就能开面板插卡了。别为了跳过这一步
-再去覆写 `checkPreconditions` —— 那正是让所有提示一起消失的原因（见上）。
-真要跳过，正确做法是给合成产物直接充满（覆写 `onCraftedBy`），
-而不是放宽"能不能开面板"的判定。
-
-**充能器本身没问题**，别去改物品的可充能性：`ChargerBlockEntity$ChargerInvFilter.allowInsert`
-的判据是 `Platform.isChargeable(stack)`，也就是
-`instanceof IAEItemPowerStorage && getAEMaxPower(stack) > 0` —— 继承 `AEBasePoweredItem`
-就自动满足。充能器显示"供能不足"是**它自己没接电**（它是网络设备，手边没网时可以用 AE2 的手摇曲柄）。
-
-**跨维度有一条解不开的限制。** `resolveGrid` 会去对应的 `ServerLevel` 找节点宿主，
-但**区块没加载就拿不到网格**。绑定卡放开的是"距离"和"维度"两条，放开不了"区块加载"——
-ME 网络只存在于已加载的区块里，AE2 自己也做不到隔空访问。要长时间远程取料，
-得靠区块加载器撑着那边。
+**跨维度有一条解不开的限制。** `resolveGrid` 会去对应的 `ServerLevel` 找节点宿主，但**区块没加载就拿不到网格**。绑定卡放开的是"距离"与"维度"两条，放开不了"区块加载"——ME 网络只存在于已加载的区块里，AE2 自己也做不到隔空访问。要长时间远程取料，得靠区块加载器撑着那边。
 
 ### 7.12 学习池：展示按产物，存储按配方
 
-**这两件事必须分开。** 早先那版只存产物，理由写在注释里："配方现场去配方表反查就行了"。
-那条路在"一样产物只有一个配方"时成立，一旦**一样产物有好几个配方**就塌了：
-反查拿到哪个是**配方表的顺序**，不是主人的意愿；而且"她到底见过哪一种做法"这件事根本没记下来，
-主人想指定也没处可指。现在的结构是：
+**这两件事必须分开。** 早先那版只存产物，理由是"配方现场去配方表反查就行"——那在"一样产物只有一个配方"时成立，一旦**一样产物有好几个配方**就塌了：反查拿到哪个取决于**配方表的顺序**，不是主人的意愿；而且"她到底见过哪一种做法"根本没记下来，主人想指定也没处可指。现在的结构是：
 
 ```java
 Learned(ItemStack product, List<Recipe> recipes, int selected)   // selected = 主人点名的那条做法
-Recipe(@Nullable ResourceLocation id, List<ItemStack> grid)   // 配方身份 + 演示时那 3×3 的摆法
+Recipe(@Nullable ResourceLocation id, List<ItemStack> grid)      // 配方身份 + 演示时那 3×3 的摆法
 ```
 
-**每个配方存两样，不是冗余。** `id` 是数据包写的那个身份（`minecraft:torch`），
-按它去重、也按它反查原版配方；`grid` 是她**亲眼看见的摆法**——数据包被换掉、配方被删掉之后，
-`id` 就查不出东西了，摆法还能读、还能显示给主人看。少存任何一样都会缺一块。
+**每个配方存两样，不是冗余**：`id` 是数据包写的身份（`minecraft:torch`），按它去重、也按它反查原版配方；`grid` 是她**亲眼看见的摆法**——数据包被换掉、配方被删掉之后 `id` 就查不出东西了，摆法还能读、还能显示给主人看。少存任何一样都会缺一块。
 
-**去重按 id，没有 id 才按摆法**（`hasRecipe`）。同一个配方换个材料再演示一遍不该算第二个配方
-（原版自己就常常 `Ingredient` 吃 tag，橡木换云杉还是同一个 `minecraft:stick`）；
-但真换个做法（这一步配方表里有两条不同记录）就该是新的一条，排在后面。
+**去重按 id，没有 id 才按摆法**（`hasRecipe`）：同一个配方换个材料再演示一遍不该算第二条（原版自己就常常让 `Ingredient` 吃 tag，橡木换云杉还是同一个 `minecraft:stick`）；但真换个做法（配方表里有两条不同记录）就该是新的一条，排在后面。
 
-**做法是"选"出来的，不是"排"出来的。** `Learned.selected` 记一个下标，`select` 只改它，
-列表顺序（学会的先后）稳定不动，界面把选中的那条高亮出来。早先那版是 `promote` 把选中的挪到最前、
-拿"第 0 个"当优先——看着省了一个字段，代价是**每次改选择都重排一次列表**：
-顺序一直在动，主人反而记不住自己选的到底是哪条，"取消优先"更是没有对应的操作。
-（没有做法、或者下标越界时 `chosenIndex()` 退回 0，所以"她照第 1 条做"这个默认是稳的。）
+**做法是"选"出来的，不是"排"出来的。** `Learned.selected` 记一个下标，`select` 只改它，列表顺序（学会的先后）稳定不动，界面把选中那条高亮。早先那版是 `promote` 把选中的挪到最前、拿"第 0 个"当优先——看着省了一个字段，代价是每次改选择都重排列表：顺序一直在动，主人反而记不住自己选的是哪条，"取消优先"也没有对应操作。（没有做法、或下标越界时 `chosenIndex()` 退回 0，所以"照第 1 条做"这个默认是稳的。）
 
-**"能读到配方"这件事全靠事件时机。** `ItemCraftedEvent` 是在 `ResultSlot#onTake` 的
-**第一步**（`checkTakeAchievements`）发出来的，之后才轮到"按 `getRemainingItemsFor` 逐格扣减材料"。
-所以处理器里读到的合成格还是**满的**：摆法与配方都必须**当场**取，等到下一 tick 就只剩产物了。
-这也是"演示一次"能记住做法的根本原因。
+**"能读到配方"这件事全靠事件时机。** `ItemCraftedEvent` 是在 `ResultSlot#onTake` 的**第一步**（`checkTakeAchievements`）发出来的，之后才轮到"按 `getRemainingItemsFor` 逐格扣减材料"，所以处理器里读到的合成格**还是满的**：摆法与配方都必须**当场**取，等到下一 tick 就只剩产物了。这也是"演示一次"能记住做法的根本原因。
 
-**"这次用的是哪个配方"要去问那次合成自己，不要猜界面类型。** `ItemCraftedEvent` 本来就带着
-合成容器（`getInventory()`）——原版工作台与背包给的正是 `CraftingContainer`，连"配方几乘几"
-都顺带有了。早先那版拿 `player.containerMenu` 判断是 `CraftingMenu` 还是 `InventoryMenu`
-再自己拼一个容器，是绕远路：**谁合成的，容器就在谁手里**。
+**"这次用的是哪个配方"要去问那次合成自己，不要猜界面类型。** 事件本来就带着合成容器（`getInventory()`），原版工作台与背包给的正是 `CraftingContainer`，连"配方几乘几"都顺带有了。早先拿 `player.containerMenu` 判断是 `CraftingMenu` 还是 `InventoryMenu` 再自己拼容器，是绕远路——**谁合成的，容器就在谁手里**。
 
-**AE2 的合成终端是这条路上的例外。** 它发事件时传的是 `craftingGrid.toContainer()`——
-`InternalInventory` 包装出来的适配器，**不是 `CraftingContainer`**，所以"把事件里那个容器
-当合成格读"在它这里什么也读不到，池子里就落一条没有配方的记录（界面显示"认不出的配方"）。
-它留的口子是 `CraftingTermMenu#getCurrentRecipe()`（公开，**无线合成终端与便携合成终端都是
-它的子类**）。从它拿到的配方要用**配方自己的材料表**摊展示摆法，**别去读它内部网格的顺序**：
-那是它三乘三槽位的顺序，未必等于配方的行宽；有序配方按 `ShapedRecipe#getWidth()` 摆，
-无序的排一行。跨模组的这种调用一律走 `Ae2Compat` 那层（类本身不引用 AE2 类型，
-确认加载了才碰 `Ae2CraftingCapture`）。
+**AE2 的合成终端是这条路上的例外。** 它发事件时传的是 `craftingGrid.toContainer()`（`InternalInventory` 包装出来的适配器），**不是 `CraftingContainer`**，所以"把事件里那个容器当合成格读"在它这里什么也读不到，池子里只落一条没有配方的记录（界面显示"认不出的配方"）。它留的口子是 `CraftingTermMenu#getCurrentRecipe()`（公开，**无线合成终端与便携合成终端都是它的子类**）。从它拿到的配方要用**配方自己的材料表**摊展示摆法，**别去读它内部网格的顺序**（那是它三乘三槽位的顺序，未必等于配方行宽；有序配方按 `ShapedRecipe#getWidth()` 摆，无序的排一行）。跨模组的这种调用一律走 `Ae2Compat` 那层（类本身不引用 AE2 类型，确认加载了才碰 `Ae2CraftingCapture`）。
 
-**还有一条兜底：按产物反查，且只认唯一一条匹配。** 多条匹配时那正是"一个产物有好几种做法"
-本身——该由主人自己挑，不是我们随便选一条塞进池子。
+**还有一条兜底：按产物反查，且只认唯一一条匹配。** 多条匹配时那正是"一个产物有好几种做法"本身——该由主人自己挑，不是我们随便选一条塞进池子。
 
-**认不出配方就只记产物，别塞假配方。** "没有 id、摆法全空"的记录在界面上就是一行
-"认不出的配方"，占着位置还挡着主人重演示一遍；只记产物的话，界面会老实说
-"只见过产物，没见过做法（再演示一次她就记住了）"。
+**认不出配方就只记产物，别塞假配方。** "没有 id、摆法全空"的记录在界面上是一行"认不出的配方"，占着位置还挡着主人重演示一遍；只记产物的话界面会老实说"只见过产物，没见过做法（再演示一次她就记住了）"。
 
-**取摆法要分工作台与背包两种容器。** 工作台 3×3 的 `craftSlots` **没有公开 getter**
-（只有 `getGridWidth`/`getRecipeBookType` 那些），只能按槽位号读 `slots` 1~9（0 号是产物格）；
-背包 2×2 的 `InventoryMenu#getCraftSlots()` 是公开的。反查配方时要把这两种容器**原样**递给
-`getRecipeFor`——容器大小本身参与匹配（2×2 的配方在 3×3 里未必匹配得上），自己拼一个 3×3 去问是错的。
-另外 1.20.1 **没有 `RecipeHolder`**（那是 1.20.2 的包装），配方 id 就在 `Recipe#getId()` 上。
+**取摆法要分工作台与背包两种容器。** 工作台 3×3 的 `craftSlots` **没有公开 getter**，只能按槽位号读 `slots` 1~9（0 号是产物格）；背包 2×2 的 `InventoryMenu#getCraftSlots()` 是公开的。反查配方时要把这两种容器**原样**递给 `getRecipeFor`——容器大小本身参与匹配（2×2 的配方在 3×3 里未必匹配得上）。另外 1.20.1 **没有 `RecipeHolder`**（那是 1.20.2 的包装），配方 id 就在 `Recipe#getId()` 上。
 
-**`registerTaskData` 漏了，是不报错的那种坏。** `TaskDataKey` 只是"一把钥匙"，
-必须在这个回调里 `register(KET)` 交给 TLM 登记，`maid.getData(key)` 才查得到。
-漏掉的表现是：数据**照样写、照样进存档**，但读回来永远是 null——"学过了全不记得"，
-日志里一个字都没有。凡是新增 `TaskDataKey`，先看 `MaidExtension.registerTaskData` 有没有登记。
+**`registerTaskData` 漏了，是不报错的那种坏。** `TaskDataKey` 只是"一把钥匙"，必须在这个回调里 `register(KEY)` 交给 TLM 登记，`maid.getData(key)` 才查得到。漏掉的表现是：数据**照样写、照样进存档**，但读回来永远是 null（"学过了全不记得"），日志里一个字都没有。凡是新增 `TaskDataKey`，先看 `MaidExtension.registerTaskData` 有没有登记。
 
-**界面入口：`InteractMaidEvent` 的 `post` 返回值就是"要不要跳过它自己的女仆界面"。**
-女仆那边的顺序是"post 事件 → 手里物品的 `interactLivingEntity` → `openMaidGui`"，
-而 `post()` 返回的是"事件被取消了"，所以**取消它 = 直接 SUCCESS 收场**（TLM 自己也这么用）。
-条件是"**蹲下 + 手里拿着木棍**"（`MaidStudyInteractHandler.TRIGGER_ITEM`）。
-原来用的是"蹲下 + 空手"，但那个手势被 TLM 自己占了——**空手蹲下右键 = 亲亲女仆**，
-两边抢同一个动作的结果是玩家想开学习池却亲了她一口。木棍没人拿它跟人互动，不会撞车；
-普通右键、拿别的东西右键仍然都归 TLM。
-事件两端都会走一遍（右键本来就有客户端预测），所以界面在客户端开就行，
-不需要额外发一个"打开界面"的包。
+**界面入口：`InteractMaidEvent` 的 `post` 返回值就是"要不要跳过它自己的女仆界面"。** 女仆那边的顺序是"post 事件 → 手里物品的 `interactLivingEntity` → `openMaidGui`"，而 `post()` 返回的是"事件被取消了"，所以**取消它 = 直接 SUCCESS 收场**。触发条件是"**蹲下 + 手里拿着木棍**"（`MaidStudyInteractHandler.TRIGGER_ITEM`）：原来用"蹲下 + 空手"，那个手势被 TLM 自己占了（空手蹲下右键 = 亲亲女仆），两边抢同一个动作的结果是玩家想开学习池却亲了她一口；木棍没人拿它跟人互动，不会撞车，普通右键与拿别的物品右键仍归 TLM。事件两端都会走一遍（右键本来就有客户端预测），所以界面在客户端开就行，不需要额外发包。
 
-**界面不用请求数据。** 池子是 `TaskDataKey`，TLM 的 `TASK_DATA_SYNC` 已经把女仆身上那份同步到
-客户端了，界面直接 `MaidStudyPool.known(maid)` 就行；只有**换做法**要发 C2S 包，
-服务端 `setAndSyncData` 之后新选择会顺着同一条同步链路推回来，界面自己就变了。
+**界面不用请求数据。** 池子是 `TaskDataKey`，TLM 的 `TASK_DATA_SYNC` 已经把女仆身上那份同步到客户端了，界面直接 `MaidStudyPool.known(maid)` 就行；只有**换做法**要发 C2S 包，服务端 `setAndSyncData` 之后新选择会顺着同一条同步链路推回来。
 
 ### 7.13 学习池下单：单子只记产物，配方每次现查
 
-**订单里不存配方，只存"做什么、还剩几个"。** 配方每次从她的学习池里取那条**选中的**。
-理由跟池子那边一致：主人在界面上换一次做法，就该立刻作用于还没做完的单；
-下单时抄一份配方，等于多出一份要同步的旧数据，而且两份一旦不一致，谁也说不清她该照哪份做。
+**订单里不存配方，只存"做什么、还剩几个"**，配方每次从她的学习池里取那条**选中的**。理由跟池子那边一致：主人在界面上换一次做法就该立刻作用于还没做完的单；下单时抄一份配方，等于多出一份要同步的旧数据，两份一旦不一致谁也说不清该照哪份做。
 
-**取料那套是借来的，但清单得传进去。** 就近容器 → 无线终端 → 绑定书仓库这个顺序、
-以及"哪些方块算容器""无线终端怎么认""要不要扫饰品栏"那些细节，施工那边都磨过了，
-重写必然走样。所以把 `findNearbyContainer` 与 `hasWantedItem` 改成静态、
-并且**把清单当参数传**（原来读的是实例上的 `shortfall`）：手搓要的料跟施工那份完全是两回事。
-只有绑定书那一支自己写——那边那支会顺带播报"隔着维度""仓库空了"，是施工口径的话术。
+**取料那套是借来的，但清单得传进去。** 就近容器 → 无线终端 → 绑定书仓库这个顺序，以及"哪些方块算容器""无线终端怎么认""要不要扫饰品栏"那些细节，施工那边都磨过了，重写必然走样。所以把 `findNearbyContainer` 与 `hasWantedItem` 改成静态、并且**把清单当参数传**（原来读的是实例上的 `shortfall`）——手搓要的料跟施工那份完全是两回事。只有绑定书那一支自己写：那边那支会顺带播报"隔着维度""仓库空了"，是施工口径的话术。
 
-**"探针清单"与"真清单"是两张不同的单。** 吃 tag 的材料（"任意木板"）在清单里没法表达
-"任意"，所以分两步：
+**"探针清单"与"真清单"是两张不同的单。** 吃 tag 的材料（"任意木板"）在清单里没法表达"任意"，所以分两步：
 
 ```
 探针清单：每个材料位的**所有候选**都列上 → 用来找"哪个来源值得跑一趟"
@@ -911,43 +691,21 @@ Recipe(@Nullable ResourceLocation id, List<ItemStack> grid)   // 配方身份 + 
           （先看她背包有没有，再拿 hasAny(单件) 逐个候选问来源）
 ```
 
-少了探针那一张，箱子里明明有云杉木板，她却会认准材料表里排第一的橡木，然后卡在"缺材料"。
+少了探针那一张，箱子里明明有云杉木板，她也会认准材料表里排第一的橡木，然后卡在"缺材料"。
 
-**手搓用一个自己的合成格，不借 `TransientCraftingContainer`。** 后者必须挂一个
-`AbstractContainerMenu`，每次 `setItem` 都回调那个菜单的 `slotsChanged`；我们只是替她
-"空手摆一遍"，没有菜单可挂，传 null 会在 `setItem` 时炸，造个假菜单则是把假状态塞进真流程。
-`CraftingGrid` 就是个 3×3 + 空实现的 `setChanged`。
+**手搓用一个自己的合成格，不借 `TransientCraftingContainer`。** 后者必须挂一个 `AbstractContainerMenu`，每次 `setItem` 都回调那个菜单的 `slotsChanged`；我们只是替她"空手摆一遍"，没有菜单可挂，传 null 会在 `setItem` 时炸，造个假菜单则是把假状态塞进真流程。`CraftingGrid` 就是个 3×3 + 空实现的 `setChanged`。
 
-**先摆格、让配方认一遍，再扣料。** 顺序是"按她手上真有的东西摆 → `recipe.matches` →
-确认每种都够 → 才 `consume` → `assemble` → `getRemainingItems`"。这样就没有
-"扣了料才发现合成失败"的回滚路径要写（施工那边同一条规矩：先确认全都够再动手）。
-摆法本身来自**配方自己写的材料表**（`StudyRecipeCapture.layout`，跟记录"她看过什么"共用一份），
-不读任何一家模组内部网格的顺序。
+**先摆格、让配方认一遍，再扣料。** 顺序是"按她手上真有的东西摆 → `recipe.matches` → 确认每种都够 → 才 `consume` → `assemble` → `getRemainingItems`"，这样就没有"扣了料才发现失败"的回滚路径要写（施工那边同一条规矩：先确认全都够再动手）。摆法本身来自**配方自己写的材料表**（`StudyRecipeCapture.layout`，与记录"她看过什么"共用一份），不读任何一家模组内部网格的顺序。
 
-**一步一 tick。** 认配方 → 找来源 → 赶路 → 搬料 → 手搓，每八 tick 只推进一步：
-赶路要时间，一趟也可能搬不完，全塞进一个 tick 里就只能成功一次。
+**一步一 tick。** 认配方 → 找来源 → 赶路 → 搬料 → 手搓，每八 tick 只推进一步：赶路要时间、一趟也可能搬不完，全塞进一个 tick 里就只能成功一次。
 
-**缺料只提醒一次。** 提示写在 `Order.warned` 上（女仆每隔几秒就重试一遍，
-照实播报会把聊天栏刷满）。做不了的单（池子里没记下做法、或者那条配方已被数据包删掉）
-直接撤掉并说明——留着只会把后面的单永远堵住。
+**缺料只提醒一次**（写在 `Order.warned` 上：她每隔几秒就重试一遍，照实播报会把聊天栏刷满）。做不了的单（池子里没记下做法、或那条配方已被数据包删掉）直接撤掉并说明——留着只会把后面的单永远堵住。
 
-**"跟着主人"和"走去取料"用的是同一套导航，只能让一个说话。** 学习模式的 tick 驱动**每 tick**
-都 `moveTo(主人)`，而取料要 `moveTo(仓库)`；两套各写各的，她的导航目标就每 tick 被顶回去一次，
-**表现是站在原地不动、永远到不了仓库**。附近的箱子几步就到，所以这个坑**只在远程仓库上才露头**
-（一开始的字段就是"绑定书明明绑了容器，她不去拿"）。
-规则：**手上有单就不跟人**（她正在干活）。同一只女仆身上挂多个 tick 驱动时，
-凡是会发导航指令的，都要写明让位条件——这类冲突不会报错，只会表现为"她傻了"。
+**"跟着主人"和"走去取料"用的是同一套导航，只能让一个说话。** 学习模式的 tick 驱动**每 tick**都 `moveTo(主人)`，而取料要 `moveTo(仓库)`；两套各写各的，她的导航目标就被每 tick 顶回去一次，**表现是站在原地不动、永远到不了仓库**。附近的箱子几步就到，所以这个坑**只在远程仓库上才露头**。规则：**手上有单就不跟人**（她正在干活）。同一只女仆身上挂多个 tick 驱动时，凡是会发导航指令的都要写明让位条件——这类冲突不会报错，只会表现为"她傻了"。
 
-**分得清"仓库里没有"与"背包塞不下"。** 搬运回来是 0 不等于来源里没有：先用
-`provider.hasAny(shortfall)` 问一句，再决定说哪句提示。写错提示会让主人顺着错的线索去翻箱子，
-而问题其实在她背包里（施工那边同一个讲究，见 `pullFromProvider`）。
+**分得清"仓库里没有"与"背包塞不下"。** 搬运回来是 0 不等于来源里没有：先用 `provider.hasAny(shortfall)` 问一句，再决定说哪句提示；写错提示会让主人顺着错的线索去翻箱子，而问题其实在她背包里（施工那边同一个讲究，见 `pullFromProvider`）。
 
-**"做完了来告诉我"是临时状态，不进存档。** 只存在内存里的 `REPORTS`（值是"做好了的那几样"）：
-跑过去说一声这件事**过期就没意义**，存档里留个"还没汇报"的尾巴，下次进游戏她突然跑来报一句反而怪。
-开口的条件三条缺一不可：**手头没别的活**（他问的是"做完了吗"，不是"做到哪了"）、
-**主人得在身边**（不在就走过去，走到 4 格内才开口——在聊天栏里飘一句和在眼前被拍一下，
-感觉完全不同）、**没等太久**（约五分钟作废，不留一笔永远报不掉的账）。
-**零件单不报**：那是她自己给自己排的活，主人不需要知道木棍做完了。
+**"做完了来告诉我"是临时状态，不进存档。** 只存在内存里的 `REPORTS`（值是"做好了的那几样"）：跑过去说一声这件事过期就没意义，存档里留个"还没汇报"的尾巴，下次进游戏她突然跑来报一句反而怪。开口的条件三条缺一不可：**手头没别的活**（他问的是"做完了吗"，不是"做到哪了"）、**主人得在身边**（不在就走过去，走到 4 格内才开口——聊天栏里飘一句和在眼前被拍一下，感觉完全不同）、**没等太久**（约五分钟作废，不留一笔永远报不掉的账）。**零件单不报**：那是她自己给自己排的活。
 
 **嵌套合成用"插队"，不用递归。** 缺的零件她要是自己会做，就往**队首插一张"先做这个零件"的单**：
 
@@ -958,13 +716,9 @@ tryNest(shortfall):
         会   → insertFirst(零件, ceil(缺的量 / 一次出几个), depth + 1)  ← 插到最前面
 ```
 
-递归得自己管调用栈、超产与失败回滚；插队只用那一份顺序表，而且**主人看得见"她接下来要做什么"**
-（排队行会直接把零件显示出来）。零件做完，原来那张单自然又有料了；零件自己也缺料，它那一步会再插一层。
+递归得自己管调用栈、超产与失败回滚；插队只用那一份顺序表，而且**主人看得见"她接下来要做什么"**（排队行会直接把零件显示出来）。零件做完，原来那张单自然又有料了；零件自己也缺料，它那一步会再插一层。
 
-**挡循环配方靠"来路"，不靠层数上限。** 一开始写的是"最多套三层"，那是**把错的尺子**：
-AE2 的处理器那类东西正常就套四五层，按层数卡会把正当配方一起卡死；而真正无解的只有
-**绕回自己**（A 要 B、B 要 A）。所以每张单都带着自己的**来路**（从根单到上一层那一串产物），
-插零件时只要求"这个零件不出现在它自己的来路上"：
+**挡循环配方靠"来路"，不靠层数上限。** 一开始写的是"最多套三层"，那是**把错的尺子**：AE2 的处理器那类东西正常就套四五层，按层数卡会把正当配方一起卡死；真正无解的只有**绕回自己**。所以每张单都带着自己的**来路**（从根单到上一层那一串产物），插零件时只要求"这个零件不出现在它自己的来路上"：
 
 ```java
 insertFirst(零件, 数量, 来路):
@@ -974,51 +728,21 @@ insertFirst(零件, 数量, 来路):
     否则插到队首，来路 = 原单的来路 + 原单自己
 ```
 
-这样正当的深套一路放行、循环的当场断掉，而且**不用维护任何魔法数字**——这也是
-"层数该怎么定"这种争论的根源：那个数字本来就不该存在。
+这样正当的深套一路放行、循环的当场断掉，而且**不用维护任何魔法数字**。代价是来路要跟着单一起存（`Order.lineage`，NBT 里一串物品）；它有界——链条上不会出现重复产物，长度天然受"不同产物个数"限制。
 
-代价是来路要跟着单一起存（`Order.lineage`，NBT 里一串物品）。它有界：链条上不会出现重复产物，
-所以长度天然受"不同产物个数"限制，不会无限膨胀。
-
-**"用途"视图查的是她自己的池子，不是配方表。** 右键产物列出**她会做的、用到这个产物的东西**
-（`MaidStudyScreen#learnedUsesOf`：遍历池子，看哪样产物的配方摆法里含它），点一条就跳过去。
-
-最初的实现是扫配方表（`ingredient.test(产物)`），后来改成反查池子，两个原因：
-
-1. **扫全表必须自己设上限**，木板这类几百条只能砍到 32 条，主人看着就是"缺失特别严重"；
-   而池子本来就有界，反查可以不砍条数、完整给全。
-2. 扫全表列出来的**绝大多数她根本不会做**，点过去只撞上"她不会做"，
-   对"接下来让她做什么"这件事没有帮助。反查池子则**每一条都点得过去、都能直接下单**。
-
-代价是：她还没学过用它做的东西时，这一页是空的。这是**口径本身的取舍，不是丢数据**——
-真要"全世界还有哪些做法"（用来决定接下来教她什么），那是接 JEI 那条路。
+**"用途"视图查的是她自己的池子，不是配方表。** 右键产物列出**她会做的、用到这个产物的东西**（`MaidStudyScreen#learnedUsesOf`：遍历池子，看哪样产物的配方摆法里含它），点一条就跳过去。最初的实现扫配方表（`ingredient.test(产物)`），后来改成反查池子：一是扫全表**必须自己设上限**，木板这类几百条只能砍到 32 条，主人看着就是"缺失特别严重"，而池子本来就有界、可以不砍条数；二是扫全表列出来的**绝大多数她根本不会做**，点过去只撞上"她不会做"，对"接下来让她做什么"没有帮助，反查池子则每一条都点得过去、都能直接下单。代价是她还没学过用它做的东西时这一页是空的——这是**口径本身的取舍，不是丢数据**；真要"全世界还有哪些做法"，那是接 JEI 那条路。
 
 ### 7.14 录入配方必须先复制：合成格里取到的是活引用
 
-`ItemCraftedEvent` 是在 `ResultSlot#onTake` 的**第一步**发出来的，所以事件里读合成格，
-格子还是满的——**读的时机没问题，坑在"存"**：
+`ItemCraftedEvent` 是在 `ResultSlot#onTake` 的第一步发出来的，所以事件里读合成格时格子还是满的——**读的时机没问题，坑在"存"**：
 
 ```java
 slots[index] = container.getItem(row * width + col);   // ← 存的是那件物品本身
 ```
 
-`container.getItem()` 返回的是合成格里**那件 ItemStack 自己**，不是副本。而主人的下一步操作
-就是"逐格扣减材料"，于是我们刚记下来的摆法跟着一起被扣空。
+`container.getItem()` 返回的是合成格里**那件 ItemStack 自己**，不是副本；而主人的下一步操作就是"逐格扣减材料"，于是我们刚记下来的摆法跟着一起被扣空。表现（很容易被误判成"数据没存上"）：刚学会的做法摆法那一片过后全空、只剩配方 id；id 也没反查到的话 `MaidStudyPool.isEmpty()` 判定为"什么都没看出来"，**整条做法等于压根没记上**；而且它**只在"每格正好放 1 个"时才丢干净**（配方书自动填充、或材料正好够），每格有剩料时反而侥幸留着——同一个 bug 看起来时好时坏，特别难查。
 
-**表现**（很容易被误判成"数据没存上"）：
-
-- 刚学会的做法，摆法那一片过后全空、只剩配方 id；
-- id 也没反查到的那些，`MaidStudyPool.isEmpty()` 判定为"什么都没看出来"，
-  **整条做法等于压根没记上**；
-- 而且它**只在"每格正好放 1 个"时才丢干净**（配方书自动填充、或材料正好够），
-  每格有剩料时反而侥幸留着——同一个 bug 看起来时好时坏，特别难查。
-
-**规矩：凡是从别人的容器里取出来的 ItemStack，要存进自己的数据结构就先 `copyWithCount(1)`。**
-
-顺带说一句它为什么藏得住：`StudyRecipeCapture#layout` 一开始就复制了
-（`chosen.copyWithCount(1)`），所以走 AE2 合成终端与"按产物反查"兜底的配方从来没有这个问题，
-只有"工作台 / 背包格子手搓"这一条路会丢。**同一个概念两条写入路径、写法不一致**，
-正是这类 bug 的温床。
+**规矩：凡是从别人的容器里取出来的 ItemStack，要存进自己的数据结构就先 `copyWithCount(1)`。** 它之所以藏得住，是因为 `StudyRecipeCapture#layout` 一开始就复制了（`chosen.copyWithCount(1)`），所以走 AE2 合成终端与"按产物反查"兜底的配方从来没有这个问题，只有"工作台 / 背包格子手搓"这一条路会丢——**同一个概念两条写入路径、写法不一致**，正是这类 bug 的温床。
 
 ### 7.15 开界面要判逻辑端：`DistExecutor` 只认物理端
 
@@ -1026,23 +750,9 @@ slots[index] = container.getItem(row * width + col);   // ← 存的是那件物
 DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> MaidStudyScreenOpener.open(maid.getId()));
 ```
 
-看着"已经限定客户端了"，其实**只挡住了专用服务端**。`DistExecutor` 判断的是**物理端**，
-而**单人游戏的物理端就是 `CLIENT`**。像 `InteractMaidEvent`（以及 Forge 的
-`PlayerInteractEvent`）这类事件**两端都会走一遍**——客户端线程一遍、集成服务端线程一遍——
-于是服务端线程上那一份也会执行，跑去调 `Minecraft.getInstance().setScreen()`，
-撞上 `RenderSystem` 的线程断言：
+看着"已经限定客户端了"，其实**只挡住了专用服务端**：`DistExecutor` 判断的是**物理端**，而**单人游戏的物理端就是 `CLIENT`**。像 `InteractMaidEvent`（以及 Forge 的 `PlayerInteractEvent`）这类事件**两端都会走一遍**——客户端线程一遍、集成服务端线程一遍——于是服务端线程上那一份也会执行，跑去调 `Minecraft.getInstance().setScreen()`，撞上 `RenderSystem` 的线程断言（日志里是 `Rendersystem called from wrong thread`）。所以**"物理端是客户端" ≠ "可以碰客户端 API"**，还差一个"当前线程是不是客户端线程"。
 
-```
-[Server thread/ERROR] Exception caught during firing event: Rendersystem called from wrong thread
-[Render thread/ERROR] Reported exception thrown!
-```
-
-所以**"物理端是客户端" ≠ "可以碰客户端 API"**，还差一个"当前线程是不是客户端线程"。
-
-正确写法是分成两件事：
-
-- **取消事件**这类逻辑，两端都要做（服务端不取消，TLM 那边照样开它自己的界面）；
-- **开界面**只能在这一份是**逻辑客户端**时做：
+正确写法是分成两件事：**取消事件**这类逻辑两端都要做（服务端不取消，TLM 照样开它自己的界面）；**开界面**只能在这一份是**逻辑客户端**时做：
 
 ```java
 event.setCanceled(true);                  // 两端都要
@@ -1052,44 +762,50 @@ if (!player.level().isClientSide()) {     // 逻辑端：服务端线程那份�
 DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> MaidStudyScreenOpener.open(maid.getId()));
 ```
 
-外层那个 `DistExecutor` 仍然要留着：它保证在**专用服务端**上不会去加载 `client` 包里的类
-（否则 `NoClassDefFoundError`）。两层各管一件事，不能互相替代。
-
----
+外层那个 `DistExecutor` 仍然要留着：它保证在**专用服务端**上不会去加载 `client` 包里的类（否则 `NoClassDefFoundError`）。两层各管一件事，不能互相替代。
 
 ### 7.16 工业模式：下单即上工，做完把模式还回去
 
-`MaidIndustryTask` 是照学习池的单子干活的工作模式，骨架与「蓝图施工」一致
-（`createBrainTasks` 返回空列表 + 服务端 tick 驱动），差在两点：
+`MaidIndustryTask` 是照学习池的单子干活的工作模式，骨架与「蓝图施工」一致（`createBrainTasks` 返回空列表 + 服务端 tick 驱动），差在三点：
 
-- **下单自动切换**：`employ` 先记下她**原来**的模式（`RETURN_TO`，只在内存里），再切到工业模式；
-  已经在工业模式时什么都不做 —— 否则连着下几单会把"原来是什么模式"覆盖成工业模式本身。
-- **待做清单空了才还回去**：`MaidCraftTickHandler.onLevelTick` 里，先让她把"做好了"那句说完
-  （`REPORTS` 里还有她的账就再等一拍），**说完了才 `release`** —— 顺序反了的话，一还回去她就不归
-  那段代码管了，那句话永远没机会说。
-- **只在工作时间干活**：判据用 TLM 自己的作息（`Activity.WORK.equals(maid.getScheduleDetail())`），
-  **别自己按 `dayTime` 算时段** —— 那等于把 TLM 的三张作息表在本模组里抄一遍，它一改我们就错。
-  查不出来时**放行**（返回 true）：宁可她在休息时段多干一点，也好过"下了单她一动不动还不报错"。
+- **下单自动切换**：`employ` 先记下她**原来**的模式（`RETURN_TO`，只在内存里），再切到工业模式；已经在工业模式时什么都不做——否则连着下几单会把"原来是什么模式"覆盖成工业模式本身。
+- **待做清单空了才还回去**：`MaidCraftTickHandler.onLevelTick` 里先让她把"做好了"那句说完（`REPORTS` 里还有她的账就再等一拍），**说完了才 `release`**——顺序反了的话，一还回去她就不归那段代码管了，那句话永远没机会说。
+- **只在工作时间干活**：判据用 TLM 自己的作息（`Activity.WORK.equals(maid.getScheduleDetail())`），**别自己按 `dayTime` 算时段**——那等于把 TLM 的三张作息表在本模组里抄一遍，它一改我们就错。查不出来时**放行**：宁可她在休息时段多干一点，也好过"下了单她一动不动还不报错"。
 
 ### 7.17 界面里的反馈必须在界面里画
 
-**开着任何 GUI 时，游戏那一层（HUD、聊天栏、动作栏）整个不画。** 所以
+**开着任何 GUI 时，游戏那一层（HUD、聊天栏、动作栏）整个不画**，所以：
 
 ```java
 player.displayClientMessage(component, true);   // 动作栏：界面开着时看不见
 owner.sendSystemMessage(component);              // 聊天栏：同上
 ```
 
-**在界面里点出来的反馈等于没发**。学习池界面的做法是自己在界面上飘一句
-（`MaidStudyScreen.flashAt` / `drawFlash`），并且把这句话占的方块记下来（`flashOverlaps`），
-让跟它重叠的悬停提示让开 —— 她说的话优先级最高。
+**在界面里点出来的反馈等于没发。** 学习池界面的做法是自己在界面上飘一句（`MaidStudyScreen.flashAt` / `drawFlash`），并且把这句话占的方块记下来（`flashOverlaps`），让跟它重叠的悬停提示让开——她说的话优先级最高。同理，界面里的操作**不再由服务端回话**：换做法、忘掉、下单失败都在客户端就地反馈；下单上限也在客户端先算一遍（`canFitInQueue`），**规矩必须与服务端 `MaidCraftOrder.order` 一模一样**，否则会出现"界面说能下、服务端不收"这种最难查的错位。
 
-同理，界面里的操作**不再由服务端回话**：换做法、忘掉、下单失败都在客户端就地反馈；
-下单上限也在客户端先算一遍（`canFitInQueue`），**规矩必须与服务端 `MaidCraftOrder.order`
-一模一样**，否则会出现"界面说能下、服务端不收"这种最难查的错位。
+### 7.18 按路径缓存本地文件时，别忘了"同名覆盖"
 
-> 服务端那些提示（施工缺料、做单卡住、做好了）仍然走聊天栏 —— 它们发生在女仆干活的时候，
-> 那时界面通常是关着的。
+图纸库、以及它上面那些缩略图缓存，一度都只用**路径**当键：重扫时路径没变就沿用旧条目。而图纸的惯例恰恰是**同名覆盖**——改一张图再导出去、从同伴那儿收来一个同名的新版——于是列表里一直是上一版的结构与缩略图，看着像"没刷新"，其实缓存压根没去问文件变没变。
+
+规矩：**凡是缓存"游戏外面能被替换的文件"，键里必须带上文件本身的标记**（大小 + 修改时间，或内容校验和）。这里的落点：
+
+- `BlueprintLibrary.Entry` 建条目时记下 `Files.size` 与 `getLastModifiedTime`，重扫时对不上就重建条目（`changedOnDisk`）；属性读不出来时**当作变了**——宁可多读一遍，也不能拿不准时继续用旧结构。
+- 缩略图那类缓存用 `Entry.cacheKey()`（路径 + 条目序号），而不是路径：序号一定会随重建而变，属性读不出来时那两个数却不会。
+- 目录**每五秒自动重扫**（`RESCAN_INTERVAL_MS`）这条本来就有，界面还得真去取它的结果（`BlueprintLibrary.entries()`）——只重扫、不接上，等于没有。
+
+### 7.19 录制态：借旁观者的两样好处，不借它的交互封锁
+
+框选一座建筑得能上房、能钻地下室，所以录制时给玩家**能飞**（`abilities.mayfly / flying`）与**能穿墙**（`noPhysics`）。**但别直接切成旁观者模式**：它掐掉一切交互，连方块都点不中，而录制要做的恰恰是"右键点方块选角点"这两下。三件事记住就不会踩：
+
+- **进之前的状态原样存下来，退出时还回去**：创造模式的玩家本来就飞着，退出录制态不该把他的飞行收走。存档落在 `player.getPersistentData()`（不是内存里）：换维度不用管，服务端重启后"这人还在录制态"也认得出；而**清掉那份存档就等于"不在录制态"**，所以完成、取消、断线还原都只是同一个动作（`RecordMode.leave`）。
+- **断线必须还原**（`PlayerLoggedOutEvent`）：能力是跟着玩家存档写下去的，不还原的话他下次登录就是个能飞的生存玩家。
+- **`noPhysics` 不是同步字段**：服务端那份由包改，客户端这份得自己按着（录制态每刻重申一次），否则本地预测会在墙前停下——玩家看到的是"穿不过去"。
+
+按键一侧的规矩：只有**世界里没开着任何界面**时才抢键。左键归那个**可取消**的 `InputEvent.MouseButton.Pre`（录制时贴着建筑看，很容易顺手挖掉一块）；`E`（开背包）与 `Q`（丢东西）则**不能**靠事件取消——`InputEvent.Key` **不可取消**，对它调 `setCanceled()` 会抛 `UnsupportedOperationException`，而且那一抛会把整段处理打断，按键白按、日志里还多一条 ERROR（这个坑踩过一次）。也**不能**靠"抢在原版读按键之前把 click 收掉"：在 `TickEvent.ClientTickEvent` 的 `START` 相位 `consumeClick()` 试过，玩家按 Q 照样把东西丢出去——原版读按键比任何一个 tick 阶段都早。**确定生效的做法是把这两个键在录制期间摘掉**（`KeyMapping.setKey(InputConstants.UNKNOWN)`，退出、取消、断线时原样还回去）：键都没绑，原版那句 `consumeClick()` 永远是 false。摘的是**客户端**的控制设置（`KeyMapping` 本来就是客户端状态），代价只有"这中间崩了要自己去控制里绑回来"这一点。方向键微调按"起点 / 终点"分工（起点 = 先点的那一角，终点 = 后点的）：`←` 终点 X+1、`→` 终点 Z+1、`↑` 终点 Y+1、`↓` 起点 Y−1，`Ctrl` 把这一下从终点换成起点（`Ctrl+←` 起点 X+1、`Ctrl+→` 起点 Z+1、`Ctrl+↑` 起点 Y+1、`Ctrl+↓` 终点 Y−1），Shift 一律反向。高度之所以分成上下界两条键（↑ 抬终点、↓ 压起点），是因为框的顶与底最常分开动；水平方向一根轴一个键就够。三根轴各给各的键，不让方向键去猜"你想调哪根"，猜错了反而要点两次才知道偏了。只点了一个角时，方向键照样能动它。E 那一下还留了兜底：万一还是把背包开了，就关掉背包并按"完成"处理，绝不让玩家按了 E 只看到背包、不知道录没录成。
+
+**录下来的结构落在哪**：**直接就是 `blueprints` 目录里的文件**——`C2SCaptureToFilePacket` → 服务端 `Schematic.capture` → `S2CSchematicFilePacket` → 客户端 `BlueprintTransfer.writeToFile` + `BlueprintLibrary.refresh`。蓝图物品在这条路上只是"把某一份取到手上"的容器，录制不经过它：让录制先写进手上一张纸、再让玩家去导出，等于凭空多一步，还要占住他手上的格子。
+
+**扫描与落盘为什么不在同一端**：扫描只有服务端做得准（客户端的方块实体 NBT 常常是残的），而文件只能写在**玩家自己那台机器**的游戏目录里——所以数据要在网络上来回一趟。中间那段字节只有一种写法（`Schematic.encode` / `decode`，文件与网络共用），别再在客户端解一遍再编一遍。
 
 ## 8. 排查手册
 
@@ -1245,7 +961,7 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 | `BuildSession.bill` vs `remainingBill` | 用途不同，混用会导致反复搬运（§7.5） |
 | `shortfall` vs `pendingBill` | 前者用于判断来源，后者传给 `transferInto`（§7.5） |
 | `BlockEntityRotation` 的实现 | 边搬边查会导致"多转一格"（§6.3） |
-| `Schematic.rotateState` | 用的是**原始状态**的值，改成转换后的值会双重旋转（§7.3） |
+| `Schematic.transformState` | 用的是**原始状态**的值，改成转换后的值会双重旋转（§7.3） |
 | `ProjectionRenderer` 的 `PENDING` 失效条件 | 少一个条件就会在世界里崩溃（§7.4） |
 | `Ae2Compat` | 加入任何 AE2 类型的引用都会破坏软依赖隔离（§7.2） |
 | 渲染循环里调 `Schematic.entries()` | 会为每方块新建对象，大结构下严重卡顿 |
@@ -1272,6 +988,9 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 ## 11. 待办
 
 ### 展示物料
+
+> 生成脚本（贴图、图标、指挥台）都在**本地** `tools/` 下：2026-10-03 起不再进版本库。
+> 换配色照样改脚本重跑，只是脚本不再随仓库分发——接手的人拿不到，这一点先知道。
 
 - ~~**模组 logo**~~ **已完成**：原图 `docs/logo-source.jpg`（画好的成品），
   处理脚本 `tools/make_logo.py`（按比例内缩 1.2% 削掉那圈浅色底 → 缩到 256/512 → 自画圆角遮罩）。
@@ -1300,3 +1019,127 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 - 写清 **车万女仆（Touhou Little Maid）是必需前置**：`mods.toml` 里写的是软依赖（不装也不崩），
   但核心玩法"女仆施工"离不开她；**AE2 是可选的**（装上才有无线终端取料那套）。
 - 联机注意事项：模组自带协议版本校验，**客户端与服务端必须装同一个版本**，不匹配会直接拒连。
+
+### 明确不做（设计取舍）
+
+- **撤销与拆除都不做。** 这里是**真实建造**：材料真被消耗，与目标不一致的方块会被替换
+  （旧方块按战利品表回收，见 `Salvage`），所以既没有"一键回到之前"，也没有"照蓝图拆掉"。
+  建错了就自己拿镐子处理——这是取舍不是缺口，别再当"缺功能"提。
+  真要做，那是另一个玩法（拆除机），得单独设计，不是补漏。
+
+### 候选方向（待讨论）
+
+按"收益 / 成本"粗排，都还没定：
+
+- **图纸格式互操作**：见下一条的清单。这是目前最容易变成"用不起来"的短板——
+  建筑圈的存量图纸大多不在我们的格式里。
+- **蓝图格式加版本字段**：`Schematic.write` 现在没有版本号，以后改格式只能靠校验失败拒载；
+  接外部格式之前先把它加上。
+- **多女仆分工**：同一张图派多只女仆，现在靠放置幂等凑出并行，没有任务切分，进度条也各算各的。
+- **"只补空、不替换"开关**：想保护已有建筑，眼下只能不给她们这张图。
+- **建筑清单导出**：清单只在界面里，不能存成文件分给队友。
+- **施工尺寸上限**：单边 128 / 体积 262144，是网络同步与内存的安全线；要不要为大结构另开一条路待议。
+- **跨模组路径的回归**：AE2 附属补槽位会让界面重叠（见上），Create 蓝图那条刚修过"朝向算两遍"——
+  这类跨模组路径值得再统一走一遍。
+- **导航让位规则**：学习池与施工共用一套导航，现在靠"谁先说话"的人工约定，值得抽成明确规则（§7.13）。
+
+### 图纸格式：现在认什么、缺哪几家
+
+**能读的**：自家 `.blueprint`（gzip NBT：`size` / `palette` / `blocks` / `block_entities`）；
+机械动力的蓝图（`CreateSchematic`，只读）。**导出的**只有自家格式。
+
+| 生态 | 格式 | 里面装什么 | 接入成本 |
+|---|---|---|---|
+| Litematica（含原版结构 `.nbt`） | `*.litematic` | NBT：多 region，每 region 一个 palette（`Name` + `Properties` 字符串，**与我们的写法几乎一致**）+ `BlockStates` 的 long 位压缩 | **最低**：语义同构，只差位压缩的读写（照 `PalettedContainer` 那套写），顺带覆盖"原版结构 `.nbt`" |
+| WorldEdit / Sponge Schematic | `*.schem`（Sponge v1/v2/v3） | NBT：`Palette`（状态 → 注册表 varint id）、`BlockData`、`BlockEntities`、`Entities`、`Metadata` | 中等：状态要按注册表数字 id 双向映射，且数字 id 依赖两端模组一致 |
+| 原版结构方块 / 数据包 | `*.nbt`（structure template） | palette + 逐方块的 pos / state / nbt | 低，而且**导出**价值最大：结构方块、数据包、Structure Gel 等都吃它 |
+| 旧的 MCEdit / Schematica | `*.schematic` | 数字 id:meta 的字节数组（1.12 时代） | 不建议：表达不了现代方块状态，只能读个大概 |
+| Axiom | 自有工程格式 | 客户端编辑器的文件 | 不划算：让它那边导出成 litematic / schem 再进来更实际 |
+| Building Gadgets 等模板类 | 各家私有（JSON / NBT 不一） | 剪贴板与模板 | 优先级低，格式稳定性也待核实 |
+
+**建议的顺序**：先"读 `*.litematic`"，再"读 Sponge `*.schem`"，导出先做"原版结构 `*.nbt`"
+（最省事、受众最广）。三者共用同一层 palette ↔ 方块状态转换——先把这层抽出来，
+之后每加一家就只是换个外壳。
+
+## 12. 蓝图指挥台：托管投影与远程下单（进行中）
+
+设计已定，正在实现。要点：
+
+- **两件东西、一条绑定链**：**蓝图终端（物品）**是钥匙兼图纸库入口，**指挥台（方块）**放在世界里干活。
+  拿终端右键指挥台即完成绑定，**绑定是玩家私有的**（每台指挥台记住它属于谁），
+  绑定之后才能在界面里指派女仆。状态挂方块实体——存档天然、多人各用各的、可以长期挂着。
+- **右键指挥台看三样**：当前投影的蓝图、指派给它的女仆、以及各自的建筑进度。
+- **绑定语义**（先定死，免得以后打架）：一台指挥台只属于一个绑定玩家（可解绑换人）；
+  一只女仆同一时间只绑一台指挥台——"她该建哪处工地"必须唯一，这也是现有施工模型的前提。
+- **投影的可见性**：托管投影对所有人显示（全息本来就是给人看的，队友也能围观），
+  但**只有绑定玩家**能暂停、取消、改指派。
+- **投影由终端托管**：不再是"手持才显示"，放下去就在，**除非在终端里取消**。
+  这是客户端投影的第三个来源（现有两个：自己手持、附近女仆手持），见
+  `ProjectionRenderer.projectionSource`。
+- **一次性下单**：选图 → 右键方块定面（与锚点定位同一套）→ 选女仆（**可多选**）→
+  把结构 id、锚点、朝向与材料清单**一次性**交给她，之后她照单自己干，不再回调终端。
+- **停下只有两条路**：手动改她的工作模式（原有机制），或者在终端里**暂停 / 取消**。
+  暂停 = 保住进度停下；取消 = 撤单，投影随之消失。不做"超时自动撤单"——
+  全息投影挂着不碍事，撤单必须是人点的。
+- **多女仆**：同一张图可以分给多只，靠放置幂等凑并行；界面必须把进度**合并**显示
+  （三只各报各的百分比对主人没有意义）。
+- **停工的边界**：终端被拆 = 撤单并让她们停下，别留一个谁也管不着的工地。
+- 女仆列表要显示"长相"：渲染她的 3D 形象必须碰 TLM 的客户端类，按老规矩关进
+  `MaidClientBridge`，没装 TLM 的客户端不许加载到那些类（1.6.3 崩过的那一类）。
+
+实现顺序（每一步都要能单独跑起来）：
+
+1. ~~方块 + 方块实体 + 状态存档 + 打开界面（复用图纸库 / 详情页）~~ **已完成**
+2. ~~托管投影：状态同步（数据小，全局发）+ 结构数据按需点播（复用现有请求包）~~ **已完成**：
+   - **绑定**：拿蓝图终端右键指挥台（`C2SBindCommandPostPacket`，潜行 = 解绑）。走 `onItemUseFirst`
+     而不是 `useOn`，这样绑定这一下不会顺带把界面打开；两端判定条件一致（点到指挥台就吃掉），
+     否则会出现"界面时开时不开"。想看界面就空手右键。
+   - **放投影：图纸库里点「投影」→ 回到世界摆位置与朝向**。入口在图纸详情页：
+     进图纸库 → 点开一份 → 点「投影」。**不需要手上拿着蓝图**——库里那些东西是**客户端硬盘上的文件**，
+     服务端读不到，所以文件字节先留在客户端会话里，等按 E 定下时才随位置与朝向一起发出去
+     （`C2SCommandPostProjectionPacket`，服务端存成一份结构数据、指挥台记它的 id；
+     渲染、施工、别人围观都照旧按 id 走）。
+   - **定位用的是"在世界里"那一套**（`BlueprintRecordSession` 的 PROJECT 模式）：能飞、能穿墙、
+     摘掉原版那两个键、屏幕角上写提示——与录制共用同一副架子，差别只有三处：
+     右键选的是**一个位置**（结构最小角钉在那儿）、方向键留给**朝向**（`←`/`→` 转 90°、`↑`/`↓` 翻面）、
+     `R` 是"清空位置"而不是"重来一遍"。世界里的线框按结构尺寸与当前旋转画（转 90° 时宽长互换），
+     尺寸在进入时解一次就够——每帧解一份几千方的结构只为画个框，不值。
+   - **放到哪一台**：从某台指挥台的界面进库的话就是那一台（坐标一路带进详情页）；
+     从终端进的话取**最近一台属于我的**（客户端那张表记了每台的主人）。一台都没有就在界面上说一句。
+   - **取消投影**在指挥台界面里点。界面里的反馈必须画在界面里（§7.17），所以前提判断客户端先做一遍、
+     服务端再验一次。
+   - **客户端那张投影表**（`CommandPostProjections`）**不靠新包**：登记挂在方块实体的 `load` 上
+     ——区块加载带的整份 NBT 与状态变更的更新包都会经过它；`setRemoved` 时划掉。
+     于是"走远了方块实体被卸掉、投影自己就没了"是白来的，也不必维护"该发给谁"。
+   - **渲染**把"来源"抽成了 `ProjectionSource`（id / 名字 / 朝向 / 锚点），三个来源按
+     **自己手持 &gt; 指挥台托管 &gt; 附近女仆** 取第一个可用的；结构本体仍按需点播（同一个 id 那套）。
+3. ~~指派施工：给 `BlueprintBuildController` 加"外部指派"来源~~ **已完成**：
+   - `server/CommandPostAssignments`：女仆 → 指挥台（带维度）的**索引**。真相在指挥台的方块实体里
+     （它记着指派了哪些女仆），索引随方块实体 `load` 重建、`setRemoved` 划掉——不另存一份，
+     两份记录一旦对不上，女仆会照着一份过期名单干活。
+   - `BlueprintBuildController.tick`：手上没图时先问"有没有指挥台指派我"（`Assigned.NONE / IDLE / BUILD`）。
+     取数只在"从哪儿来"上分岔（`refreshAssignedSession` 从方块实体取 id/锚点/朝向），
+     建会话、算 `siteId`、站位那段与蓝图那条**共用**（抽成了 `afterSessionBuilt`）——
+     同一个工地走两条路进来，客户端的进度条认得出是同一处。
+   - 完工记在**指挥台**上（新增 `completed` 字段与存档）；**取消投影 = 撤单**，挂在上面的女仆一并撤下。
+4. ~~女仆列表~~ **已完成**（下单、进度合并、暂停还差）：
+   - `server/MaidOwnership`：**主人 → 他的女仆**（UUID + 名字 + 维度）。**进游戏时扫一遍**
+     （`MaidOwnershipTracker`，注册在 `MaidExtension` 里——那段只在女仆模组存在时执行，
+     否则类里的 `EntityMaid` 会让没装女仆的客户端 NoClassDefFoundError，见 §7.10）。
+     没进过表的只有"从没被加载过"的女仆，那基本只发生在"后来才装这个模组"的时候。
+   - `MaidRoster`（客户端）+ `C2SMaidListRequestPacket` / `S2CMaidListPacket`：名单与"已指派到哪台"
+     **一次给全**，分两次发只会出现"名单到了、状态还没到"的一帧错位。
+   - 名单**单开一个界面**（`MaidRosterScreen`）：每只一张卡、画成 3D 立绘——姓名那行文字认不出是谁。
+     立绘走原版实体渲染（`InventoryScreen.renderEntityInInventoryFollowsMouse`），实体按 UUID 在
+     `entitiesForRendering()` 里找（客户端没有按 UUID 查的入口）；她不在附近就只画名字。
+     **指挥台界面与蓝图终端都只留一个「女仆」按钮**：指挥台那点地方连"名字 + 状态"都摆不下，
+     更摆不下立绘（早先挤在图纸库底部时，窗口被顶出了屏幕）。
+     点卡片即指派：从指挥台进来指**这一台**，从终端进来指**最近一台属于我的**（远程指派）。
+   - 指派时**远处的直接传送**到指挥台上方一格（`teleportTo`）；她的区块没加载时先记下指派，
+     等她加载后自己开工。只能指派**自己的**女仆——UUID 是客户端给的，先用那张表认一遍。
+   - **指派必须把她的工作模式一并切过来**（`BlueprintBuildTask.employ/release`，与「工业模式」同一套）：
+     `MaidBuildTickHandler` 只在她的任务是「蓝图建造」时才驱动她（那道闸门有意为之，免得别的模式下
+     她突然开始搬方块），而指派只改指挥台那一侧的状态——不切模式，界面里看着就是"指派了没反应，
+     她照旧种地"。切换按**边沿**做（只在她刚被指派、刚被撤单时动一次）：她干活期间主人手动换了模式，
+     那是主人的意思，不该被一直掰回来。**还没放投影时她就是这个模式在空转 = 待命**，
+     不干扰别的活，等投影一放下就自己开工。

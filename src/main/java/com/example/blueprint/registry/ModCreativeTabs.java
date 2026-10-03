@@ -30,10 +30,13 @@ public final class ModCreativeTabs {
                     .icon(() -> ModItems.BLUEPRINT.get().getDefaultInstance())
                     .displayItems((params, output) -> {
                         output.accept(ModItems.BLUEPRINT.get());
+                        output.accept(ModItems.BLUEPRINT_TERMINAL.get());
                         // 说明书只能"送"（新玩家第一次进世界，见 ManualGiveaway），
                         // 但玩家把它弄丢之后总得有个地方再拿一本——就摆在这儿
                         output.accept(ManualBook.create());
                         output.accept(ModItems.BINDING_BOOK.get());
+                        // 指挥台与 AE2 无关，谁都能用；AE2 那几个终端在下面单独加
+                        output.accept(ModItems.COMMAND_POST.get());
                         // 终端物品只在 AE2 存在时才有注册对象：访问这个字段会初始化
                         // Ae2TerminalRegistry 的静态字段，未装 AE2 时那是个 NoClassDefFoundError
                         if (Ae2Compat.isLoaded()) {

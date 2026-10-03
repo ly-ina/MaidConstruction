@@ -15,8 +15,10 @@ import com.example.blueprint.item.BindingBookItem;
 import com.example.blueprint.item.BlueprintItem;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.network.packet.S2CBuildProgressPacket;
+import com.example.blueprint.block.CommandPostBlockEntity;
 import com.example.blueprint.schematic.Schematic;
 import com.example.blueprint.schematic.SchematicStorage;
+import com.example.blueprint.server.CommandPostAssignments;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.SchedulePos;
 import com.github.tartaricacid.touhoulittlemaid.inventory.handler.BaubleItemHandler;
@@ -251,6 +253,14 @@ public class BlueprintBuildController {
     private BlockPos activeAnchor;
     private Rotation activeRotation = Rotation.NONE;
     private Mirror activeMirror = Mirror.NONE;
+    /**
+     * 这次是**被哪台指挥台指派**的（手上那张蓝图走这条路时为 null）。
+     * <p>
+     * 只用来判断"完工之后该给谁记账"：物品那条要把完工标记写进物品 NBT、把图收回背包；
+     * 指派这条写进指挥台的方块实体，而且没有"把图收起来"这回事。
+     */
+    @Nullable
+    private BlockPos activePost;
     private State state = State.MOVE_TO_SPOT;
     /** 女仆的施工站位，站定后不再挪窝 */
     private BlockPos standSpot;
@@ -350,38 +360,48 @@ public class BlueprintBuildController {
 
         ItemStack stack = findBlueprint(maid);
         if (stack.isEmpty()) {
-            // 没带蓝图就安静待着，不用刷屏提醒
-            setWorkingHomeMode(maid, false);
-            reset();
-            return;
-        }
-        if (!BlueprintItem.isMaidBuildEnabled(stack)) {
-            setWorkingHomeMode(maid, false);
-            notify(level, maid, "message.blueprint.maid_forbidden");
-            return;
-        }
-        if (!MaidBlueprint.hasSchematic(stack)) {
-            setWorkingHomeMode(maid, false);
-            notify(level, maid, "message.blueprint.maid_empty_blueprint");
-            return;
-        }
-        if (!MaidBlueprint.hasAnchor(stack)) {
-            setWorkingHomeMode(maid, false);
-            notify(level, maid, "message.blueprint.maid_no_anchor");
-            return;
-        }
-
-        refreshSession(level, maid, stack);
-        if (session == null) {
-            setWorkingHomeMode(maid, false);
-            // 机械动力那张读不出来时把原因说清楚：光一句"找不到结构"，
-            // 玩家没法动手改（文件名没写？文件没上传？还是文件坏了？）
-            if (MaidBlueprint.isCreate(stack)) {
-                notify(level, maid, "message.blueprint.maid_create_unreadable", MaidBlueprint.problem());
-            } else {
-                notify(level, maid, "message.blueprint.maid_no_schematic");
+            // 手上没图：看她有没有被指挥台指派——"她该建哪儿"那条路上由指挥台说了算
+            Assigned assigned = ensureAssignedSession(level, maid);
+            if (assigned == Assigned.IDLE) {
+                setWorkingHomeMode(maid, false);
+                return;
             }
-            return;
+            if (assigned == Assigned.NONE) {
+                // 没带蓝图就安静待着，不用刷屏提醒
+                setWorkingHomeMode(maid, false);
+                reset();
+                return;
+            }
+            // Assigned.BUILD：会话已经就绪，下面照同一套状态机走
+        } else {
+            if (!BlueprintItem.isMaidBuildEnabled(stack)) {
+                setWorkingHomeMode(maid, false);
+                notify(level, maid, "message.blueprint.maid_forbidden");
+                return;
+            }
+            if (!MaidBlueprint.hasSchematic(stack)) {
+                setWorkingHomeMode(maid, false);
+                notify(level, maid, "message.blueprint.maid_empty_blueprint");
+                return;
+            }
+            if (!MaidBlueprint.hasAnchor(stack)) {
+                setWorkingHomeMode(maid, false);
+                notify(level, maid, "message.blueprint.maid_no_anchor");
+                return;
+            }
+
+            refreshSession(level, maid, stack);
+            if (session == null) {
+                setWorkingHomeMode(maid, false);
+                // 机械动力那张读不出来时把原因说清楚：光一句"找不到结构"，
+                // 玩家没法动手改（文件名没写？文件没上传？还是文件坏了？）
+                if (MaidBlueprint.isCreate(stack)) {
+                    notify(level, maid, "message.blueprint.maid_create_unreadable", MaidBlueprint.problem());
+                } else {
+                    notify(level, maid, "message.blueprint.maid_no_schematic");
+                }
+                return;
+            }
         }
         if (session.isFinished()) {
             // 建完了。先把背包里剩下的建造材料还回容器，还干净了再收工，
@@ -604,6 +624,7 @@ public class BlueprintBuildController {
 
     private void reset() {
         session = null;
+        activePost = null;
         bill = Map.of();
         pendingBill = Map.of();
         shortfall = Map.of();
@@ -671,6 +692,11 @@ public class BlueprintBuildController {
     }
 
     private void onCompleted(ServerLevel level, EntityMaid maid, ItemStack stack) {
+        // 外部指派那条路：完工标记记在**指挥台**上（她手上没有纸可写），也没有"把图收起来"这回事
+        if (activePost != null) {
+            onAssignedCompleted(level, maid, activePost);
+            return;
+        }
         // 有几块到头来还是放不下（缺支撑、位置被占）：**必须说一声**。
         // 不然报的是"建好啦"，而墙上可能少着几个火把、半砖——玩家得自己一块块对。
         // 这里 remaining() 只会是那种"放不下"的：缺料是不会走到 finished 的
@@ -699,6 +725,34 @@ public class BlueprintBuildController {
         stashFinishedBlueprint(maid);
         // 建完就撒手，不再重复扫描工地。
         // 要重新施工的话，重新定位或改朝向会清掉完工标记，女仆就会重新开工。
+    }
+
+    /**
+     * 外部指派那条路的完工：报一句、把完工标记写进**指挥台**、工地不再重复扫。
+     * <p>
+     * 与物品那条只差两处：标记写在方块实体上（她手上没有纸可写），
+     * 也没有"把蓝图收回背包"这一步——图还在图纸库里，谁想再建一次，去指挥台重新放一遍投影就是了。
+     */
+    private void onAssignedCompleted(ServerLevel level, EntityMaid maid, BlockPos postPos) {
+        if (!(level.getBlockEntity(postPos) instanceof CommandPostBlockEntity post)) {
+            return;
+        }
+        int leftover = session == null ? 0 : session.remaining();
+        if (!post.isCompleted()) {
+            post.setCompleted(true);
+            Advancements.grant(maid.getOwner(), Advancements.BUILD_DONE);
+            if (leftover > 0) {
+                BlueprintMod.LOGGER.info("女仆 {} 完工，但有 {} 块放不下（缺支撑或位置被占）",
+                        maid.getUUID(), leftover);
+                notify(level, maid, "message.blueprint.maid_build_leftover", leftover);
+                // 紧跟一句"挡路的是什么、在哪"：不走 notify 是因为那条路上的 30 秒冷却会把第二句吞掉
+                sayTo(level, maid, "message.blueprint.maid_blocked_list", describeBlocked(maid));
+            } else {
+                notify(level, maid, "message.blueprint.maid_build_done");
+            }
+        }
+        // 最后推一次进度。她手上没有蓝图，这一条拿不到建筑名（指挥台界面上另有那份名字）
+        sendProgress(level, maid, ItemStack.EMPTY);
     }
 
     /**
@@ -2031,6 +2085,88 @@ public class BlueprintBuildController {
     // 状态维护
     // ------------------------------------------------------------------
 
+    /** "外部指派"这条路的三种结局，见 {@link #ensureAssignedSession} */
+    private enum Assigned {
+        /** 没被任何指挥台指派 */
+        NONE,
+        /** 被指派了，但这一 tick 不该动（暂停、已完工、指挥台还没放投影） */
+        IDLE,
+        /** 已经照指派建好会话，接着走同一套状态机 */
+        BUILD
+    }
+
+    /**
+     * 她手上没有蓝图时的那条路：**有没有指挥台指派她**。
+     * <p>
+     * 为什么不在这儿造一张"假蓝图"：那会凭空多出一份要同步、要存档、还要跟着完工标记跑的 NBT；
+     * 而这里真正需要的只有三个数——结构 id、锚点、朝向，与手上那张图问出来的东西一模一样。
+     * 所以只在"从哪儿取这三个数"上分岔，后面的扫描、站位、取料、进度全都照旧。
+     */
+    private Assigned ensureAssignedSession(ServerLevel level, EntityMaid maid) {
+        BlockPos postPos = CommandPostAssignments.postPosIn(level, maid.getUUID());
+        if (postPos == null) {
+            return Assigned.NONE;
+        }
+        if (!(level.getBlockEntity(postPos) instanceof CommandPostBlockEntity post)
+                || post.getSchematicId() == null || post.getAnchor() == null) {
+            // 指挥台不在了、或还没放投影：先当没被指派（她会安静待着，不刷屏）
+            return Assigned.NONE;
+        }
+        if (post.isPaused() || post.isCompleted()) {
+            // 暂停 = 保住进度停下；完工 = 别再往工地跑（工地被拆掉几块也不去补，与蓝图那条同规矩）
+            return Assigned.IDLE;
+        }
+        refreshAssignedSession(level, maid, post);
+        return session == null ? Assigned.IDLE : Assigned.BUILD;
+    }
+
+    /**
+     * 照指挥台托管的投影建会话：结构与锚点、朝向都来自方块实体。
+     * <p>
+     * 与 {@link #refreshSession} 只差**数据从哪儿来**（那边是物品 NBT，这边是方块实体）；
+     * "是不是换工地"的判据、建 {@code BuildSession}、算 siteId 的口径完全一致——
+     * 于是同一处工地不管从哪条路进来，客户端的进度条都认得出是同一处。
+     */
+    private void refreshAssignedSession(ServerLevel level, EntityMaid maid, CommandPostBlockEntity post) {
+        UUID id = post.getSchematicId();
+        BlockPos anchor = post.getAnchor();
+        if (id == null || anchor == null) {
+            return;
+        }
+        Rotation rotation = post.getRotation();
+        Mirror mirror = post.getMirror();
+        if (session != null && Objects.equals(id, activeId)
+                && Objects.equals(anchor, activeAnchor)
+                && rotation == activeRotation
+                && mirror == activeMirror) {
+            activePost = post.getBlockPos();
+            return;
+        }
+
+        Schematic base = SchematicStorage.get(level).get(id);
+        if (base == null) {
+            // 结构数据不在（比如指挥台是从别的存档带过来的）：先不建会话，等它齐了再说
+            return;
+        }
+        Schematic schematic = base.mirror(mirror).rotate(rotation);
+
+        session = new BuildSession(schematic, level, anchor);
+        bill = BuildSession.bill(schematic);
+        activeId = id;
+        activeAnchor = anchor;
+        activeRotation = rotation;
+        activeMirror = mirror;
+        activePost = post.getBlockPos();
+        // 工地身份与物品那条算得一模一样：同一个工地走两条路进来也得是同一个 site
+        siteId = ((long) Objects.hash(id, anchor) << 32)
+                | (Objects.hash(rotation, mirror) & 0xFFFFFFFFL);
+        // 换了工地才重新记账（"这块我拆不动"那类），与刷新那条同一规矩
+        toolWarned.clear();
+        BlueprintMod.LOGGER.info("女仆 {} 照指挥台 {} 托管的投影开工，结构 {}",
+                maid.getUUID(), post.getBlockPos(), id);
+        afterSessionBuilt(level, maid, schematic, anchor);
+    }
+
     private void refreshSession(ServerLevel level, EntityMaid maid, ItemStack stack) {
         UUID id = MaidBlueprint.id(stack);
         BlockPos anchor = MaidBlueprint.anchor(stack);
@@ -2083,6 +2219,16 @@ public class BlueprintBuildController {
             // 缺料那几句**不在这里销账**：她身上可能同时有两张图、或者一轮里结构数据抖一下，
             // 那都不该让"同一批缺料"重新说一遍。换了缺的种类它自己会再说（指纹按种类算）
         }
+        afterSessionBuilt(level, maid, schematic, anchor);
+    }
+
+    /**
+     * 会话建好之后的收尾：站位、耐心、账本、进度状态。
+     * <p>
+     * 抽出来是因为"照手上那张图建"和"照指挥台托管的投影建"这最后一步完全一样：
+     * 各写一份的话，以后改站位规矩只会改到其中一条，另一条悄悄地不一样——而那种偏差没人会去核对。
+     */
+    private void afterSessionBuilt(ServerLevel level, EntityMaid maid, Schematic schematic, BlockPos anchor) {
         // **站哪都行**：施工本来就没有距离限制（见类注释），她已经到工地附近就就地开工，
         // 不必再去找一个"合适"的站位——大结构外圈那一圈，走过去又远、路上还容易卡，
         // 表现就是"一直在找站位"。只有她离得还远时，才给她一个落脚方向

@@ -37,6 +37,8 @@ public class MaidExtension implements ILittleMaid {
             MinecraftForge.EVENT_BUS.register(MaidStudyTickHandler.class);
             MinecraftForge.EVENT_BUS.register(MaidStudyInteractHandler.class);
             MinecraftForge.EVENT_BUS.register(MaidCraftTickHandler.class);
+            // "谁有哪些女仆"那张表：进游戏时扫一遍，供指挥台界面列"我的女仆"用
+            MinecraftForge.EVENT_BUS.register(MaidOwnershipTracker.class);
         }
     }
 

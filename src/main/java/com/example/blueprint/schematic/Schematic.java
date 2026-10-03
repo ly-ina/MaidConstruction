@@ -7,6 +7,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
@@ -22,6 +23,9 @@ import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -473,6 +477,24 @@ public final class Schematic {
     // ------------------------------------------------------------------
     // 序列化
     // ------------------------------------------------------------------
+
+    /**
+     * gzip 过的 NBT 字节：**文件与网络都走这一种**。
+     * <p>
+     * 单独抽出来是因为它有两个用法、两边的写法必须一模一样：客户端写 {@code blueprints}
+     * 目录里的文件，以及服务端扫完结构之后发给客户端的那一段。各写一份的话，
+     * 哪天格式调了只改了一边，就成了"存下来的文件读不回去"这种最难查的错。
+     */
+    public static byte[] encode(Schematic schematic) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        NbtIo.writeCompressed(schematic.write(new CompoundTag()), out);
+        return out.toByteArray();
+    }
+
+    /** {@link #encode} 的反向：读回一份结构，数据坏了抛 IOException */
+    public static Schematic decode(byte[] bytes) throws IOException {
+        return read(NbtIo.readCompressed(new ByteArrayInputStream(bytes)));
+    }
 
     public CompoundTag write(CompoundTag tag) {
         tag.putIntArray("size", new int[]{size.getX(), size.getY(), size.getZ()});

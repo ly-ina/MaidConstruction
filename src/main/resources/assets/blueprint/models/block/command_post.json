@@ -1,0 +1,83 @@
+{
+  "parent": "block/block",
+  "display": {
+    "firstperson_righthand": {
+      "rotation": [ 0, 135, 0 ],
+      "translation": [ 0, 0, 0 ],
+      "scale": [ 0.4, 0.4, 0.4 ]
+    }
+  },
+  "textures": {
+    "particle": "blueprint:block/command_post_sides",
+    "bottom": "blueprint:block/command_post_base",
+    "base": "blueprint:block/command_post_base",
+    "front": "blueprint:block/command_post_front",
+    "sides": "blueprint:block/command_post_sides",
+    "top": "blueprint:block/command_post_top",
+    "screen": "blueprint:block/command_post_screen_off",
+    "led": "blueprint:block/command_post_led"
+  },
+  "elements": [
+    {
+      "from": [ 0, 0, 0 ],
+      "to": [ 16, 2, 16 ],
+      "faces": {
+        "north": { "uv": [ 0, 14, 16, 16 ], "texture": "#base", "cullface": "north" },
+        "east":  { "uv": [ 0,  6, 16,  8 ], "texture": "#base", "cullface": "east" },
+        "south": { "uv": [ 0,  6, 16,  8 ], "texture": "#base", "cullface": "south" },
+        "west":  { "uv": [ 0,  6, 16,  8 ], "texture": "#base", "cullface": "west" },
+        "up":    { "uv": [ 0,  0, 16, 16 ], "rotation": 180, "texture": "#base" },
+        "down":  { "uv": [ 0,  0, 16, 16 ], "texture": "#bottom", "cullface": "down" }
+      }
+    },
+    {
+      "from": [4, 2, 4],
+      "to": [12, 15, 12],
+      "faces": {
+        "north": { "uv": [ 0,  0,  8, 13 ], "texture": "#front" },
+        "east":  { "uv": [ 2, 16, 15,  8 ], "rotation": 90, "texture": "#sides" },
+        "south": { "uv": [ 8,  3, 16, 16 ], "texture": "#front" },
+        "west":  { "uv": [ 2,  8, 15, 16 ], "rotation": 90, "texture": "#sides" }
+      }
+    },
+    {
+      "from": [ 0.0125, 12, 3 ],
+      "to": [ 15.9875, 16, 16 ],
+      "rotation": { "angle": -22.5, "axis": "x", "origin": [ 8, 8, 8 ] },
+      "faces": {
+        "north": { "uv": [ 0, 0, 16,  4 ], "texture": "#sides" },
+        "east":  { "uv": [ 0, 4, 13,  8 ], "texture": "#sides" },
+        "south": { "uv": [ 0, 4, 16,  8 ], "texture": "#sides" },
+        "west":  { "uv": [ 0, 4, 13,  8 ], "texture": "#sides" },
+        "up":    { "uv": [ 0, 1, 16, 14 ], "rotation": 180, "texture": "#top" },
+        "down":  { "uv": [ 0, 0, 16, 13 ], "texture": "#bottom" }
+      }
+    },
+    {
+      "comment": "台面那块屏：躺在斜台面上（同一个旋转），比台面高出一点点，免得两个面重叠打架",
+      "from": [ 2, 15.7, 5 ],
+      "to": [ 14, 16.3, 14 ],
+      "rotation": { "angle": -22.5, "axis": "x", "origin": [ 8, 8, 8 ] },
+      "faces": {
+        "up":    { "uv": [ 0, 0, 16, 16 ], "texture": "#screen" },
+        "down":  { "uv": [ 0, 0, 16, 16 ], "texture": "#sides" },
+        "north": { "uv": [ 0, 0, 16,  1 ], "texture": "#sides" },
+        "south": { "uv": [ 0, 0, 16,  1 ], "texture": "#sides" },
+        "east":  { "uv": [ 0, 0, 16,  1 ], "texture": "#sides" },
+        "west":  { "uv": [ 0, 0, 16,  1 ], "texture": "#sides" }
+      }
+    },
+    {
+      "comment": "正面那条指示灯：贴在台身前脸上，稍微凸出一点",
+      "from": [ 4.2, 12.2, 3.85 ],
+      "to": [ 11.8, 13.2, 4.05 ],
+      "faces": {
+        "north": { "uv": [ 2, 7, 14, 9 ], "texture": "#led" },
+        "up":    { "uv": [ 2, 7, 14, 9 ], "texture": "#sides" },
+        "down":  { "uv": [ 2, 7, 14, 9 ], "texture": "#sides" },
+        "east":  { "uv": [ 0, 0,  1,  1 ], "texture": "#sides" },
+        "west":  { "uv": [ 0, 0,  1,  1 ], "texture": "#sides" }
+      }
+    }
+  ]
+}

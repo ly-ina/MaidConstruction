@@ -1,11 +1,16 @@
 package com.example.blueprint.network;
 
 import com.example.blueprint.BlueprintMod;
+import com.example.blueprint.network.packet.C2SAssignMaidPacket;
+import com.example.blueprint.network.packet.C2SBindCommandPostPacket;
 import com.example.blueprint.network.packet.C2SCancelCraftOrderPacket;
 import com.example.blueprint.network.packet.C2SCapturePacket;
+import com.example.blueprint.network.packet.C2SCaptureToFilePacket;
 import com.example.blueprint.network.packet.C2SClearBlueprintPacket;
+import com.example.blueprint.network.packet.C2SCommandPostProjectionPacket;
 import com.example.blueprint.network.packet.C2SImportBlueprintPacket;
 import com.example.blueprint.network.packet.C2SMaidCraftOrderPacket;
+import com.example.blueprint.network.packet.C2SRecordModePacket;
 import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetNamePacket;
@@ -14,6 +19,9 @@ import com.example.blueprint.network.packet.C2SForgetStudyPacket;
 import com.example.blueprint.network.packet.C2SSelectStudyRecipePacket;
 import com.example.blueprint.network.packet.S2CBuildProgressPacket;
 import com.example.blueprint.network.packet.S2CSchematicDataPacket;
+import com.example.blueprint.network.packet.C2SMaidListRequestPacket;
+import com.example.blueprint.network.packet.S2CMaidListPacket;
+import com.example.blueprint.network.packet.S2CSchematicFilePacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.simple.SimpleChannel;
@@ -28,8 +36,11 @@ public class ModNetwork {
     // 1.6.5 进度包带上"工地身份"（site）：同一处工地上进度只往前不往回，
     // 光有"已建多少"没法判断"这是新工地还是同一处重扫"，条就会来回跳。升到 7。
     // 再之后进度包带上"建筑名"（玩家给这张蓝图起的名字），条上要写出来，升到 8。
+    // 1.8.0 加了"进入/退出录制态"的包（C2SRecordModePacket）：录制要的飞行与穿墙只有服务端改得动。
+    // 再之后指挥台接上：绑定（C2SBindCommandPostPacket）与放置/取消托管投影
+    // （C2SCommandPostProjectionPacket）——两件都改方块实体的存档状态，同样只有服务端算数。
     // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
-    private static final String PROTOCOL_VERSION = "8";
+    private static final String PROTOCOL_VERSION = "12";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(BlueprintMod.MOD_ID, "main"),
@@ -48,6 +59,24 @@ public class ModNetwork {
                 C2SSetOrientationPacket::encode, C2SSetOrientationPacket::decode, C2SSetOrientationPacket::handle);
         CHANNEL.registerMessage(id++, C2SClearBlueprintPacket.class,
                 C2SClearBlueprintPacket::encode, C2SClearBlueprintPacket::decode, C2SClearBlueprintPacket::handle);
+        CHANNEL.registerMessage(id++, C2SRecordModePacket.class,
+                C2SRecordModePacket::encode, C2SRecordModePacket::decode, C2SRecordModePacket::handle);
+        CHANNEL.registerMessage(id++, C2SBindCommandPostPacket.class,
+                C2SBindCommandPostPacket::encode, C2SBindCommandPostPacket::decode, C2SBindCommandPostPacket::handle);
+        CHANNEL.registerMessage(id++, C2SCommandPostProjectionPacket.class,
+                C2SCommandPostProjectionPacket::encode, C2SCommandPostProjectionPacket::decode,
+                C2SCommandPostProjectionPacket::handle);
+        CHANNEL.registerMessage(id++, C2SAssignMaidPacket.class,
+                C2SAssignMaidPacket::encode, C2SAssignMaidPacket::decode, C2SAssignMaidPacket::handle);
+        CHANNEL.registerMessage(id++, C2SMaidListRequestPacket.class,
+                C2SMaidListRequestPacket::encode, C2SMaidListRequestPacket::decode,
+                C2SMaidListRequestPacket::handle);
+        CHANNEL.registerMessage(id++, S2CMaidListPacket.class,
+                S2CMaidListPacket::encode, S2CMaidListPacket::decode, S2CMaidListPacket::handle);
+        CHANNEL.registerMessage(id++, C2SCaptureToFilePacket.class,
+                C2SCaptureToFilePacket::encode, C2SCaptureToFilePacket::decode, C2SCaptureToFilePacket::handle);
+        CHANNEL.registerMessage(id++, S2CSchematicFilePacket.class,
+                S2CSchematicFilePacket::encode, S2CSchematicFilePacket::decode, S2CSchematicFilePacket::handle);
         CHANNEL.registerMessage(id++, C2SRequestSchematicPacket.class,
                 C2SRequestSchematicPacket::encode, C2SRequestSchematicPacket::decode, C2SRequestSchematicPacket::handle);
         CHANNEL.registerMessage(id++, C2SImportBlueprintPacket.class,

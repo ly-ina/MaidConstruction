@@ -34,6 +34,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.model.data.ModelData;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -86,39 +87,27 @@ public class ProjectionRenderer {
             return;
         }
 
-        ItemStack stack = projectionSource(mc);
-        if (stack.isEmpty()) {
+        // 手上那张图优先（含"只点了一个角点"的选点线框）：那是最明确的一次表达
+        ItemStack held = BlueprintItem.findHeld(mc.player);
+        if (!BlueprintItem.hasSchematic(held) && BlueprintItem.hasPos1(held)) {
+            renderSelectionBox(event, mc, BlueprintItem.getPos1(held));
             return;
         }
 
-        // 只选了第一个角点时，画一个跟随视线的选区线框
-        if (!BlueprintItem.hasSchematic(stack) && BlueprintItem.hasPos1(stack)) {
-            renderSelectionBox(event, mc, BlueprintItem.getPos1(stack));
+        ProjectionSource source = projectionSource(mc, held);
+        if (source == null) {
             return;
         }
 
-        if (!BlueprintItem.hasSchematic(stack)) {
-            return;
-        }
-
-        UUID id = BlueprintItem.getSchematicId(stack);
-        if (id == null) {
-            return;
-        }
-        Schematic schematic = ClientSchematicCache.get(id,
-                BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack));
+        UUID id = source.id();
+        Schematic schematic = ClientSchematicCache.get(id, source.rotation(), source.mirror());
         if (schematic == null) {
             // 本地没有结构数据（例如物品 NBT 同步慢了一步），主动向服务端要一次
             requestSchematic(id);
             return;
         }
 
-        BlockPos origin = BlueprintItem.hasAnchor(stack)
-                ? BlueprintItem.getAnchor(stack)
-                : resolveLookOrigin(mc);
-        if (origin == null) {
-            return;
-        }
+        BlockPos origin = source.anchor();
 
         long now = System.currentTimeMillis();
         // 还要比对 schematic 实例本身：旋转蓝图时 id 和 origin 都没变，
@@ -166,8 +155,7 @@ public class ProjectionRenderer {
         buffers.endBatch(GHOST);
 
         if (unrenderable != null) {
-            renderOutlines(pose, buffers, schematic,
-                    BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack), unrenderable);
+            renderOutlines(pose, buffers, schematic, source.rotation(), source.mirror(), unrenderable);
         }
 
         pose.popPose();
@@ -273,20 +261,43 @@ public class ProjectionRenderer {
      */
     private static long lastRequestAt = 0;
 
+    /** 一处投影的来源：结构 id、名字、朝向、锚点。三个来源最后都归成它，渲染那边只认这一组 */
+    private record ProjectionSource(UUID id, String name, Rotation rotation, Mirror mirror, BlockPos anchor) {
+    }
+
     /**
-     * 该照谁手上的蓝图画：**先看你自己，再看附近的女仆**。
+     * 该照谁的图画：**自己手持 &gt; 指挥台托管 &gt; 附近女仆**。
      * <p>
-     * 你自己手里拿着蓝图时永远画你自己那张——否则在工地旁边站着，屏幕会被她那张图盖住，
+     * 你自己手里拿着蓝图时永远画你自己那张——否则在工地旁边站着，屏幕会被别的图盖住，
      * 而你想看的正是自己刚录好的样子。
      * <p>
-     * 没拿蓝图时才去找女仆：她拿着还没建完的图，站在旁边看不见她要建什么，
+     * 没拿图时先看**指挥台托管的那一份**：托管投影是"放下去就在、除非在终端里取消"的，
+     * 主人放下之后可能手上什么都不拿（还要干活、还要放方块），不接这一条就等于投影白托管了；
+     * 它对所有人可见，队友也能围观。
+     * <p>
+     * 最后才找附近女仆：她拿着还没建完的图，站在旁边看不见她要建什么，
      * 只能对着空地等她一块块放，这一条就是补这个的。
-     * 有几只就取**最近**那只——同时叠两张半透明的图，谁也看不清。
+     * 指挥台与女仆都取**最近**那一处——同时叠两张半透明的图，谁也看不清。
      */
-    private static ItemStack projectionSource(Minecraft mc) {
-        ItemStack held = BlueprintItem.findHeld(mc.player);
-        if (!held.isEmpty() || mc.level == null || !BlueprintConfig.maidProjection()) {
-            return held;
+    @Nullable
+    private static ProjectionSource projectionSource(Minecraft mc, ItemStack held) {
+        // 正在摆投影的时候画的就是"正在摆的那一份"（连位置与朝向一起）：那是模态动作，别的都让位。
+        // 它用的是本地合成的 id，结构也已经在客户端手上（就是那份文件），所以不必向服务端要
+        BlueprintRecordSession.Preview placing = BlueprintRecordSession.preview();
+        if (placing != null) {
+            return new ProjectionSource(placing.id(), "", placing.rotation(), placing.mirror(), placing.anchor());
+        }
+
+        if (BlueprintItem.hasSchematic(held)) {
+            ProjectionSource mine = fromStack(held, mc);
+            if (mine != null) {
+                return mine;
+            }
+        }
+
+        CommandPostProjections.Projection post = CommandPostProjections.nearest(mc.player.blockPosition());
+        if (post != null && post.anchor() != null) {
+            return new ProjectionSource(post.id(), post.name(), post.rotation(), post.mirror(), post.anchor());
         }
 
         // 女仆模组没装就到此为止。**这个方法自己的字节码里只要出现一次
@@ -294,10 +305,43 @@ public class ProjectionRenderer {
         // NoClassDefFoundError（1.6.3 的客户端崩溃就是这么来的：那会儿女仆那段
         // 就写在这个方法里）。现在真正的女仆代码关在 MaidClientBridge 里，
         // 到这一句为止只碰过一个纯 ModList 判断——没装就永远不会被加载
-        if (!MaidCompat.isLoaded()) {
-            return ItemStack.EMPTY;
+        if (mc.level == null || !BlueprintConfig.maidProjection() || !MaidCompat.isLoaded()) {
+            return null;
         }
-        return MaidClientBridge.nearestBuildingBlueprint(mc);
+        return fromStack(MaidClientBridge.nearestBuildingBlueprint(mc), mc);
+    }
+
+    /** 从一张蓝图取来源；锚点没定过的图按"看着哪儿就放哪儿"现算（与老行为一致） */
+    @Nullable
+    private static ProjectionSource fromStack(ItemStack stack, Minecraft mc) {
+        if (stack.isEmpty()) {
+            return null;
+        }
+        UUID id = BlueprintItem.getSchematicId(stack);
+        if (id == null) {
+            return null;
+        }
+        BlockPos anchor = BlueprintItem.hasAnchor(stack)
+                ? BlueprintItem.getAnchor(stack)
+                : resolveLookOrigin(mc);
+        if (anchor == null) {
+            return null;
+        }
+        return new ProjectionSource(id, BlueprintItem.getBlueprintName(stack),
+                BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack), anchor);
+    }
+
+    /**
+     * 退出世界时把"指挥台托管着哪些投影"那份表清掉。
+     * <p>
+     * 它记的是**这个存档里那几台指挥台**，换个存档就不作数了；不清的话，
+     * 新世界里会照着上一个存档的坐标去画空气。
+     */
+    @SubscribeEvent
+    public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        CommandPostProjections.clear();
+        // 名册是"这个存档里我的女仆"，换个存档就不作数了，一并清掉
+        MaidRoster.clear();
     }
 
     /**

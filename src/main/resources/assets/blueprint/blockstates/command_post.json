@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "facing=north,loaded=false": { "model": "blueprint:block/command_post" },
+    "facing=east,loaded=false":  { "model": "blueprint:block/command_post", "y": 90 },
+    "facing=south,loaded=false": { "model": "blueprint:block/command_post", "y": 180 },
+    "facing=west,loaded=false":  { "model": "blueprint:block/command_post", "y": 270 },
+    "facing=north,loaded=true":  { "model": "blueprint:block/command_post_loaded" },
+    "facing=east,loaded=true":   { "model": "blueprint:block/command_post_loaded", "y": 90 },
+    "facing=south,loaded=true":  { "model": "blueprint:block/command_post_loaded", "y": 180 },
+    "facing=west,loaded=true":   { "model": "blueprint:block/command_post_loaded", "y": 270 }
+  }
+}

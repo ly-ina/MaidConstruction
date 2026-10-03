@@ -1,0 +1,7 @@
+{
+  "parent": "blueprint:block/command_post",
+  "textures": {
+    "screen": "blueprint:block/command_post_screen_on"
+  },
+  "forge_data": { "block_light": 15, "sky_light": 15 }
+}
