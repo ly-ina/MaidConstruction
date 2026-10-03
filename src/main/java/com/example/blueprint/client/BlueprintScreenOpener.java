@@ -1,6 +1,6 @@
 package com.example.blueprint.client;
 
-import com.example.blueprint.client.gui.BlueprintLibraryScreen;
+import com.example.blueprint.client.gui.BlueprintHomeScreen;
 import com.example.blueprint.client.gui.CommandPostScreen;
 import net.minecraft.core.BlockPos;
 import com.example.blueprint.client.gui.BlueprintMaterialsScreen;
@@ -27,13 +27,14 @@ public class BlueprintScreenOpener {
     }
 
     /**
-     * 打开蓝图终端（图纸库）。
+     * 打开蓝图终端的**主页**（监视板 + 开工口令）。
      * <p>
-     * 与蓝图面板分开是因为数据来源不同：面板围着"手上那张图"转（要问服务端拿结构），
-     * 而图纸库只读客户端的 {@code blueprints} 目录——所以它连服务端都不用惊动。
+     * 右键终端先到这儿，要翻图纸再点主页里的「图纸库」：终端管的是"工地现在怎么样"，
+     * 图纸库回答的是"我有哪些图纸"，两个问题分两页。与蓝图面板分开则是因为数据来源不同——
+     * 面板围着"手上那张图"转（要问服务端拿结构），终端这两页都不用惊动服务端。
      */
-    public static void openLibrary() {
-        Minecraft.getInstance().setScreen(new BlueprintLibraryScreen());
+    public static void openHome() {
+        Minecraft.getInstance().setScreen(new BlueprintHomeScreen(null));
     }
 
     /**

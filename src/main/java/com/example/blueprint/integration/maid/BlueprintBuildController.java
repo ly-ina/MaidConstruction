@@ -2112,7 +2112,8 @@ public class BlueprintBuildController {
             // 指挥台不在了、或还没放投影：先当没被指派（她会安静待着，不刷屏）
             return Assigned.NONE;
         }
-        if (post.isPaused() || post.isCompleted()) {
+        if (!post.isStarted() || post.isPaused() || post.isCompleted()) {
+            // 没下令开工 = **待命**（放投影、指派女仆都只是准备，口令才是开工，见 C2SCommandPostStartPacket）；
             // 暂停 = 保住进度停下；完工 = 别再往工地跑（工地被拆掉几块也不去补，与蓝图那条同规矩）
             return Assigned.IDLE;
         }

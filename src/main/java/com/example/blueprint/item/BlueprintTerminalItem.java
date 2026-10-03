@@ -75,7 +75,7 @@ public class BlueprintTerminalItem extends Item {
         ItemStack stack = player.getItemInHand(hand);
         if (level.isClientSide) {
             // 用 DistExecutor 包一层，服务端不会去加载客户端的界面类
-            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> BlueprintScreenOpener.openLibrary());
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> BlueprintScreenOpener.openHome());
             return InteractionResultHolder.success(stack);
         }
         return InteractionResultHolder.success(stack);

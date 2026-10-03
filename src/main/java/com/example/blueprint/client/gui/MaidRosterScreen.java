@@ -139,7 +139,6 @@ public class MaidRosterScreen extends Screen {
         graphics.renderOutline(x, y, CARD_WIDTH, CARD_HEIGHT, hovered ? COLOR_TEXT : COLOR_DIVIDER);
 
         // 立绘：拿这个客户端世界里那只实体来画（区块没加载就只剩名字，也够认）
-        BlockPos post = maid.post();
         Entity entity = entityOf(maid.id());
         if (entity instanceof LivingEntity living) {
             // 后两个参数是**从立绘中心指向鼠标的偏移**（原版背包就是这么算的）：
@@ -160,9 +159,9 @@ public class MaidRosterScreen extends Screen {
         graphics.fill(x + 1, labelY, x + CARD_WIDTH - 1, y + CARD_HEIGHT - 1, 0xC0000000);
         graphics.drawString(this.font, this.font.plainSubstrByWidth(maid.name(), CARD_WIDTH - 8),
                 x + 4, labelY + 2, COLOR_TEXT, false);
-        graphics.drawString(this.font, Component.translatable(post != null
-                        ? "gui.blueprint.maids.assigned" : "gui.blueprint.maids.free"),
-                x + 4, labelY + 11, post != null ? COLOR_GOOD : COLOR_LABEL, false);
+        // 状态是服务端算好带上来的：空闲 / 待命 / 正在建（界面不自己猜，见 S2CMaidListPacket.Status）
+        graphics.drawString(this.font, MaidRoster.statusText(maid.status()),
+                x + 4, labelY + 11, MaidRoster.statusColor(maid.status()), false);
     }
 
     @Override

@@ -12,6 +12,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -264,6 +265,77 @@ public class BlueprintItem extends Item {
         ItemStack offHand = player.getOffhandItem();
         if (offHand.getItem() instanceof BlueprintItem) {
             return offHand;
+        }
+        return ItemStack.EMPTY;
+    }
+
+    /** 一张**空白**蓝图（还没录过东西的那张） */
+    public static boolean isBlank(ItemStack stack) {
+        return stack.getItem() instanceof BlueprintItem && !hasSchematic(stack);
+    }
+
+    /**
+     * 找一张空白蓝图：主手 → 副手 → 快捷栏 → 主背包。
+     * <p>
+     * 返回的是背包里**真实的那一份**（改它的 NBT 就是在改背包）；找不到返回 null。
+     * <p>
+     * **只查不改**，两端都能调：客户端拿它做界面预检（开着界面时聊天栏不画，
+     * 等服务端回一句"不行"等于什么都没发生），真正写入由服务端做。
+     */
+    @Nullable
+    public static ItemStack findBlank(Player player) {
+        if (isBlank(player.getMainHandItem())) {
+            return player.getMainHandItem();
+        }
+        if (isBlank(player.getOffhandItem())) {
+            return player.getOffhandItem();
+        }
+        Inventory inventory = player.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            if (isBlank(inventory.getItem(i))) {
+                return inventory.getItem(i);
+            }
+        }
+        return null;
+    }
+
+    /** 背包（主手、副手、快捷栏、主背包）里有没有空白蓝图 */
+    public static boolean hasBlank(Player player) {
+        return findBlank(player) != null;
+    }
+
+    /**
+     * 找一张空白蓝图并**把它放到手上**；找不到返回 {@link ItemStack#EMPTY}。
+     * <p>
+     * 为什么不再只认手上那张（见 {@link #findHeld}）："取到手上"这个动作的前提原本是
+     * 手里先有一张空白蓝图，而玩家点它的时候多半正拿着终端——于是每次都得先翻背包、
+     * 腾出手、再回到界面点一次。空白蓝图本来就在他的物品栏里，没必要让他自己先搬一趟。
+     * <p>
+     * 找到的位置不在手上时**与主手对调**（而不是就地写进去）：一来"取到手上"名副其实，
+     * 二来图纸拿了就是要马上用（交给女仆、放到指挥台），对调之后直接就能用；被换下来的
+     * 东西只是换了个格子，一样在他身上，不会丢。
+     * <p>
+     * <b>只在服务端调</b>：它会动物品栏，客户端那份是同步来的镜像，动它会和服务端对不上。
+     */
+    public static ItemStack findBlankToHand(Player player) {
+        ItemStack mainHand = player.getMainHandItem();
+        if (isBlank(mainHand)) {
+            return mainHand;
+        }
+        ItemStack offHand = player.getOffhandItem();
+        if (isBlank(offHand)) {
+            return offHand;
+        }
+        Inventory inventory = player.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            if (!isBlank(inventory.getItem(i))) {
+                continue;
+            }
+            int hand = inventory.selected;
+            ItemStack found = inventory.getItem(i);
+            inventory.setItem(i, inventory.getItem(hand));
+            inventory.setItem(hand, found);
+            return found;
         }
         return ItemStack.EMPTY;
     }

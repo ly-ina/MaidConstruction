@@ -332,18 +332,21 @@ public class BlueprintDetailScreen extends Screen {
     }
 
     /**
-     * 把这份图纸放进手上的蓝图。
+     * 把这份图纸放进一张**空白蓝图**，并让它**落到手上**。
      * <p>
-     * 走的是已有的导入包（客户端读文件、服务端写进手持物品），所以**手里得拿着一张蓝图**：
-     * 服务端只认它找得到的那张图，没拿就没地方放。这一条在这里先说清楚，
-     * 免得玩家点完以为成功了。
+     * 走的是已有的导入包（客户端读文件、服务端写物品 NBT）。空白蓝图**不必先拿在手上**：
+     * 服务端会在主手、副手、快捷栏、主背包里找第一张空白的（{@code BlueprintItem.findBlankToHand}），
+     * 不在手上就与主手对调——否则每次都得先翻背包腾出手再回来点一次，纯属白跑。
+     * <p>
+     * 这里先判一遍是**为了把话说清楚**：开着界面时聊天栏是不画的（§7.17），
+     * 等服务端回一句"没有空白蓝图"等于什么都没发生。
      */
     private void onTake() {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) {
             return;
         }
-        if (BlueprintItem.findHeld(player).isEmpty()) {
+        if (!BlueprintItem.hasBlank(player)) {
             setStatus(Component.translatable("gui.blueprint.detail.take_hint"), COLOR_WARN);
             return;
         }

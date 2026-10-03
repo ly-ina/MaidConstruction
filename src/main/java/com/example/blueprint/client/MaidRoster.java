@@ -4,6 +4,7 @@ import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.network.packet.C2SMaidListRequestPacket;
 import com.example.blueprint.network.packet.S2CMaidListPacket;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -47,6 +48,50 @@ public final class MaidRoster {
 
     public static void accept(List<S2CMaidListPacket.Entry> list) {
         entries = List.copyOf(list);
+    }
+
+    /**
+     * 她此刻的工作状态（名单里没有她时按"空闲"算）。
+     * <p>
+     * 状态**由服务端算**（见 {@code C2SMaidListRequestPacket#statusOf}）：名册里可能有别处的
+     * 指挥台，那台的方块实体客户端根本没同步过来。
+     */
+    public static S2CMaidListPacket.Status statusOf(UUID maid) {
+        for (S2CMaidListPacket.Entry entry : entries) {
+            if (entry.id().equals(maid)) {
+                return entry.status();
+            }
+        }
+        return S2CMaidListPacket.Status.FREE;
+    }
+
+    /** 状态文案：空闲 / 待命 / 正在建（女仆卡片与终端主页共用同一套，两处不会写岔） */
+    public static Component statusText(S2CMaidListPacket.Status status) {
+        return Component.translatable(switch (status) {
+            case FREE -> "gui.blueprint.maids.free";
+            case STANDBY -> "gui.blueprint.maids.standby";
+            case BUILDING -> "gui.blueprint.maids.building";
+        });
+    }
+
+    /** 状态色：空闲灰、待命黄、在建绿 */
+    public static int statusColor(S2CMaidListPacket.Status status) {
+        return switch (status) {
+            case FREE -> 0xAAAAAA;
+            case STANDBY -> 0xFFAA00;
+            case BUILDING -> 0x55FF55;
+        };
+    }
+
+    /** 名单里有几只处于这个状态（终端主页那一行汇总用） */
+    public static int count(S2CMaidListPacket.Status status) {
+        int total = 0;
+        for (S2CMaidListPacket.Entry entry : entries) {
+            if (entry.status() == status) {
+                total++;
+            }
+        }
+        return total;
     }
 
     /** 她被指派到哪台；没指派、或那台在别的维度时返回 null */

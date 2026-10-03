@@ -1,8 +1,10 @@
 package com.example.blueprint.client.gui;
 
 import com.example.blueprint.block.CommandPostBlockEntity;
+import com.example.blueprint.client.CommandPostProjections;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.network.packet.C2SCommandPostProjectionPacket;
+import com.example.blueprint.network.packet.C2SCommandPostStartPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -52,6 +54,8 @@ public class CommandPostScreen extends Screen {
     private final BlockPos pos;
     /** 界面里的反馈（没绑定、手上没图…）：开着界面时聊天栏不画，只能自己写一行 */
     private Component status = Component.empty();
+    /** 口令那个按钮：没开工写「开始建造」，开工了写「停下」，见 {@link #tick()} */
+    private Button startButton;
 
 
     public CommandPostScreen(BlockPos pos) {
@@ -79,6 +83,11 @@ public class CommandPostScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.maids.title"),
                         b -> Minecraft.getInstance().setScreen(new MaidRosterScreen(this.pos)))
                 .bounds(left + 100, actionY, 90, 18).build());
+        // 口令：放好投影、指派好女仆都只是准备，这一下才是开工（见 C2SCommandPostStartPacket）
+        this.startButton = Button.builder(Component.translatable("gui.blueprint.home.start"),
+                        b -> onOrder())
+                .bounds(left + 194, actionY, 100, 18).build();
+        this.addRenderableWidget(this.startButton);
 
         this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.library.title"),
                         b -> Minecraft.getInstance().setScreen(new BlueprintLibraryScreen(this.pos)))
@@ -109,6 +118,45 @@ public class CommandPostScreen extends Screen {
 
     private void setStatus(Component message) {
         this.status = message;
+    }
+
+    /**
+     * 口令那个按钮跟着状态变字样。
+     * <p>
+     * 状态是**别人改的**（方块实体同步过来、或者施工那边完工置位、或者终端主页那边下的口令），
+     * 所以不能只在 {@code init} 里定一次。
+     */
+    @Override
+    public void tick() {
+        if (this.startButton == null) {
+            return;
+        }
+        CommandPostBlockEntity post = post();
+        this.startButton.setMessage(Component.translatable(post != null && post.isStarted()
+                ? "gui.blueprint.home.stop" : "gui.blueprint.home.start"));
+        // 没投影就没有"开工"的对象（那台不是我的，服务端还会再拦一次）
+        this.startButton.active = post != null && post.getSchematicId() != null;
+    }
+
+    /** 下口令 / 收回口令：客户端先判一遍，服务端还会再验一次（这里只是把话说清楚） */
+    private void onOrder() {
+        CommandPostBlockEntity post = post();
+        Player player = Minecraft.getInstance().player;
+        if (post == null || player == null) {
+            return;
+        }
+        if (!post.isBoundTo(player.getUUID())) {
+            setStatus(Component.translatable("gui.blueprint.post.need_bind"));
+            return;
+        }
+        if (post.getSchematicId() == null) {
+            setStatus(Component.translatable("gui.blueprint.post.no_blueprint"));
+            return;
+        }
+        boolean start = !post.isStarted();
+        ModNetwork.CHANNEL.sendToServer(new C2SCommandPostStartPacket(this.pos, start));
+        setStatus(Component.translatable(start
+                ? "message.blueprint.post.started" : "message.blueprint.post.stopped"));
     }
 
     /** 这块指挥台；没加载出来（例如刚被拆掉）时返回 null */
@@ -179,14 +227,11 @@ public class CommandPostScreen extends Screen {
                     Component.translatable("gui.blueprint.post.anchor",
                             anchor == null ? "-" : anchor.getX() + ", " + anchor.getY() + ", " + anchor.getZ()),
                     x + 8, y, COLOR_LABEL, false);
-            if (post.isPaused()) {
-                graphics.drawString(this.font, Component.translatable("gui.blueprint.post.paused"),
-                        x + 8 + this.font.width(
-                                Component.translatable("gui.blueprint.post.anchor",
-                                        anchor == null ? "-" : anchor.getX() + ", " + anchor.getY() + ", " + anchor.getZ()))
-                                + 6,
-                        y, COLOR_WARN, false);
-            }
+            // 下一步在哪：待命（等着开工口令）/ 正在建 / 已完工 / 已暂停。
+            // 判据与终端主页共用同一处（CommandPostProjections#stateText），两页不会写出两个说法
+            y += ROW_HEIGHT;
+            graphics.drawString(this.font, CommandPostProjections.stateText(post),
+                    x + 8, y, CommandPostProjections.stateColor(post), false);
         }
 
         // 女仆：这一栏只说"这台手底下有谁"；完整名册（带立绘、能指派）走下面那个「女仆」按钮单开

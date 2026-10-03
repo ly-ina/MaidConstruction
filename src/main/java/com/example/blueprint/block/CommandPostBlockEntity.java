@@ -49,6 +49,7 @@ public class CommandPostBlockEntity extends BlockEntity {
     private static final String KEY_MIRROR = "Mirror";
     private static final String KEY_PAUSED = "Paused";
     private static final String KEY_COMPLETED = "Completed";
+    private static final String KEY_STARTED = "Started";
     private static final String KEY_MAIDS = "Maids";
     private static final String KEY_MAID_ID = "id";
     private static final String KEY_MAID_NAME = "name";
@@ -73,6 +74,13 @@ public class CommandPostBlockEntity extends BlockEntity {
     private boolean paused;
     /** 这台托的那份建完了：建完就不再派她往工地跑（与蓝图上的完工标记同一条规矩） */
     private boolean completed;
+    /**
+     * 玩家下过「开始建造」的口令没有。
+     * <p>
+     * <b>默认 false</b>：放投影、指派女仆都只是准备，准备不该等于开工——他要先把她叫齐、
+     * 把料备好、把别的事交代完。旧存档读出来也是 false，正好是"等口令"这个意思。
+     */
+    private boolean started;
 
     /** 指派给这台指挥台的女仆：uuid -> 名字快照（顺序就是指派的先后） */
     private final Map<UUID, String> maids = new LinkedHashMap<>();
@@ -141,6 +149,24 @@ public class CommandPostBlockEntity extends BlockEntity {
         markUpdated();
     }
 
+    public boolean isStarted() {
+        return started;
+    }
+
+    /**
+     * 下口令 / 收回口令（见 {@code C2SCommandPostStartPacket}）。
+     * <p>
+     * 开工时顺带把"完工"清掉：她上次建完、工地后来被拆了几块，主人再下一次口令的意思
+     * 就是"再去过一遍"——不清的话她会一直显示已完成，且永远不再去补。
+     */
+    public void setStarted(boolean value) {
+        this.started = value;
+        if (value) {
+            this.completed = false;
+        }
+        markUpdated();
+    }
+
     /**
      * 放下投影：结构、朝向、位置全部来自**手上那张蓝图**（见 {@code C2SCommandPostProjectionPacket}）。
      * <p>
@@ -153,8 +179,9 @@ public class CommandPostBlockEntity extends BlockEntity {
         this.anchor = anchor;
         this.rotation = rotation;
         this.mirror = mirror;
-        // 换了图就当是新工地：上一份的"建完了"不能留给这一份用
+        // 换了图就当是新工地：上一份的"建完了"不能留给这一份用，口令也要重下
         this.completed = false;
+        this.started = false;
         markUpdated();
     }
 
@@ -166,6 +193,7 @@ public class CommandPostBlockEntity extends BlockEntity {
         this.schematicId = null;
         this.anchor = null;
         this.completed = false;
+        this.started = false;
         if (this.level != null && !this.level.isClientSide) {
             CommandPostAssignments.clearPost(CommandPostAssignments.at(this.level, this.worldPosition));
         }
@@ -258,6 +286,7 @@ public class CommandPostBlockEntity extends BlockEntity {
         tag.putInt(KEY_MIRROR, this.mirror.ordinal());
         tag.putBoolean(KEY_PAUSED, this.paused);
         tag.putBoolean(KEY_COMPLETED, this.completed);
+        tag.putBoolean(KEY_STARTED, this.started);
 
         ListTag list = new ListTag();
         for (Map.Entry<UUID, String> maid : this.maids.entrySet()) {
@@ -286,6 +315,8 @@ public class CommandPostBlockEntity extends BlockEntity {
         this.mirror = mirrors[Math.floorMod(tag.getInt(KEY_MIRROR), mirrors.length)];
         this.paused = tag.getBoolean(KEY_PAUSED);
         this.completed = tag.getBoolean(KEY_COMPLETED);
+        // 没有这个键（1.8.0 之前的存档）= false = 等她等口令，正是想要的行为
+        this.started = tag.getBoolean(KEY_STARTED);
 
         this.maids.clear();
         ListTag list = tag.getList(KEY_MAIDS, Tag.TAG_COMPOUND);

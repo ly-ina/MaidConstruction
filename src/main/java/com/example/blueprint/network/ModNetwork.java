@@ -8,6 +8,7 @@ import com.example.blueprint.network.packet.C2SCapturePacket;
 import com.example.blueprint.network.packet.C2SCaptureToFilePacket;
 import com.example.blueprint.network.packet.C2SClearBlueprintPacket;
 import com.example.blueprint.network.packet.C2SCommandPostProjectionPacket;
+import com.example.blueprint.network.packet.C2SCommandPostStartPacket;
 import com.example.blueprint.network.packet.C2SImportBlueprintPacket;
 import com.example.blueprint.network.packet.C2SMaidCraftOrderPacket;
 import com.example.blueprint.network.packet.C2SRecordModePacket;
@@ -40,7 +41,9 @@ public class ModNetwork {
     // 再之后指挥台接上：绑定（C2SBindCommandPostPacket）与放置/取消托管投影
     // （C2SCommandPostProjectionPacket）——两件都改方块实体的存档状态，同样只有服务端算数。
     // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
-    private static final String PROTOCOL_VERSION = "12";
+    // 1.8.0 再往后：开工口令（C2SCommandPostStartPacket，见 DEVELOPER §12 第 4 步），升到 13。
+    // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
+    private static final String PROTOCOL_VERSION = "13";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(BlueprintMod.MOD_ID, "main"),
@@ -75,6 +78,9 @@ public class ModNetwork {
                 S2CMaidListPacket::encode, S2CMaidListPacket::decode, S2CMaidListPacket::handle);
         CHANNEL.registerMessage(id++, C2SCaptureToFilePacket.class,
                 C2SCaptureToFilePacket::encode, C2SCaptureToFilePacket::decode, C2SCaptureToFilePacket::handle);
+        CHANNEL.registerMessage(id++, C2SCommandPostStartPacket.class,
+                C2SCommandPostStartPacket::encode, C2SCommandPostStartPacket::decode,
+                C2SCommandPostStartPacket::handle);
         CHANNEL.registerMessage(id++, S2CSchematicFilePacket.class,
                 S2CSchematicFilePacket::encode, S2CSchematicFilePacket::decode, S2CSchematicFilePacket::handle);
         CHANNEL.registerMessage(id++, C2SRequestSchematicPacket.class,

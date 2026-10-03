@@ -1,6 +1,10 @@
 package com.example.blueprint.client;
 
+import com.example.blueprint.block.CommandPostBlockEntity;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraftforge.api.distmarker.Dist;
@@ -104,5 +108,58 @@ public final class CommandPostProjections {
             }
         }
         return best;
+    }
+
+    /**
+     * 客户端这边那块指挥台方块实体；不在附近、区块已卸掉、或那不是指挥台时 null。
+     * <p>
+     * 指挥台的状态（有没有投影、下没下开工口令、完工没有）**整份都随更新包同步过来**
+     * （见 {@code CommandPostBlockEntity} 的 {@code getUpdateTag}），所以界面直接读方块实体就够了，
+     * 不必再开一份"客户端状态缓存"——那种缓存和实际的偏差最难查。
+     */
+    @Nullable
+    public static CommandPostBlockEntity blockEntityAt(@Nullable BlockPos pos) {
+        if (pos == null) {
+            return null;
+        }
+        Level level = Minecraft.getInstance().level;
+        return level != null && level.getBlockEntity(pos) instanceof CommandPostBlockEntity post
+                ? post : null;
+    }
+
+    /**
+     * 这台指挥台此刻处于哪一步：没投影 / 待命（等着开工口令）/ 正在建 / 已完工 / 已暂停。
+     * <p>
+     * 判据**按"她会不会真的去建"来分**（与施工控制器开工的条件同一组，见 {@code BlueprintBuildController}）：
+     * 界面写"正在建"而她不建、或反过来，都会被当成 bug。
+     */
+    public static Component stateText(CommandPostBlockEntity post) {
+        if (post.getSchematicId() == null) {
+            return Component.translatable("gui.blueprint.post.state.none");
+        }
+        if (post.isCompleted()) {
+            return Component.translatable("gui.blueprint.post.state.done");
+        }
+        if (!post.isStarted()) {
+            return Component.translatable("gui.blueprint.post.state.standby");
+        }
+        if (post.isPaused()) {
+            return Component.translatable("gui.blueprint.post.state.paused");
+        }
+        return Component.translatable("gui.blueprint.post.state.building");
+    }
+
+    /** 与 {@link #stateText} 配套的颜色：没投影灰、待命黄、在建绿、完工青、暂停橙 */
+    public static int stateColor(CommandPostBlockEntity post) {
+        if (post.getSchematicId() == null) {
+            return 0xAAAAAA;
+        }
+        if (post.isCompleted()) {
+            return 0x55FFFF;
+        }
+        if (!post.isStarted()) {
+            return 0xFFAA00;
+        }
+        return post.isPaused() ? 0xFF8800 : 0x55FF55;
     }
 }

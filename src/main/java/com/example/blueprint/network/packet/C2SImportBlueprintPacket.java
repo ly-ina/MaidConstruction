@@ -52,34 +52,43 @@ public class C2SImportBlueprintPacket {
             if (player == null) {
                 return;
             }
-            ItemStack stack = BlueprintItem.findHeld(player);
-            if (stack.isEmpty()) {
-                return;
-            }
             if (msg.data.length > MAX_BYTES) {
                 player.sendSystemMessage(Component.translatable("message.blueprint.import_too_large"));
                 return;
             }
 
+            Schematic schematic;
             try {
-                Schematic schematic = Schematic.read(NbtIo.readCompressed(new ByteArrayInputStream(msg.data)));
-                UUID id = SchematicStorage.get(player.serverLevel()).put(schematic);
-
-                // 导入的是新结构，旧的定位和朝向都没有意义了
-                BlueprintItem.setSchematic(stack, id, schematic.getSize(), msg.name);
-                BlueprintItem.clearAnchor(stack);
-                BlueprintItem.setRotation(stack, net.minecraft.world.level.block.Rotation.NONE);
-                BlueprintItem.setMirror(stack, net.minecraft.world.level.block.Mirror.NONE);
-
-                ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                        new S2CSchematicDataPacket(id, msg.name, schematic.write(new CompoundTag())));
-
-                player.sendSystemMessage(Component.translatable("message.blueprint.imported",
-                        schematic.getWidth(), schematic.getHeight(), schematic.getLength()));
+                schematic = Schematic.read(NbtIo.readCompressed(new ByteArrayInputStream(msg.data)));
             } catch (Exception e) {
                 BlueprintMod.LOGGER.warn("蓝图导入失败", e);
                 player.sendSystemMessage(Component.translatable("message.blueprint.import_failed"));
+                return;
             }
+
+            // 读出来了才动背包：解析失败时不该先把玩家手里的东西换一遍
+            ItemStack stack = BlueprintItem.findBlankToHand(player);
+            if (stack.isEmpty()) {
+                player.sendSystemMessage(Component.translatable("message.blueprint.no_empty"));
+                return;
+            }
+
+            UUID id = SchematicStorage.get(player.serverLevel()).put(schematic);
+
+            // 导入的是新结构，旧的定位和朝向都没有意义了
+            BlueprintItem.setSchematic(stack, id, schematic.getSize(), msg.name);
+            BlueprintItem.clearAnchor(stack);
+            BlueprintItem.setRotation(stack, net.minecraft.world.level.block.Rotation.NONE);
+            BlueprintItem.setMirror(stack, net.minecraft.world.level.block.Mirror.NONE);
+
+            // 可能刚和主手对调过格子：让客户端立刻看到，不等下一次整包同步
+            player.inventoryMenu.broadcastChanges();
+
+            ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                    new S2CSchematicDataPacket(id, msg.name, schematic.write(new CompoundTag())));
+
+            player.sendSystemMessage(Component.translatable("message.blueprint.imported",
+                    schematic.getWidth(), schematic.getHeight(), schematic.getLength()));
         });
         context.setPacketHandled(true);
     }

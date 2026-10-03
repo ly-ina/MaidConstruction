@@ -1,5 +1,6 @@
 package com.example.blueprint.network.packet;
 
+import com.example.blueprint.block.CommandPostBlockEntity;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.server.CommandPostAssignments;
 import com.example.blueprint.server.MaidOwnership;
@@ -46,8 +47,9 @@ public class C2SMaidListRequestPacket {
             ServerLevel level = player.serverLevel();
             List<S2CMaidListPacket.Entry> entries = new ArrayList<>();
             for (MaidOwnership.Maid maid : MaidOwnership.of(player.getUUID())) {
-                entries.add(new S2CMaidListPacket.Entry(maid.id(), maid.name(),
-                        postOf(level, maid.id())));
+                BlockPos post = postOf(level, maid.id());
+                entries.add(new S2CMaidListPacket.Entry(maid.id(), maid.name(), post,
+                        statusOf(level, post)));
             }
             ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new S2CMaidListPacket(entries));
@@ -63,5 +65,24 @@ public class C2SMaidListRequestPacket {
     @Nullable
     private static BlockPos postOf(ServerLevel level, java.util.UUID maid) {
         return CommandPostAssignments.postPosIn(level, maid);
+    }
+
+    /**
+     * 她此刻的工作状态。
+     * <p>
+     * "正在建"的判据就是**指挥台那边那套**（放好投影 + 下过开工口令 + 没暂停没完工），
+     * 与施工控制器开工的条件是同一组——界面写"正在建"而她不建、或反过来，都只会让人怀疑是 bug。
+     * 其余一律算**待命**：她确实被指派了，只是还没开工（或已经完工）。
+     */
+    private static S2CMaidListPacket.Status statusOf(ServerLevel level, @Nullable BlockPos postPos) {
+        if (postPos == null) {
+            return S2CMaidListPacket.Status.FREE;
+        }
+        if (!(level.getBlockEntity(postPos) instanceof CommandPostBlockEntity post)
+                || post.getSchematicId() == null
+                || !post.isStarted() || post.isPaused() || post.isCompleted()) {
+            return S2CMaidListPacket.Status.STANDBY;
+        }
+        return S2CMaidListPacket.Status.BUILDING;
     }
 }

@@ -22,12 +22,27 @@ import java.util.function.Supplier;
 public class S2CMaidListPacket {
 
     /**
+     * 她的工作状态。
+     * <p>
+     * 只有三种，而且**由服务端算**：名册里可能有别处的指挥台，那台的方块实体客户端根本
+     * 没同步过来——让客户端照着本地那份猜，远处的女仆就会一直是错的。
+     */
+    public enum Status {
+        /** 还没指派：她干自己的活 */
+        FREE,
+        /** 指派了，但那台还没下开工口令（或暂停/已完工/还没放投影）：她在待命 */
+        STANDBY,
+        /** 正在建 */
+        BUILDING
+    }
+
+    /**
      * 一只女仆：{@code post} 为 null 表示还没被指派。
      * <p>
-     * 只给 BlockPos 而不给整台指挥台：界面需要的只是"有没有指派、指到哪"，点按钮时
+     * 只给 BlockPos 而不给整台指挥台：界面需要的只是"有没有指派、指到哪、她在干嘛"，点按钮时
      * 走的是"对我这台"或"最近一台属于我的"那两条路，都还要服务端再确认一次。
      */
-    public record Entry(UUID id, String name, @Nullable BlockPos post) {
+    public record Entry(UUID id, String name, @Nullable BlockPos post, Status status) {
     }
 
     private final List<Entry> entries;
@@ -45,6 +60,7 @@ public class S2CMaidListPacket {
             if (entry.post() != null) {
                 buf.writeBlockPos(entry.post());
             }
+            buf.writeEnum(entry.status());
         }
     }
 
@@ -54,7 +70,8 @@ public class S2CMaidListPacket {
         for (int i = 0; i < size; i++) {
             UUID id = buf.readUUID();
             String name = buf.readUtf(64);
-            entries.add(new Entry(id, name, buf.readBoolean() ? buf.readBlockPos() : null));
+            BlockPos post = buf.readBoolean() ? buf.readBlockPos() : null;
+            entries.add(new Entry(id, name, post, buf.readEnum(Status.class)));
         }
         return new S2CMaidListPacket(entries);
     }
