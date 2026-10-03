@@ -303,7 +303,7 @@ public class BlueprintLibraryScreen extends Screen {
      * 右键点两个角点，E 完成——扫出来的结构直接写进 {@code blueprints} 目录，不经过蓝图。
      * <p>
      * 界面得先关掉：框选要一边看着建筑一边点，界面开着就看不全了。
-     * 录制态（能飞、能穿墙）由服务端管进出，见 {@code RecordMode}。
+     * 录制态（能飞）由服务端管进出，见 {@code RecordMode}。
      * <p>
      * 名字为空先拦住：那会落到 {@code blueprint.blueprint} 这种毫无意义的文件名上，
      * 与其生成出来再让玩家去改，不如在这里说一句。
