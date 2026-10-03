@@ -11,7 +11,6 @@ import com.example.blueprint.network.packet.C2SCommandPostProjectionPacket;
 import com.example.blueprint.network.packet.C2SCommandPostStartPacket;
 import com.example.blueprint.network.packet.C2SImportBlueprintPacket;
 import com.example.blueprint.network.packet.C2SMaidCraftOrderPacket;
-import com.example.blueprint.network.packet.C2SRecordModePacket;
 import com.example.blueprint.network.packet.C2SRequestSchematicPacket;
 import com.example.blueprint.network.packet.C2SSetAnchorPacket;
 import com.example.blueprint.network.packet.C2SSetNamePacket;
@@ -37,13 +36,15 @@ public class ModNetwork {
     // 1.6.5 进度包带上"工地身份"（site）：同一处工地上进度只往前不往回，
     // 光有"已建多少"没法判断"这是新工地还是同一处重扫"，条就会来回跳。升到 7。
     // 再之后进度包带上"建筑名"（玩家给这张蓝图起的名字），条上要写出来，升到 8。
-    // 1.8.0 加了"进入/退出录制态"的包（C2SRecordModePacket）：录制要的飞行只有服务端改得动。
+    // 1.8.0 一度有个"进入/退出录制态"的包（C2SRecordModePacket），用来给录制开飞行；
+    // 那等于给生存玩家一个免费飞行，整个删掉了（DEVELOPER §7.19），位置一并回收。
     // 再之后指挥台接上：绑定（C2SBindCommandPostPacket）与放置/取消托管投影
     // （C2SCommandPostProjectionPacket）——两件都改方块实体的存档状态，同样只有服务端算数。
     // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
     // 1.8.0 再往后：开工口令（C2SCommandPostStartPacket，见 DEVELOPER §12 第 4 步），升到 13。
+    // 删掉录制态那个包之后，它后面那些包的 id 全都前移了一格，所以再升一档到 14。
     // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
-    private static final String PROTOCOL_VERSION = "13";
+    private static final String PROTOCOL_VERSION = "14";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(BlueprintMod.MOD_ID, "main"),
@@ -62,8 +63,6 @@ public class ModNetwork {
                 C2SSetOrientationPacket::encode, C2SSetOrientationPacket::decode, C2SSetOrientationPacket::handle);
         CHANNEL.registerMessage(id++, C2SClearBlueprintPacket.class,
                 C2SClearBlueprintPacket::encode, C2SClearBlueprintPacket::decode, C2SClearBlueprintPacket::handle);
-        CHANNEL.registerMessage(id++, C2SRecordModePacket.class,
-                C2SRecordModePacket::encode, C2SRecordModePacket::decode, C2SRecordModePacket::handle);
         CHANNEL.registerMessage(id++, C2SBindCommandPostPacket.class,
                 C2SBindCommandPostPacket::encode, C2SBindCommandPostPacket::decode, C2SBindCommandPostPacket::handle);
         CHANNEL.registerMessage(id++, C2SCommandPostProjectionPacket.class,

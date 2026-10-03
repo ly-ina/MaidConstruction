@@ -5,7 +5,6 @@ import com.example.blueprint.schematic.Schematic;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.network.packet.C2SCaptureToFilePacket;
 import com.example.blueprint.network.packet.C2SCommandPostProjectionPacket;
-import com.example.blueprint.network.packet.C2SRecordModePacket;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -87,7 +86,7 @@ public final class BlueprintRecordSession {
     private static final int COLOR_TEXT = 0xFFFFFF;
     private static final int COLOR_HINT = 0xAAAAAA;
 
-    /** 在世界里摆东西的两种用途：键位与收尾不一样，架子（飞行、摘键、提示）是同一套 */
+    /** 在世界里摆东西的两种用途：键位与收尾不一样，架子（摘键、提示）是同一套 */
     private enum Mode {
         /** 框两个角点，录成一份图纸文件 */
         RECORD,
@@ -151,13 +150,12 @@ public final class BlueprintRecordSession {
         corner2 = null;
         active = true;
         captureVanillaKeys();
-        ModNetwork.CHANNEL.sendToServer(new C2SRecordModePacket(true));
     }
 
     /**
      * 进入**投影定位态**：从图纸库里点了「投影」之后回到世界，右键选位置，`←/→` 转、`↑/↓` 翻，E 定下来。
      * <p>
-     * 与录制共用同一套架子（能飞、摘掉原版那两个键、屏幕角上写提示），差别只在三处：
+     * 与录制共用同一套架子（摘掉原版那两个键、屏幕角上写提示），差别只在三处：
      * 右键选的是**一个位置**（结构的最小角），方向键留给**朝向**而不是挪格子，
      * R 是"清空位置"而不是"重来一遍"——投影要反复试的就是位置与朝向，清空比一格一格退回去快。
      *
@@ -186,7 +184,6 @@ public final class BlueprintRecordSession {
         }
         active = true;
         captureVanillaKeys();
-        ModNetwork.CHANNEL.sendToServer(new C2SRecordModePacket(true));
     }
 
     /**
@@ -277,7 +274,6 @@ public final class BlueprintRecordSession {
         projectSchematic = null;
         projectPreviewId = null;
         releaseVanillaKeys();
-        ModNetwork.CHANNEL.sendToServer(new C2SRecordModePacket(false));
     }
 
     /**
