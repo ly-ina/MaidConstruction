@@ -3,6 +3,7 @@ package com.example.blueprint.registry;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.item.BindingBookItem;
 import com.example.blueprint.item.BlueprintTerminalItem;
+import com.example.blueprint.item.ManualItem;
 import net.minecraft.world.item.BlockItem;
 import com.example.blueprint.item.BlueprintItem;
 import net.minecraft.world.item.Item;
@@ -42,4 +43,13 @@ public class ModItems {
      */
     public static final RegistryObject<Item> COMMAND_POST = ITEMS.register("command_post",
             () -> new BlockItem(ModBlocks.COMMAND_POST.get(), new Item.Properties()));
+
+    /**
+     * 《女仆建筑说明书》：右键打开自己的界面（左目录可点，见 {@code ManualItem}）。
+     * <p>
+     * 不堆叠：它是"一本"东西，包里躺着好几本没有意义；它也不存任何数据，
+     * 所以可以放心地随身带着、丢了再合成一本。
+     */
+    public static final RegistryObject<Item> MANUAL = ITEMS.register("manual",
+            () -> new ManualItem(new Item.Properties().stacksTo(1)));
 }

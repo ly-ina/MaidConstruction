@@ -64,6 +64,33 @@ public class Ae2WirelessProvider implements ItemProvider {
         return null;
     }
 
+    /**
+     * 每 tick 现取现放用的一小口：从网络里补 {@code maxItems} 个材料进背包。
+     *
+     * @return 实际补进去的数量；没有终端、接不上网、清单已经够了都返回 0
+     */
+    public static int topUp(Level level, Iterable<ItemStack> candidates, @Nullable net.minecraft.world.phys.Vec3 userPos,
+                            IItemHandler dst, Map<Item, Integer> need, int maxItems) {
+        for (ItemStack stack : candidates) {
+            if (!(stack.getItem() instanceof WirelessMaidTerminalItem)) {
+                continue;
+            }
+            IGrid grid = WirelessMaidLink.resolveGrid(level, stack);
+            if (grid == null) {
+                continue;
+            }
+            if (!WirelessMaidLink.hasBindingCard(stack)
+                    && !WirelessMaidLink.withinRange(WirelessMaidLink.linkedAccessPoint(level, stack), userPos)) {
+                continue;
+            }
+            MEStorage storage = WirelessMaidLink.getStorage(grid);
+            if (storage != null) {
+                return Ae2StorageTransfer.takeInto(storage, dst, need, maxItems);
+            }
+        }
+        return 0;
+    }
+
     @Override
     public BlockPos interactPos() {
         return NO_TRAVEL_POS;

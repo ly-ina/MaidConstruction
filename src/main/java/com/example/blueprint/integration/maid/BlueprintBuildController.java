@@ -101,13 +101,24 @@ public class BlueprintBuildController {
      */
     private static final int FAVORABILITY_PER_EXTRA_PLACE = 5;
     /**
-     * 速度上限（块/秒）。防呆：好感度上千的存档不至于一 tick 刷出几百块把服务器噎住。
+     * 速度上限（**块/tick**）：20 = 一 tick 放 20 块，也就是 400 块/秒。
      * <p>
-     * 20 正好是"一 tick 一块"；再往上就得一 tick 放多块，属于另一个量级的改动。
+     * 这是防呆线而不是日常档位——按"好感度每 5 点 +1 块/秒"的曲线，得两千点好感才够到它。
+     * 之所以按 tick 来写：{@code BuildSession.step} 本来就接"这一 tick 放几块"，
+     * 一 tick 多放是它支持的用法，上限也就该用 tick 数（早先封在 20 块/秒 = 1 块/tick，
+     * 等于把上限压在了日常档位附近，好感度上百的女仆一撞就顶）。
      */
-    private static final int MAX_PLACES_PER_SECOND = 20;
+    private static final int MAX_PLACES_PER_TICK = 20;
     private static final double TICKS_PER_SECOND = 20.0D;
-    private static final int FETCH_COOLDOWN = 20;
+    /**
+     * 搬完料回到站位之后，歇几 tick 再动手。
+     * <p>
+     * 早先是 20（整整一秒）——那是"放置上限 20 块/秒"时代的节奏：一秒的停顿看着刚好。
+     * 现在放置能到 20 块/tick，一秒的停等于是每搬一趟货就把工地钉住二十倍的时间，
+     * 表现就是"她一趟趟地搬、建得却很慢"。取料与放置该是同一档速度，所以压到 1：
+     * 只在"刚搬完 → 换回放置"之间留一 tick 的缝。
+     */
+    private static final int FETCH_COOLDOWN = 1;
     private static final int NO_SOURCE_COOLDOWN = 100;
     /**
      * 走到站位多近算到岗（只算水平，垂直另算）。
@@ -828,11 +839,11 @@ public class BlueprintBuildController {
     }
 
     /**
-     * 她的放置速度（块/秒）：**基准 + 好感度每点 1 块**，封顶 {@link #MAX_PLACES_PER_SECOND}。
+     * 她的放置速度（块/秒）：**基准 + 好感度每点 1 块**，封顶 {@link #MAX_PLACES_PER_TICK} × 20。
      */
     private static int placesPerSecond(EntityMaid maid) {
         int favorability = Math.max(0, maid.getFavorability());
-        return Math.min(MAX_PLACES_PER_SECOND,
+        return Math.min(MAX_PLACES_PER_TICK * (int) TICKS_PER_SECOND,
                 BASE_PLACES_PER_SECOND + favorability / FAVORABILITY_PER_EXTRA_PLACE);
     }
 
@@ -1351,6 +1362,10 @@ public class BlueprintBuildController {
             cooldown = 1;
             return;
         }
+        // 每 tick 现取现放：不用走动的来源（她身上的无线女仆终端）当场补一点，
+        // 这一 tick 要放的量就够了。要走去仓库的来源不在此列——那是一趟趟搬满（见 tickFetch）
+        topUpPerTick(level, maid, allowed);
+
         BuildSession.StepResult result = session.step(level, activeAnchor, new MaidItemSource(maid), allowed,
                 BlueprintConfig.salvageEnabled() ? new MaidSalvage(maid) : null,
                 maid.getBoundingBox());
@@ -1848,6 +1863,36 @@ public class BlueprintBuildController {
     }
 
     /**
+     * 每 tick 现取现放：从一个**不用走动**的来源补 {@code max(1, 这一 tick 的放置额度)} 个材料。
+     * <p>
+     * 为什么按"放置额度"取：速度低于 1 块/tick 时那个额度会算成 0（份额还没攒够），
+     * 这时**保底取 1 个**，免得她因为"攒不出额度"而永远不补货。
+     * <p>
+     * 只认她身上的无线女仆终端：要走去仓库的来源走的是"一趟搬满、放完再搬"那条路
+     * （见 {@link #tickFetch}），不归这里管——那条路真正的成本是走路，按 tick 补没有意义。
+     */
+    private void topUpPerTick(ServerLevel level, EntityMaid maid, int allowed) {
+        if (!Ae2Compat.isLoaded()) {
+            return;
+        }
+        IItemHandler backpack = new MaidItemSource(maid).getBackpack();
+        if (backpack == null) {
+            return;
+        }
+        // 缺什么补什么：上一步算出来的缺口优先，还没有（刚开工）就用整张单
+        Map<Item, Integer> need = shortfall.isEmpty() ? pendingBill : shortfall;
+        if (need.isEmpty()) {
+            return;
+        }
+        int moved = com.example.blueprint.integration.ae2.Ae2WirelessProvider.topUp(
+                level, collectHeldStacks(maid), maid.position(), backpack, need, Math.max(1, allowed));
+        if (moved > 0) {
+            // 条上那行字照这个说"她去取料了"（与 tickFetch 同一个标记）
+            fetchedSincePacket = true;
+        }
+    }
+
+    /**
      * 把材料从来源搬进女仆背包。
      * <p>
      * 具体怎么搬交给 {@link ItemProvider} 自己决定：普通容器是逐槽抽取，
@@ -2205,9 +2250,9 @@ public class BlueprintBuildController {
                 | (Objects.hash(rotation, mirror) & 0xFFFFFFFFL);
         // 写一行放置速度：它的依据是她的好感度，玩家想核对"为什么她放得这么快/这么慢"时，
         // 这行里三个数（速度、基准、好感度）一目了然
-        BlueprintMod.LOGGER.info("女仆 {} 的放置速度：{} 块/秒（基准 {} + 好感度 {} ÷ {}，上限 {}）",
+        BlueprintMod.LOGGER.info("女仆 {} 的放置速度：{} 块/秒（基准 {} + 好感度 {} ÷ {}，上限 {} 块/tick）",
                 maid.getUUID(), placesPerSecond(maid), BASE_PLACES_PER_SECOND, maid.getFavorability(),
-                FAVORABILITY_PER_EXTRA_PLACE, MAX_PLACES_PER_SECOND);
+                FAVORABILITY_PER_EXTRA_PLACE, MAX_PLACES_PER_TICK);
         // **换了工地**才重新记账：上处说过"这块我拆不动"，不代表这处也免开尊口。
         // 同一处工地反复重建会话（重扫、进度重建）**不算换工地**——
         // 以前这里无条件清账，于是每隔几秒的重扫都把"说过了"重置一遍，

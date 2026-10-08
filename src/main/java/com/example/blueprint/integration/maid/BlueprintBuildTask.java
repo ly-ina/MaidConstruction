@@ -115,12 +115,34 @@ public class BlueprintBuildTask implements IMaidTask {
         TaskManager.findTask(UID).ifPresent(maid::setTask);
     }
 
-    /** 撤单：把她还回被指派之前的那个模式（没记过就什么也不做，交给她自己） */
-    public static void release(EntityMaid maid) {
+    /**
+     * 撤单：把她还回被指派之前的那个模式。
+     *
+     * @return 真的还回去过才返回 true；没记过（她是主人自己拨到建造模式的）返回 false，
+     *   此时什么都不做——她的模式该由主人说了算
+     */
+    public static boolean release(EntityMaid maid) {
         ResourceLocation back = RETURN_TO.remove(maid.getUUID());
-        if (back != null) {
-            TaskManager.findTask(back).ifPresent(maid::setTask);
+        if (back == null) {
+            return false;
         }
+        TaskManager.findTask(back).ifPresent(maid::setTask);
+        return true;
+    }
+
+    /** 她是不是我们替她切过模式的（账上还欠着"撤单时还回去"） */
+    public static boolean employedByUs(UUID maid) {
+        return RETURN_TO.containsKey(maid);
+    }
+
+    /**
+     * 主人接管了她的模式：把账销掉，**不动她的模式**。
+     * <p>
+     * 用在"指派期间主人自己给她换了模式"：那时我们要做的是**撤掉指派**，
+     * 而她的模式保持主人刚换的那个——不是替他改回指派前那个（那是撤单的意思，方向相反）。
+     */
+    public static void disown(UUID maid) {
+        RETURN_TO.remove(maid);
     }
 
     /** 她原来的工作模式：被指派前是什么，撤单时还回去 */

@@ -3,7 +3,7 @@ package com.example.blueprint.registry;
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.integration.ae2.Ae2Compat;
 import com.example.blueprint.integration.ae2.Ae2TerminalRegistry;
-import com.example.blueprint.item.ManualBook;
+import com.example.blueprint.item.ManualItem;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.CreativeModeTab;
@@ -33,7 +33,7 @@ public final class ModCreativeTabs {
                         output.accept(ModItems.BLUEPRINT_TERMINAL.get());
                         // 说明书只能"送"（新玩家第一次进世界，见 ManualGiveaway），
                         // 但玩家把它弄丢之后总得有个地方再拿一本——就摆在这儿
-                        output.accept(ManualBook.create());
+                        output.accept(ManualItem.create());
                         output.accept(ModItems.BINDING_BOOK.get());
                         // 指挥台与 AE2 无关，谁都能用；AE2 那几个终端在下面单独加
                         output.accept(ModItems.COMMAND_POST.get());

@@ -58,8 +58,8 @@ public class MaidBuildTickHandler {
                 continue;
             }
             // 先把"她被指挥台指派了没有"和"她的工作模式"对齐，再往下走：
-            // 下面那道闸门认的就是任务类型，不先切，指派了也没有人来驱动她
-            switchToAssignedMode(level, maid);
+            // 下面那道闸门认的就是任务类型，不对齐，指派了也没有人来驱动她
+            syncAssignedMode(level, maid);
 
             if (!isBuildTask(maid)) {
                 BlueprintBuildController stopped = CONTROLLERS.remove(maid.getId());
@@ -98,35 +98,50 @@ public class MaidBuildTickHandler {
         }
     }
 
-    /** 已经替她切过模式的（被指挥台指派的那些），见 {@link #switchToAssignedMode} */
-    private static final Set<UUID> EMPLOYED = new HashSet<>();
-
     /**
      * 让"被指挥台指派"与"她的工作模式"对上。
      * <p>
-     * 指派只改指挥台那一侧的状态，她自己并不知道；而驱动只看任务类型。两边不对齐，
-     * 表现就是"在界面里指派了她，她照旧种地"。这里按**边沿**动一次：
-     * 刚被指派 → 切到「蓝图建造」；刚被撤单 → 还回原来的模式。
+     * 指派只改指挥台那一侧的状态，她自己并不知道；而驱动只看任务类型（下面那道闸门）。
+     * 两边不对齐，表现就是"在界面里指派了她，她照旧种地"。
      * <p>
-     * 为什么是边沿而不是每 tick 都掰：她干活期间主人手动给她换了模式，那是主人的意思，
-     * 我们不该一直把她按回来。（这也是"没放投影 = 待命"的实现方式：模式在建造、手上没活，
-     * 那个模式本来就是空转，不干扰别的活。）
+     * <b>每 tick 对齐，而不是只在"刚被指派"那一下</b>：早先写成边沿触发，结果那次切换
+     * 只要因为任何原因被跳过（指派索引还没更新、她当时不在同一维度、区块刚加载……），
+     * 之后就再也不会补，看起来就是"指派了却永远不来干活"。指派期间她的模式本就该是
+     * 「蓝图建造」，所以这里直接保证它——**撤单时**才还回她原来的模式（见 {@code release}）。
+     * <p>
+     * 代价说清楚：指派期间主人手动给她换成别的模式，会被这里按回来。要她自己干别的，
+     * 先从指挥台撤单——那时我们才把模式还给她。
      */
-    private static void switchToAssignedMode(ServerLevel level, EntityMaid maid) {
+    private static void syncAssignedMode(ServerLevel level, EntityMaid maid) {
         UUID id = maid.getUUID();
-        boolean assigned = CommandPostAssignments.postPosIn(level, id) != null;
-        if (assigned == EMPLOYED.contains(id)) {
+        net.minecraft.core.BlockPos postPos = CommandPostAssignments.postPosIn(level, id);
+        if (postPos == null) {
+            // 不再被指派：把当初替她换过来的模式还回去。
+            // 她本来就在建造模式（主人自己拨的）时 RETURN_TO 里没有记录，release 什么都不做
+            if (BlueprintBuildTask.release(maid)) {
+                BlueprintMod.LOGGER.info("女仆 {} 不再被指挥台指派，已还回原来的工作模式", id);
+            }
             return;
         }
-        if (assigned) {
-            EMPLOYED.add(id);
-            BlueprintBuildTask.employ(maid);
-            BlueprintMod.LOGGER.info("女仆 {} 被指挥台指派，已切到「蓝图建造」模式", id);
-        } else {
-            EMPLOYED.remove(id);
-            BlueprintBuildTask.release(maid);
-            BlueprintMod.LOGGER.info("女仆 {} 不再被指挥台指派，已还回原来的工作模式", id);
+
+        if (isBuildTask(maid)) {
+            return; // 已经是建造模式，无事可做
         }
+        if (BlueprintBuildTask.employedByUs(id)) {
+            // 指派期间**主人自己**把她的模式换成了别的：按主人的意思办——撤销指派，
+            // 她的模式保持他刚换的那个（不动）。否则就成了"一边按着她干活、一边跟她
+            // 抢模式"，主人换两次也换不动，看起来就是"指派了却永远不来干活"
+            if (level.getBlockEntity(postPos)
+                    instanceof com.example.blueprint.block.CommandPostBlockEntity post) {
+                post.unassign(id);
+                BlueprintBuildTask.disown(id);
+                BlueprintMod.LOGGER.info("女仆 {} 在指派期间被换了工作模式，已撤销指挥台的指派", id);
+            }
+            return;
+        }
+        // 刚被指派（还没轮到我们切）：切到建造模式，并记下她原来那个模式
+        BlueprintBuildTask.employ(maid);
+        BlueprintMod.LOGGER.info("女仆 {} 被指挥台指派，已切到「蓝图建造」模式", id);
     }
 
     /**

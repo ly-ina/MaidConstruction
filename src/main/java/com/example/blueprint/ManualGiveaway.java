@@ -1,6 +1,6 @@
 package com.example.blueprint;
 
-import com.example.blueprint.item.ManualBook;
+import com.example.blueprint.item.ManualItem;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -43,7 +43,7 @@ public final class ManualGiveaway {
         }
         data.putBoolean(GIVEN_TAG, true);
 
-        ItemStack book = ManualBook.create();
+        ItemStack book = ManualItem.create();
         if (!player.getInventory().add(book)) {
             // 背包满了就丢在他脚下。**不能就这么算了**：第一次进服的玩家背包里通常
             // 已经有服务器送的一堆东西，正好塞满是很常见的——那样这本说明书就凭空没了，

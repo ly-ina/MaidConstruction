@@ -4,6 +4,7 @@ import com.example.blueprint.block.CommandPostBlockEntity;
 import com.example.blueprint.client.CommandPostProjections;
 import com.example.blueprint.client.MaidRoster;
 import com.example.blueprint.network.ModNetwork;
+import com.example.blueprint.network.packet.C2SCommandPostProjectionPacket;
 import com.example.blueprint.network.packet.C2SCommandPostStartPacket;
 import com.example.blueprint.network.packet.S2CMaidListPacket;
 import net.minecraft.client.Minecraft;
@@ -79,6 +80,11 @@ public class BlueprintHomeScreen extends Screen {
                         b -> onOrder())
                 .bounds(left + 6, orderY, 110, 18).build();
         this.addRenderableWidget(this.startButton);
+        // 取消投影也放在这儿：终端本来就是"托管投影"的那个入口（放它的是图纸库，
+        // 撤它的是这里），不必为了撤销专门跑回指挥台那边按一次
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.post.clear"),
+                        b -> onClearProjection())
+                .bounds(left + 120, orderY, 90, 18).build());
 
         // 页脚：图纸库 | 女仆（指派） | 关闭。这一行是"去哪儿"的入口，与上面那个"做什么"分开
         int y = top + WINDOW_HEIGHT - 24;
@@ -139,6 +145,30 @@ public class BlueprintHomeScreen extends Screen {
 
     private void setStatus(Component message) {
         this.status = message;
+    }
+
+    /**
+     * 取消投影 = **撤单**：投影消失、挂在这台上的女仆一并撤下来。
+     * <p>
+     * 这台的状态跟着方块实体同步过来，所以这里只把请求发出去——界面下一 tick 自己就变成
+     * "还没放投影"了，不需要本地先改一份。与指挥台界面上那个按钮是同一条包、同一套校验。
+     */
+    private void onClearProjection() {
+        BlockPos pos = postPos();
+        CommandPostBlockEntity post = post();
+        if (post == null || pos == null) {
+            return;
+        }
+        if (!isMine(post)) {
+            setStatus(Component.translatable("gui.blueprint.post.need_bind"));
+            return;
+        }
+        if (post.getSchematicId() == null) {
+            setStatus(Component.translatable("gui.blueprint.post.no_blueprint"));
+            return;
+        }
+        ModNetwork.CHANNEL.sendToServer(C2SCommandPostProjectionPacket.cancel(pos));
+        setStatus(Component.translatable("gui.blueprint.post.cleared"));
     }
 
     /** 这台的状态归不归我管：绑定它的那个玩家才能下口令（与放置投影同一条规矩） */

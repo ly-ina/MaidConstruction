@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -26,6 +27,52 @@ final class Ae2StorageTransfer {
     }
 
     private static final IActionSource SOURCE = IActionSource.empty();
+
+    /**
+     * 从网络里**少量**补货进背包：最多搬 {@code maxItems} 个，按缺口逐样各取一个。
+     * <p>
+     * 与 {@link #transferInto} 的分工：那条是"一趟搬满"（要走去仓库的那些来源用它），
+     * 这条是"这一 tick 要用多少就补多少"——放置多快、取料就多快，她不会因为
+     * "一大笔料还没搬完"而空转。每样先探再取，塞不下就一分不动，绝不吞物品。
+     */
+    static int takeInto(MEStorage storage, IItemHandler dst, Map<Item, Integer> need, int maxItems) {
+        Map<Item, Integer> want = new HashMap<>(need);
+        int moved = 0;
+        boolean progressed = true;
+        while (moved < maxItems && progressed) {
+            progressed = false;
+            for (Map.Entry<Item, Integer> entry : want.entrySet()) {
+                if (moved >= maxItems) {
+                    break;
+                }
+                if (entry.getValue() <= 0) {
+                    continue;
+                }
+                AEItemKey key = AEItemKey.of(entry.getKey());
+                if (key == null || storage.extract(key, 1, Actionable.SIMULATE, SOURCE) <= 0) {
+                    continue;
+                }
+                // 背包这一格该放哪儿先探一次：塞不下就别从网络里拿
+                ItemStack probe = ItemHandlerHelper.insertItemStacked(dst, new ItemStack(entry.getKey()), true);
+                if (!probe.isEmpty()) {
+                    continue;
+                }
+                if (storage.extract(key, 1, Actionable.MODULATE, SOURCE) <= 0) {
+                    continue;
+                }
+                ItemStack rest = ItemHandlerHelper.insertItemStacked(dst, new ItemStack(entry.getKey()), false);
+                if (!rest.isEmpty()) {
+                    // 两次调用之间背包被改动了：原样还回网络，宁可少拿也不让物品蒸发
+                    storage.insert(key, rest.getCount(), Actionable.MODULATE, SOURCE);
+                    continue;
+                }
+                entry.setValue(entry.getValue() - 1);
+                moved++;
+                progressed = true;
+            }
+        }
+        return moved;
+    }
 
     /** 这份存储里有没有清单上要的材料。尽量便宜：每种只问 1 个。 */
     static boolean hasAny(MEStorage storage, Map<Item, Integer> bill) {

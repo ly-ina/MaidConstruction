@@ -17,7 +17,7 @@ import net.minecraft.world.level.Level;
  * 说明书的正文存在物品 NBT 里（页、书名、作者），而**普通配方的产物只能写
  * "什么物品、几个"**，写不出 NBT。拿 JSON 配方产出的会是一本空白成书——
  * 打得开、没有字，比做不出来更让人困惑。特殊配方的产物由代码现造，
- * 才能把 {@link ManualBook#create()} 那本书原样给出去。
+ * 才能把 {@link ManualItem#create()} 那本书原样给出去。
  * <p>
  * 配方不进配方书（{@code CustomRecipe} 天生 {@code isSpecial}）：它是个"补领"通道，
  * 新玩家第一次进世界就会拿到一本，不需要靠配方书去发现。
@@ -52,7 +52,7 @@ public class GuideBookRecipe extends CustomRecipe {
 
     @Override
     public ItemStack assemble(CraftingContainer container, RegistryAccess access) {
-        return ManualBook.create();
+        return ManualItem.create();
     }
 
     @Override
