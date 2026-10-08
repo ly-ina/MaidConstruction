@@ -1,0 +1,26 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " A ",
+    "RBR",
+    " O "
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:anvil"
+    },
+    "R": {
+      "item": "minecraft:redstone"
+    },
+    "B": {
+      "item": "blueprint:blueprint"
+    },
+    "O": {
+      "item": "minecraft:obsidian"
+    }
+  },
+  "result": {
+    "item": "blueprint:command_post",
+    "count": 1
+  }
+}
