@@ -84,7 +84,7 @@ public class BlueprintLibraryScreen extends Screen {
      *                   从终端进来传 null，那时找最近一台属于自己的指挥台
      */
     public BlueprintLibraryScreen(@Nullable BlockPos targetPost) {
-        super(Component.translatable("gui.blueprint.library.title"));
+        super(Component.translatable("gui.maidconstruction.library.title"));
         this.targetPost = targetPost;
     }
 
@@ -108,24 +108,24 @@ public class BlueprintLibraryScreen extends Screen {
         // （它们的横向位置是按"刷新 | 打开文件夹 | 关闭"配好的）
         int toolsY = top + WINDOW_HEIGHT - 44;
         this.nameBox = new EditBox(this.font, left + 6, toolsY + 1, 240, 16,
-                Component.translatable("gui.blueprint.library.name_hint"));
+                Component.translatable("gui.maidconstruction.library.name_hint"));
         this.nameBox.setMaxLength(48);
-        this.nameBox.setHint(Component.translatable("gui.blueprint.library.name_hint"));
+        this.nameBox.setHint(Component.translatable("gui.maidconstruction.library.name_hint"));
         this.addRenderableWidget(this.nameBox);
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.library.record"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.library.record"),
                         b -> onRecord())
                 .bounds(left + 250, toolsY, 120, 18).build());
 
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.library.refresh"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.library.refresh"),
                         b -> refresh())
                 .bounds(left + 6, y, 60, 18).build());
         // 女仆名册单开一个界面（那里画得下立绘）：这里只留一个入口，名单不再挤在这一行
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.maids.title"), b -> openRoster())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.maids.title"), b -> openRoster())
                 .bounds(left + 160, y, 60, 18).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.library.open_folder"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.library.open_folder"),
                         b -> Util.getPlatform().openFile(BlueprintTransfer.getExportDirectory().toFile()))
                 .bounds(left + 70, y, 76, 18).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.library.close"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.library.close"),
                         b -> onClose())
                 .bounds(left + WINDOW_WIDTH - 66, y, 60, 18).build());
     }
@@ -149,14 +149,14 @@ public class BlueprintLibraryScreen extends Screen {
         // 页头右上角平时显示张数，有反馈信息时让给它——这一行是界面上唯一稳定可见的空位
         boolean hasStatus = !this.status.getString().isEmpty();
         Component header = hasStatus
-                ? this.status : Component.translatable("gui.blueprint.library.count", this.entries.size());
+                ? this.status : Component.translatable("gui.maidconstruction.library.count", this.entries.size());
         graphics.drawString(this.font, header, left + WINDOW_WIDTH - 8 - this.font.width(header),
                 top + 7, hasStatus ? COLOR_TEXT : COLOR_LABEL, false);
 
         if (this.entries.isEmpty()) {
             int cy = top + WINDOW_HEIGHT / 2;
-            drawCentered(graphics, Component.translatable("gui.blueprint.library.empty"), cy - 6, COLOR_LABEL);
-            drawCentered(graphics, Component.translatable("gui.blueprint.library.empty_hint"), cy + 8, COLOR_LABEL);
+            drawCentered(graphics, Component.translatable("gui.maidconstruction.library.empty"), cy - 6, COLOR_LABEL);
+            drawCentered(graphics, Component.translatable("gui.maidconstruction.library.empty_hint"), cy + 8, COLOR_LABEL);
         } else {
             drawCards(graphics, left, top, mouseX, mouseY);
             drawPageIndicator(graphics, left, top);
@@ -212,10 +212,10 @@ public class BlueprintLibraryScreen extends Screen {
     private Component describe(BlueprintLibrary.Entry entry, Schematic schematic) {
         if (schematic == null) {
             return Component.translatable(entry.broken()
-                    ? "gui.blueprint.library.broken" : "gui.blueprint.library.loading");
+                    ? "gui.maidconstruction.library.broken" : "gui.maidconstruction.library.loading");
         }
         Vec3i size = schematic.getSize();
-        return Component.translatable("gui.blueprint.library.size",
+        return Component.translatable("gui.maidconstruction.library.size",
                 size.getX(), size.getY(), size.getZ(), schematic.countBlocks());
     }
 
@@ -229,7 +229,7 @@ public class BlueprintLibraryScreen extends Screen {
         if (pages <= visibleRows()) {
             return;
         }
-        Component text = Component.translatable("gui.blueprint.library.scroll",
+        Component text = Component.translatable("gui.maidconstruction.library.scroll",
                 this.scrollRow + 1, pages - visibleRows() + 1);
         graphics.drawString(this.font, text,
                 left + 8, top + WINDOW_HEIGHT - 15, COLOR_LABEL, false);
@@ -300,7 +300,7 @@ public class BlueprintLibraryScreen extends Screen {
 
     /**
      * 开始录制：**名字就用这个输入框**（它同时是文件名与列表里显示的名字），进世界之后
-     * 右键点两个角点，E 完成——扫出来的结构直接写进 {@code blueprints} 目录，不经过蓝图。
+     * 右键点两个角点，E 完成——扫出来的结构直接写进 {@code maidconstruction/blueprints} 目录，不经过蓝图。
      * <p>
      * 界面得先关掉：框选要一边看着建筑一边点，界面开着就看不全了。
      * 录制态**不给任何能力**：能飞、能穿墙都删掉了（前者等于给生存玩家一个免费飞行，
@@ -312,7 +312,7 @@ public class BlueprintLibraryScreen extends Screen {
     private void onRecord() {
         String name = this.nameBox.getValue().trim();
         if (name.isEmpty()) {
-            setStatus(Component.translatable("gui.blueprint.library.need_name"));
+            setStatus(Component.translatable("gui.maidconstruction.library.need_name"));
             return;
         }
         BlueprintRecordSession.start(name);

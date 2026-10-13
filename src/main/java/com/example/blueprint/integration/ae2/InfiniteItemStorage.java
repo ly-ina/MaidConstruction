@@ -78,7 +78,7 @@ public class InfiniteItemStorage implements MEStorage {
 
     @Override
     public Component getDescription() {
-        return Component.translatable("block.blueprint.creative_maid_interface");
+        return Component.translatable("block.maidconstruction.creative_maid_interface");
     }
 
     /**

@@ -197,8 +197,8 @@ public class BuildProgressHud {
         int left = Math.max(0, total - done);
         Component building = progress.name().isEmpty()
                 // 没起名就说"未命名建筑"：不显示名字的话，多工地时认不出是哪一座
-                ? Component.translatable("gui.blueprint.build_progress_unnamed", left, percent)
-                : Component.translatable("gui.blueprint.build_progress_named",
+                ? Component.translatable("gui.maidconstruction.build_progress_unnamed", left, percent)
+                : Component.translatable("gui.maidconstruction.build_progress_named",
                         progress.name(), left, percent);
         graphics.drawString(mc.font, building,
                 centerX - mc.font.width(building) / 2, y + BAR_HEIGHT + 4,

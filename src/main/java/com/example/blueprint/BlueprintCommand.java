@@ -22,16 +22,16 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /**
- * {@code /blueprint}：看她到底在干什么。
+ * {@code /maidconstruction}：看她到底在干什么。
  * <p>
  * 为什么要有它：进度条只在**站得够近**的时候画，而她可能在几百格外的另一处工地，
  * 甚至另一个维度。玩家想知道"她还在建吗、建的是哪一座、建到几成"时，缺的可能只是
  * 一个不用跑过去的办法。
  * <ul>
- *   <li>{@code /blueprint list} —— 所有在施工的女仆：谁、在哪座工地、还剩多少块；</li>
- *   <li>{@code /blueprint where} —— 离你最近的那处工地（报的是**建筑的锚点**，
+ *   <li>{@code /maidconstruction list} —— 所有在施工的女仆：谁、在哪座工地、还剩多少块；</li>
+ *   <li>{@code /maidconstruction where} —— 离你最近的那处工地（报的是**建筑的锚点**，
  *       不是她本人的位置：要定位的是建筑）；</li>
- *   <li>{@code /blueprint stop} —— 把她手上的蓝图收回来，她立刻收工、待命状态还原。</li>
+ *   <li>{@code /maidconstruction stop} —— 把她手上的蓝图收回来，她立刻收工、待命状态还原。</li>
  * </ul>
  * 这几个子命令都**只读、或者只动她自己手上那件东西**：不动世界、不动别人的东西。
  * <p>
@@ -49,7 +49,8 @@ public final class BlueprintCommand {
     @SubscribeEvent
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         // 谁都能看自己的女仆在干什么；动她手上的蓝图另判主人（见 stop）
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("blueprint")
+        // 命令名跟着 modid 走：留着旧名除了让人多记一个词，没有别的好处
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("maidconstruction")
                 .requires(source -> source.hasPermission(0))
                 .executes(context -> list(context.getSource()));
         // 一个子命令一句：这么写不用数括号，加一条也只是多一行
@@ -63,13 +64,13 @@ public final class BlueprintCommand {
     private static int list(CommandSourceStack source) {
         List<EntityMaid> maids = MaidBuildTickHandler.buildingMaids(source.getServer());
         if (maids.isEmpty()) {
-            reply(source, "command.blueprint.none");
+            reply(source, "command.maidconstruction.none");
             return 0;
         }
-        reply(source, "command.blueprint.count", maids.size());
+        reply(source, "command.maidconstruction.count", maids.size());
         for (EntityMaid maid : maids) {
             BlueprintBuildController.Snapshot snapshot = MaidBuildTickHandler.snapshotOf(maid);
-            reply(source, "command.blueprint.line",
+            reply(source, "command.maidconstruction.line",
                     maid.getDisplayName(),
                     Component.translatable(stateKey(snapshot)),
                     snapshot.total() - snapshot.done(),
@@ -82,7 +83,7 @@ public final class BlueprintCommand {
     private static int where(CommandSourceStack source) {
         EntityMaid maid = nearest(source);
         if (maid == null) {
-            reply(source, "command.blueprint.where_none", NEAR_RADIUS);
+            reply(source, "command.maidconstruction.where_none", NEAR_RADIUS);
             return 0;
         }
         BlueprintBuildController.Snapshot snapshot = MaidBuildTickHandler.snapshotOf(maid);
@@ -90,11 +91,11 @@ public final class BlueprintCommand {
         int left = snapshot.total() - snapshot.done();
         if (anchor == null) {
             // 没有原点就没法"定位"：直说她缺什么，比报一串空坐标有用
-            reply(source, "command.blueprint.where_no_anchor", maid.getDisplayName(), left);
+            reply(source, "command.maidconstruction.where_no_anchor", maid.getDisplayName(), left);
             return 1;
         }
         int away = (int) Math.round(Math.sqrt(source.getPosition().distanceTo(anchor.getCenter())));
-        reply(source, "command.blueprint.where_line",
+        reply(source, "command.maidconstruction.where_line",
                 maid.getDisplayName(), site(source, maid, anchor), away, left);
         return 1;
     }
@@ -109,29 +110,29 @@ public final class BlueprintCommand {
     private static int stop(CommandSourceStack source) {
         ServerPlayer player = source.getPlayer();
         if (player == null) {
-            reply(source, "command.blueprint.stop_player_only");
+            reply(source, "command.maidconstruction.stop_player_only");
             return 0;
         }
         EntityMaid maid = nearest(source);
         if (maid == null) {
-            reply(source, "command.blueprint.stop_none", NEAR_RADIUS);
+            reply(source, "command.maidconstruction.stop_none", NEAR_RADIUS);
             return 0;
         }
         if (maid.getOwner() != player) {
-            reply(source, "command.blueprint.stop_not_owner", maid.getDisplayName());
+            reply(source, "command.maidconstruction.stop_not_owner", maid.getDisplayName());
             return 0;
         }
         ItemStack taken = takeBlueprint(maid);
         if (taken.isEmpty()) {
-            reply(source, "command.blueprint.stop_nothing", maid.getDisplayName());
+            reply(source, "command.maidconstruction.stop_nothing", maid.getDisplayName());
             return 0;
         }
         // 还给她主人；装不下就丢在**他**脚边（不外送：蓝图是玩家的东西，掉在远处等于弄丢）
         if (player.getInventory().add(taken)) {
-            reply(source, "command.blueprint.stop_done", maid.getDisplayName());
+            reply(source, "command.maidconstruction.stop_done", maid.getDisplayName());
         } else {
             player.drop(taken, false);
-            reply(source, "command.blueprint.stop_dropped", maid.getDisplayName());
+            reply(source, "command.maidconstruction.stop_dropped", maid.getDisplayName());
         }
         return 1;
     }
@@ -180,16 +181,16 @@ public final class BlueprintCommand {
     /** 她在干什么：沿用进度条那几条译文，不再造一套同义的说法 */
     private static String stateKey(BlueprintBuildController.Snapshot snapshot) {
         return switch (snapshot.state()) {
-            case "FETCH" -> "hud.blueprint.maid_phase.fetch";
-            case "MOVE_TO_SPOT" -> "hud.blueprint.maid_phase.walk";
-            default -> "hud.blueprint.maid_phase.build";
+            case "FETCH" -> "hud.maidconstruction.maid_phase.fetch";
+            case "MOVE_TO_SPOT" -> "hud.maidconstruction.maid_phase.walk";
+            default -> "hud.maidconstruction.maid_phase.build";
         };
     }
 
     /** 工地位置：同一个维度只报坐标，别的维度把维度名也带上（不然那串数字没法用） */
     private static Component site(CommandSourceStack source, EntityMaid maid, @Nullable BlockPos anchor) {
         if (anchor == null) {
-            return Component.translatable("command.blueprint.no_anchor");
+            return Component.translatable("command.maidconstruction.no_anchor");
         }
         String coords = anchor.getX() + " " + anchor.getY() + " " + anchor.getZ();
         if (maid.level().dimension().equals(source.getLevel().dimension())) {

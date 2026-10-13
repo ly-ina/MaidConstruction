@@ -38,7 +38,7 @@ import javax.annotation.Nullable;
 import java.util.UUID;
 
 /**
- * 录制态（客户端这一半）：在世界里框选一座建筑，**录成 {@code blueprints} 目录里的一份图纸**。
+ * 录制态（客户端这一半）：在世界里框选一座建筑，**录成 {@code maidconstruction/blueprints} 目录里的一份图纸**。
  * <p>
  * 从图纸库界面点「录制」进来，退出有三条路：
  * <ul>
@@ -205,7 +205,7 @@ public final class BlueprintRecordSession {
     }
 
     /**
-     * 完成录制：服务端扫描，扫出来的结构**直接写进 {@code blueprints} 目录**。
+     * 完成录制：服务端扫描，扫出来的结构**直接写进 {@code maidconstruction/blueprints} 目录**。
      * <p>
      * 不经过蓝图：蓝图在这条路上只是"以后把某一份取到手上"的容器，
      * 而录制是"往目录里录一份"——先占住手上那张纸再让玩家去导出，中间那一步没有意义。
@@ -220,7 +220,7 @@ public final class BlueprintRecordSession {
             return;
         }
         if (corner1 == null || corner2 == null) {
-            flash("gui.blueprint.record.need_two_corners");
+            flash("gui.maidconstruction.record.need_two_corners");
             return;
         }
 
@@ -236,7 +236,7 @@ public final class BlueprintRecordSession {
             return;
         }
         if (projectAnchor == null) {
-            flash("gui.blueprint.project.need_anchor");
+            flash("gui.maidconstruction.project.need_anchor");
             return;
         }
         ModNetwork.CHANNEL.sendToServer(C2SCommandPostProjectionPacket.place(
@@ -609,23 +609,23 @@ public final class BlueprintRecordSession {
             return;
         }
 
-        String title = Component.translatable("gui.blueprint.record.title",
-                name.isEmpty() ? Component.translatable("tooltip.blueprint.unnamed").getString() : name).getString();
+        String title = Component.translatable("gui.maidconstruction.record.title",
+                name.isEmpty() ? Component.translatable("tooltip.maidconstruction.unnamed").getString() : name).getString();
         // 名字是玩家自己填的（最长 48 字），太长就把这一行截短——宁可少看几个字，
         // 也别让整块提示被屏幕右边缘切掉
         title = mc.font.plainSubstrByWidth(title, Math.max(40, screenWidth - 32));
 
         String hint = corner1 == null
-                ? Component.translatable("gui.blueprint.record.pick_first").getString()
+                ? Component.translatable("gui.maidconstruction.record.pick_first").getString()
                 : corner2 == null
-                ? Component.translatable("gui.blueprint.record.pick_second").getString()
-                : Component.translatable("gui.blueprint.record.size",
+                ? Component.translatable("gui.maidconstruction.record.pick_second").getString()
+                : Component.translatable("gui.maidconstruction.record.size",
                         boxSize(1), boxSize(0), boxSize(2), boxVolume()).getString();
 
         // 按键提示分两行：一整行写全曾经长到被屏幕切掉，而按键是录制时最常看的一行，
         // 宁可多占一行高度，也不能让它读不全
-        String nudge = Component.translatable("gui.blueprint.record.keys_nudge").getString();
-        String action = Component.translatable("gui.blueprint.record.keys_action").getString();
+        String nudge = Component.translatable("gui.maidconstruction.record.keys_nudge").getString();
+        String action = Component.translatable("gui.maidconstruction.record.keys_action").getString();
 
         int width = Math.max(Math.max(mc.font.width(title), mc.font.width(hint)),
                 Math.max(mc.font.width(nudge), mc.font.width(action))) + 8;
@@ -639,21 +639,21 @@ public final class BlueprintRecordSession {
 
     /** 投影定位态的屏幕提示：托的是哪张图、位置选了没有、当前朝向、按键 */
     private static void drawProjectionHud(GuiGraphics graphics, int screenWidth) {
-        String title = Component.translatable("gui.blueprint.project.title",
+        String title = Component.translatable("gui.maidconstruction.project.title",
                 projectName.isEmpty()
-                        ? Component.translatable("tooltip.blueprint.unnamed").getString() : projectName).getString();
+                        ? Component.translatable("tooltip.maidconstruction.unnamed").getString() : projectName).getString();
         title = mc.font.plainSubstrByWidth(title, Math.max(40, screenWidth - 32));
 
         String hint = projectAnchor == null
-                ? Component.translatable("gui.blueprint.project.pick").getString()
-                : Component.translatable("gui.blueprint.project.at",
+                ? Component.translatable("gui.maidconstruction.project.pick").getString()
+                : Component.translatable("gui.maidconstruction.project.at",
                         projectAnchor.getX(), projectAnchor.getY(), projectAnchor.getZ()).getString();
-        String facing = Component.translatable("gui.blueprint.project.facing",
+        String facing = Component.translatable("gui.maidconstruction.project.facing",
                 (projectRotation.ordinal() * 90) + "°",
                 Component.translatable(projectMirror == Mirror.NONE
-                                ? "gui.blueprint.project.mirror_off" : "gui.blueprint.project.mirror_on")
+                                ? "gui.maidconstruction.project.mirror_off" : "gui.maidconstruction.project.mirror_on")
                         .getString()).getString();
-        String keys = Component.translatable("gui.blueprint.project.keys").getString();
+        String keys = Component.translatable("gui.maidconstruction.project.keys").getString();
 
         int width = Math.max(Math.max(mc.font.width(title), mc.font.width(hint)),
                 Math.max(mc.font.width(facing), mc.font.width(keys))) + 8;

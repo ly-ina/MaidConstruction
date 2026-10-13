@@ -135,18 +135,18 @@ public final class CommandPostProjections {
      */
     public static Component stateText(CommandPostBlockEntity post) {
         if (post.getSchematicId() == null) {
-            return Component.translatable("gui.blueprint.post.state.none");
+            return Component.translatable("gui.maidconstruction.post.state.none");
         }
         if (post.isCompleted()) {
-            return Component.translatable("gui.blueprint.post.state.done");
+            return Component.translatable("gui.maidconstruction.post.state.done");
         }
         if (!post.isStarted()) {
-            return Component.translatable("gui.blueprint.post.state.standby");
+            return Component.translatable("gui.maidconstruction.post.state.standby");
         }
         if (post.isPaused()) {
-            return Component.translatable("gui.blueprint.post.state.paused");
+            return Component.translatable("gui.maidconstruction.post.state.paused");
         }
-        return Component.translatable("gui.blueprint.post.state.building");
+        return Component.translatable("gui.maidconstruction.post.state.building");
     }
 
     /** 与 {@link #stateText} 配套的颜色：没投影灰、待命黄、在建绿、完工青、暂停橙 */

@@ -66,11 +66,11 @@ public class MaidStudyTask implements IMaidTask {
 
     @Override
     public MutableComponent getName() {
-        return Component.translatable("task.blueprint.study");
+        return Component.translatable("task.maidconstruction.study");
     }
 
     @Override
     public List<String> getDescription(EntityMaid maid) {
-        return List.of("task.blueprint.study.desc");
+        return List.of("task.maidconstruction.study.desc");
     }
 }

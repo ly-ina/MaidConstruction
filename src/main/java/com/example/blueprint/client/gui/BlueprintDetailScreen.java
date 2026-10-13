@@ -142,22 +142,22 @@ public class BlueprintDetailScreen extends Screen {
 
         int buttonX = left + WINDOW_WIDTH - BUTTON_WIDTH - 6;
         int y = top + HEADER_HEIGHT + 6;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.detail.take"), b -> onTake())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.detail.take"), b -> onTake())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
         // 「投影」紧随"取到手上"：两件事都是"把这份图纸用起来"，一个进她/我的手上，一个进指挥台
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.detail.project"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.detail.project"),
                         b -> onProject())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.library.open_folder"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.library.open_folder"),
                         b -> Util.getPlatform().openFile(BlueprintTransfer.getExportDirectory().toFile()))
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.detail.delete"), b -> onDelete())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.detail.delete"), b -> onDelete())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 30;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.detail.back"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.detail.back"),
                         b -> Minecraft.getInstance().setScreen(new BlueprintLibraryScreen()))
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
     }
@@ -173,7 +173,7 @@ public class BlueprintDetailScreen extends Screen {
         drawTitle(graphics, left, top);
 
         if (this.schematic == null) {
-            graphics.drawCenteredString(this.font, Component.translatable("gui.blueprint.detail.broken"),
+            graphics.drawCenteredString(this.font, Component.translatable("gui.maidconstruction.detail.broken"),
                     left + WINDOW_WIDTH / 2, top + WINDOW_HEIGHT / 2, COLOR_WARN);
         } else {
             drawPreview(graphics, left, top);
@@ -195,7 +195,7 @@ public class BlueprintDetailScreen extends Screen {
             return;
         }
         Vec3i size = this.schematic.getSize();
-        Component detail = Component.translatable("gui.blueprint.library.size",
+        Component detail = Component.translatable("gui.maidconstruction.library.size",
                 size.getX(), size.getY(), size.getZ(), this.schematic.countBlocks());
         graphics.drawString(this.font, detail,
                 left + WINDOW_WIDTH - 8 - this.font.width(detail), top + 7, COLOR_LABEL, false);
@@ -215,7 +215,7 @@ public class BlueprintDetailScreen extends Screen {
 
     private void drawList(GuiGraphics graphics) {
         graphics.drawString(this.font,
-                Component.translatable("gui.blueprint.detail.materials", this.rows.size(), countMaterials()),
+                Component.translatable("gui.maidconstruction.detail.materials", this.rows.size(), countMaterials()),
                 this.listX, this.listY - 10, COLOR_LABEL, false);
 
         graphics.enableScissor(this.listX, this.listY, this.listX + this.listWidth, this.listY + this.listHeight);
@@ -234,7 +234,7 @@ public class BlueprintDetailScreen extends Screen {
 
         if (this.rows.size() > visibleRows()) {
             graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.detail.position",
+                    Component.translatable("gui.maidconstruction.detail.position",
                             this.scrollRow + 1,
                             Math.min(this.rows.size(), this.scrollRow + visibleRows()),
                             this.rows.size()),
@@ -243,7 +243,7 @@ public class BlueprintDetailScreen extends Screen {
         if (this.plainBlocks > 0) {
             graphics.drawString(this.font,
                     this.font.plainSubstrByWidth(
-                            Component.translatable("gui.blueprint.materials.plain", this.plainBlocks).getString(),
+                            Component.translatable("gui.maidconstruction.materials.plain", this.plainBlocks).getString(),
                             this.listWidth),
                     this.listX, this.listY + this.listHeight + 12, COLOR_LABEL, false);
         }
@@ -255,7 +255,7 @@ public class BlueprintDetailScreen extends Screen {
             return "×" + count;
         }
         return "×" + count + "  "
-                + Component.translatable("gui.blueprint.detail.stack_pair", count / 64, count % 64).getString();
+                + Component.translatable("gui.maidconstruction.detail.stack_pair", count / 64, count % 64).getString();
     }
 
     private int countMaterials() {
@@ -347,15 +347,15 @@ public class BlueprintDetailScreen extends Screen {
             return;
         }
         if (!BlueprintItem.hasBlank(player)) {
-            setStatus(Component.translatable("gui.blueprint.detail.take_hint"), COLOR_WARN);
+            setStatus(Component.translatable("gui.maidconstruction.detail.take_hint"), COLOR_WARN);
             return;
         }
         try {
             byte[] data = Files.readAllBytes(this.entry.path());
             ModNetwork.CHANNEL.sendToServer(new C2SImportBlueprintPacket(data, this.entry.name()));
-            setStatus(Component.translatable("gui.blueprint.detail.take_sent"), COLOR_STATUS);
+            setStatus(Component.translatable("gui.maidconstruction.detail.take_sent"), COLOR_STATUS);
         } catch (IOException e) {
-            setStatus(Component.translatable("gui.blueprint.detail.broken"), COLOR_WARN);
+            setStatus(Component.translatable("gui.maidconstruction.detail.broken"), COLOR_WARN);
         }
     }
 
@@ -379,7 +379,7 @@ public class BlueprintDetailScreen extends Screen {
                 ? this.targetPost
                 : CommandPostProjections.nearestMine(player.blockPosition(), player.getUUID());
         if (target == null) {
-            setStatus(Component.translatable("gui.blueprint.detail.no_post"), COLOR_WARN);
+            setStatus(Component.translatable("gui.maidconstruction.detail.no_post"), COLOR_WARN);
             return;
         }
         try {
@@ -387,14 +387,14 @@ public class BlueprintDetailScreen extends Screen {
             BlueprintRecordSession.startProjection(target, this.entry.name(), data);
             this.onClose();
         } catch (IOException e) {
-            setStatus(Component.translatable("gui.blueprint.detail.broken"), COLOR_WARN);
+            setStatus(Component.translatable("gui.maidconstruction.detail.broken"), COLOR_WARN);
         }
     }
 
     private void onDelete() {
         if (!this.deleteArmed) {
             this.deleteArmed = true;
-            setStatus(Component.translatable("gui.blueprint.detail.delete_confirm"), COLOR_WARN);
+            setStatus(Component.translatable("gui.maidconstruction.detail.delete_confirm"), COLOR_WARN);
             return;
         }
         try {
@@ -404,7 +404,7 @@ public class BlueprintDetailScreen extends Screen {
             Minecraft.getInstance().setScreen(new BlueprintLibraryScreen());
         } catch (IOException e) {
             this.deleteArmed = false;
-            setStatus(Component.translatable("gui.blueprint.detail.delete_failed"), COLOR_WARN);
+            setStatus(Component.translatable("gui.maidconstruction.detail.delete_failed"), COLOR_WARN);
         }
     }
 

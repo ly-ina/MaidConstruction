@@ -57,7 +57,7 @@ public class C2SCapturePacket {
             }
 
             if (BlueprintItem.hasSchematic(stack)) {
-                player.sendSystemMessage(Component.translatable("message.blueprint.already_has_schematic"));
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.already_has_schematic"));
                 return;
             }
 
@@ -72,15 +72,15 @@ public class C2SCapturePacket {
                         PacketDistributor.PLAYER.with(() -> player),
                         new S2CSchematicDataPacket(id, msg.name, schematic.write(new CompoundTag())));
 
-                player.sendSystemMessage(Component.translatable("message.blueprint.captured",
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.captured",
                         schematic.getWidth(), schematic.getHeight(), schematic.getLength(),
                         countBlocks(schematic)));
             } catch (IllegalStateException e) {
                 player.sendSystemMessage(Component.translatable(e.getMessage() == null
-                        ? "message.blueprint.capture_failed" : e.getMessage()));
+                        ? "message.maidconstruction.capture_failed" : e.getMessage()));
             } catch (Exception e) {
                 com.example.blueprint.BlueprintMod.LOGGER.error("蓝图扫描失败", e);
-                player.sendSystemMessage(Component.translatable("message.blueprint.capture_failed"));
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.capture_failed"));
             }
         });
         context.setPacketHandled(true);

@@ -73,7 +73,7 @@ public class BlueprintBuildController {
     private enum State { MOVE_TO_SPOT, BUILD, FETCH }
 
     /**
-     * 一眼状态：给 {@code /blueprint} 命令看的（也方便以后做别的只读界面）。
+     * 一眼状态：给 {@code /maidconstruction} 命令看的（也方便以后做别的只读界面）。
      * <p>
      * 只报**事实**（在不在投影里、建到几成、站在哪、状态名），不做翻译——
      * 译文由命令那边查，语言跟着玩家的客户端走。
@@ -387,17 +387,17 @@ public class BlueprintBuildController {
         } else {
             if (!BlueprintItem.isMaidBuildEnabled(stack)) {
                 setWorkingHomeMode(maid, false);
-                notify(level, maid, "message.blueprint.maid_forbidden");
+                notify(level, maid, "message.maidconstruction.maid_forbidden");
                 return;
             }
             if (!MaidBlueprint.hasSchematic(stack)) {
                 setWorkingHomeMode(maid, false);
-                notify(level, maid, "message.blueprint.maid_empty_blueprint");
+                notify(level, maid, "message.maidconstruction.maid_empty_blueprint");
                 return;
             }
             if (!MaidBlueprint.hasAnchor(stack)) {
                 setWorkingHomeMode(maid, false);
-                notify(level, maid, "message.blueprint.maid_no_anchor");
+                notify(level, maid, "message.maidconstruction.maid_no_anchor");
                 return;
             }
 
@@ -407,9 +407,9 @@ public class BlueprintBuildController {
                 // 机械动力那张读不出来时把原因说清楚：光一句"找不到结构"，
                 // 玩家没法动手改（文件名没写？文件没上传？还是文件坏了？）
                 if (MaidBlueprint.isCreate(stack)) {
-                    notify(level, maid, "message.blueprint.maid_create_unreadable", MaidBlueprint.problem());
+                    notify(level, maid, "message.maidconstruction.maid_create_unreadable", MaidBlueprint.problem());
                 } else {
-                    notify(level, maid, "message.blueprint.maid_no_schematic");
+                    notify(level, maid, "message.maidconstruction.maid_no_schematic");
                 }
                 return;
             }
@@ -468,7 +468,7 @@ public class BlueprintBuildController {
         // 工地中途被人拆了几块怎么办：重新定位或改朝向会清掉完工标记，她会从头再走一遍。
         if (session == null) {
             setWorkingHomeMode(maid, false);
-            notify(level, maid, "message.blueprint.maid_no_schematic");
+            notify(level, maid, "message.maidconstruction.maid_no_schematic");
             return;
         }
 
@@ -721,12 +721,12 @@ public class BlueprintBuildController {
             if (leftover > 0) {
                 BlueprintMod.LOGGER.info("女仆 {} 完工，但有 {} 块放不下（缺支撑或位置被占）",
                         maid.getUUID(), leftover);
-                notify(level, maid, "message.blueprint.maid_build_leftover", leftover);
+                notify(level, maid, "message.maidconstruction.maid_build_leftover", leftover);
                 // 紧跟一句"挡路的是什么、在哪"。这里不走 notify：那条路上的 30 秒冷却
                 // 会把第二句直接吞掉，而这两句本来是一起说的
-                sayTo(level, maid, "message.blueprint.maid_blocked_list", describeBlocked(maid));
+                sayTo(level, maid, "message.maidconstruction.maid_blocked_list", describeBlocked(maid));
             } else {
-                notify(level, maid, "message.blueprint.maid_build_done");
+                notify(level, maid, "message.maidconstruction.maid_build_done");
             }
         }
         // 最后推一次进度。之后靠客户端的时效自己消失——不需要再补一条"结束了"
@@ -755,11 +755,11 @@ public class BlueprintBuildController {
             if (leftover > 0) {
                 BlueprintMod.LOGGER.info("女仆 {} 完工，但有 {} 块放不下（缺支撑或位置被占）",
                         maid.getUUID(), leftover);
-                notify(level, maid, "message.blueprint.maid_build_leftover", leftover);
+                notify(level, maid, "message.maidconstruction.maid_build_leftover", leftover);
                 // 紧跟一句"挡路的是什么、在哪"：不走 notify 是因为那条路上的 30 秒冷却会把第二句吞掉
-                sayTo(level, maid, "message.blueprint.maid_blocked_list", describeBlocked(maid));
+                sayTo(level, maid, "message.maidconstruction.maid_blocked_list", describeBlocked(maid));
             } else {
-                notify(level, maid, "message.blueprint.maid_build_done");
+                notify(level, maid, "message.maidconstruction.maid_build_done");
             }
         }
         // 最后推一次进度。她手上没有蓝图，这一条拿不到建筑名（指挥台界面上另有那份名字）
@@ -1505,12 +1505,12 @@ public class BlueprintBuildController {
 
         @Override
         public void cannotHarvest(ServerLevel level, BlockPos pos, BlockState state) {
-            reportUnremovable(level, pos, state, "need_tool", "message.blueprint.maid_need_tool");
+            reportUnremovable(level, pos, state, "need_tool", "message.maidconstruction.maid_need_tool");
         }
 
         @Override
         public void unbreakable(ServerLevel level, BlockPos pos, BlockState state) {
-            reportUnremovable(level, pos, state, "unbreakable", "message.blueprint.maid_unbreakable");
+            reportUnremovable(level, pos, state, "unbreakable", "message.maidconstruction.maid_unbreakable");
         }
 
         /**
@@ -1802,7 +1802,7 @@ public class BlueprintBuildController {
         ResourceLocation dimension = BindingBookItem.getBoundDimension(book);
         if (dimension != null && !dimension.equals(level.dimension().location())) {
             // 隔着维度走不过去。多半是玩家忘了，提示一句总比杵着不动强
-            notify(level, maid, "message.blueprint.maid_bound_other_dimension");
+            notify(level, maid, "message.maidconstruction.maid_bound_other_dimension");
             return null;
         }
 
@@ -1817,7 +1817,7 @@ public class BlueprintBuildController {
         // 坐标还在，但里面已经没有需要的材料了。
         // 走 sayTo 而不是 notify：缺料提示自己有闸门，不该再被 30 秒冷却挤掉
         if (shouldReportShortfall("bound_empty", shortfall)) {
-            sayTo(level, maid, "message.blueprint.maid_bound_empty", describeShortfall());
+            sayTo(level, maid, "message.maidconstruction.maid_bound_empty", describeShortfall());
         }
         return null;
     }
@@ -1901,7 +1901,7 @@ public class BlueprintBuildController {
     private void pullFromProvider(ServerLevel level, EntityMaid maid, ItemProvider provider) {
         IItemHandler backpack = new MaidItemSource(maid).getBackpack();
         if (backpack == null) {
-            notify(level, maid, "message.blueprint.maid_no_backpack");
+            notify(level, maid, "message.maidconstruction.maid_no_backpack");
             return;
         }
 
@@ -1930,8 +1930,8 @@ public class BlueprintBuildController {
             String kind = hasWanted ? "backpack_full" : "source_empty";
             if (shouldReportShortfall(kind, shortfall)) {
                 sayTo(level, maid, hasWanted
-                        ? "message.blueprint.maid_backpack_full"
-                        : "message.blueprint.maid_source_empty", describeShortfall());
+                        ? "message.maidconstruction.maid_backpack_full"
+                        : "message.maidconstruction.maid_source_empty", describeShortfall());
             }
         } else {
             BlueprintMod.LOGGER.info("女仆 {} 从 {} 取到 {} 种材料", maid.getUUID(), pos, moved);
@@ -1970,7 +1970,7 @@ public class BlueprintBuildController {
         // 也必须有个了结。收工那一步排在还料之后，一直还不上，
         // 女仆就会永远停在"施工中"，待命状态也还不回来
         if (++returnTicks > RETURN_TIMEOUT) {
-            notify(level, maid, "message.blueprint.maid_return_failed");
+            notify(level, maid, "message.maidconstruction.maid_return_failed");
             returnProvider = null;
             returnTicks = 0;
             returnFinished = true;
@@ -1980,7 +1980,7 @@ public class BlueprintBuildController {
         if (returnProvider == null) {
             returnProvider = findReturnTarget(level, maid);
             if (returnProvider == null) {
-                notify(level, maid, "message.blueprint.maid_return_no_target");
+                notify(level, maid, "message.maidconstruction.maid_return_no_target");
                 returnFinished = true;
                 return false;
             }
@@ -2002,7 +2002,7 @@ public class BlueprintBuildController {
                     return true;
                 }
                 if (horizontalSqr > ABORT_DISTANCE_SQR) {
-                    notify(level, maid, "message.blueprint.maid_return_unreachable");
+                    notify(level, maid, "message.maidconstruction.maid_return_unreachable");
                     returnProvider = null;
                     returnFinished = true;
                     return false;
@@ -2026,7 +2026,7 @@ public class BlueprintBuildController {
 
         if (moved == 0) {
             // 一种都塞不回去（多半是容器满了），再试只会原地打转
-            notify(level, maid, "message.blueprint.maid_return_failed");
+            notify(level, maid, "message.maidconstruction.maid_return_failed");
             returnFinished = true;
             return false;
         }
@@ -2443,7 +2443,7 @@ public class BlueprintBuildController {
         if (!shouldReportShortfall("no-network", shortfall)) {
             return;
         }
-        notify(level, maid, "message.blueprint.maid_terminal_offline");
+        notify(level, maid, "message.maidconstruction.maid_terminal_offline");
     }
 
     private void notifyMissingMaterials(ServerLevel level, EntityMaid maid) {
@@ -2460,12 +2460,12 @@ public class BlueprintBuildController {
         }
 
         if (shortfall.isEmpty()) {
-            sayTo(level, maid, "message.blueprint.maid_no_material");
+            sayTo(level, maid, "message.maidconstruction.maid_no_material");
             return;
         }
 
         BlueprintMod.LOGGER.info("女仆 {} 缺少建造材料：{}", maid.getUUID(), shortfall);
-        sayTo(level, maid, "message.blueprint.maid_missing_materials", describeShortfall());
+        sayTo(level, maid, "message.maidconstruction.maid_missing_materials", describeShortfall());
     }
 
     /**
@@ -2566,7 +2566,7 @@ public class BlueprintBuildController {
                     .append(String.valueOf(entry.getValue()));
         }
         if (shortfall.size() > MAX_REPORTED_MATERIALS) {
-            list.append(Component.translatable("message.blueprint.maid_missing_more",
+            list.append(Component.translatable("message.maidconstruction.maid_missing_more",
                     shortfall.size() - MAX_REPORTED_MATERIALS));
         }
         return list;
@@ -2593,7 +2593,7 @@ public class BlueprintBuildController {
                 list.append(Component.literal("、"));
             }
             list.append(here.isAir()
-                    ? Component.translatable("message.blueprint.blocked_no_support")
+                    ? Component.translatable("message.maidconstruction.blocked_no_support")
                     : here.getBlock().getName());
             list.append(Component.literal(" (" + world.getX() + ", " + world.getY() + ", " + world.getZ() + ")"));
             shown++;

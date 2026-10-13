@@ -83,7 +83,7 @@ public class CreativeMaidInterfaceBlock extends Block implements EntityBlock {
         // 所以只把"AE 那一半现在不工作"提示一下，界面照开
         if (!creative.isNetworkReady()) {
             serverPlayer.displayClientMessage(
-                    Component.translatable("message.blueprint.creative_interface_offline"), true);
+                    Component.translatable("message.maidconstruction.creative_interface_offline"), true);
         }
 
         MenuOpener.open(MEStorageMenu.TYPE, serverPlayer, MenuLocators.forBlockEntity(creative));

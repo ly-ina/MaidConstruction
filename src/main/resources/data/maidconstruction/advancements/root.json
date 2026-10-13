@@ -4,10 +4,10 @@
       "item": "maidconstruction:blueprint"
     },
     "title": {
-      "translate": "advancements.blueprint.root.title"
+      "translate": "advancements.maidconstruction.root.title"
     },
     "description": {
-      "translate": "advancements.blueprint.root.description"
+      "translate": "advancements.maidconstruction.root.description"
     },
     "frame": "task",
     "background": "minecraft:textures/gui/advancements/backgrounds/stone.png",

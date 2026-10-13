@@ -6,7 +6,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import java.util.List;
 
 /**
- * 模组的行为开关，落在 {@code config/blueprint-common.toml}。
+ * 模组的行为开关，落在 {@code config/maidconstruction-common.toml}。
  * <p>
  * 用 COMMON 而不是 SERVER：这些开关几乎都同时管着两边的表现——女仆干不干活是服务端的事，
  * 投影、进度条、队列界面是客户端的事，而"作息算不算数"这种还得让界面能提前知道，
@@ -54,7 +54,7 @@ public final class BlueprintConfig {
     private static final boolean DEF_ALLOW_HARD_MOVE = true;
     private static final boolean DEF_GIVE_GUIDE_BOOK = true;
     private static final String DEF_CREATIVE_ITEM_MODE = "blocks";
-    /** 创造女仆接口可以列出的范围（{@code blueprint-common.toml} 里那一项的取值） */
+    /** 创造女仆接口可以列出的范围（{@code maidconstruction-common.toml} 里那一项的取值） */
     private static final List<String> CREATIVE_ITEM_MODES = List.of("blocks", "all");
 
     static {

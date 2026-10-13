@@ -54,7 +54,7 @@ public class ManualScreen extends Screen {
     }
 
     public ManualScreen() {
-        super(Component.translatable("gui.blueprint.manual.title"));
+        super(Component.translatable("gui.maidconstruction.manual.title"));
         for (String key : ManualItem.PAGES) {
             entries.add(new Entry(key, labelOf(Component.translatable(key).getString())));
         }
@@ -76,7 +76,7 @@ public class ManualScreen extends Screen {
     protected void init() {
         int left = (this.width - WINDOW_WIDTH) / 2;
         int top = (this.height - WINDOW_HEIGHT) / 2;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.manual.close"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.manual.close"),
                         b -> onClose())
                 .bounds(left + WINDOW_WIDTH - 66, top + WINDOW_HEIGHT - 22, 60, 18).build());
         rewrap();
@@ -133,14 +133,14 @@ public class ManualScreen extends Screen {
 
         // 页头：书名 + 目录两个字，右边写"第几章"
         graphics.drawString(this.font, this.title, left + 8, top + 8, COLOR_TEXT, false);
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.manual.toc"),
+        graphics.drawString(this.font, Component.translatable("gui.maidconstruction.manual.toc"),
                 left + 18, top + HEADER + 2, COLOR_LABEL, false);
-        Component page = Component.translatable("gui.blueprint.manual.chapter",
+        Component page = Component.translatable("gui.maidconstruction.manual.chapter",
                 this.selected + 1, this.entries.size());
         graphics.drawString(this.font, page,
                 left + WINDOW_WIDTH - 8 - this.font.width(page), top + 8, COLOR_LABEL, false);
         // 页脚左边那行操作提示
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.manual.hint"),
+        graphics.drawString(this.font, Component.translatable("gui.maidconstruction.manual.hint"),
                 left + 8, top + WINDOW_HEIGHT - 17, COLOR_DIM, false);
 
         drawToc(graphics, left, top, mouseX, mouseY);
@@ -180,7 +180,7 @@ public class ManualScreen extends Screen {
         }
         // 还有下文时，右下角写一句，免得玩家以为就这么多
         if (this.scroll < maxScroll()) {
-            Component more = Component.translatable("gui.blueprint.manual.more",
+            Component more = Component.translatable("gui.maidconstruction.manual.more",
                     this.scroll + visibleLines(), this.bodyLines.size());
             graphics.drawString(this.font, more,
                     left + WINDOW_WIDTH - 8 - this.font.width(more),

@@ -102,7 +102,7 @@ public class WirelessMaidTerminalItem extends WirelessTerminalItem {
             if (!level.isClientSide) {
                 WirelessMaidLink.unlink(stack);
                 player.displayClientMessage(
-                        Component.translatable("message.blueprint.wireless_unbound"), true);
+                        Component.translatable("message.maidconstruction.wireless_unbound"), true);
             }
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
         }
@@ -235,16 +235,16 @@ public class WirelessMaidTerminalItem extends WirelessTerminalItem {
         super.appendHoverText(stack, level, tooltip, flag);
         GlobalPos linked = WirelessMaidLink.linkedPosition(stack);
         tooltip.add(linked == null
-                ? Component.translatable("tooltip.blueprint.wireless_unbound")
-                : Component.translatable("tooltip.blueprint.wireless_bound",
+                ? Component.translatable("tooltip.maidconstruction.wireless_unbound")
+                : Component.translatable("tooltip.maidconstruction.wireless_bound",
                         linked.dimension().location().toString(),
                         linked.pos().getX(), linked.pos().getY(), linked.pos().getZ()));
         if (WirelessMaidLink.hasBindingCard(stack)) {
-            tooltip.add(Component.translatable("tooltip.blueprint.wireless_card_installed"));
+            tooltip.add(Component.translatable("tooltip.maidconstruction.wireless_card_installed"));
         }
-        tooltip.add(Component.translatable("tooltip.blueprint.wireless_hint_open"));
-        tooltip.add(Component.translatable("tooltip.blueprint.wireless_hint_bind"));
-        tooltip.add(Component.translatable("tooltip.blueprint.wireless_hint_unbind"));
-        tooltip.add(Component.translatable("tooltip.blueprint.wireless_maid"));
+        tooltip.add(Component.translatable("tooltip.maidconstruction.wireless_hint_open"));
+        tooltip.add(Component.translatable("tooltip.maidconstruction.wireless_hint_bind"));
+        tooltip.add(Component.translatable("tooltip.maidconstruction.wireless_hint_unbind"));
+        tooltip.add(Component.translatable("tooltip.maidconstruction.wireless_maid"));
     }
 }

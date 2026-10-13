@@ -56,28 +56,28 @@ public class C2SBindCommandPostPacket {
             }
             BlockEntity be = level.getBlockEntity(msg.pos);
             if (!(be instanceof CommandPostBlockEntity post)) {
-                player.sendSystemMessage(Component.translatable("gui.blueprint.post.missing"));
+                player.sendSystemMessage(Component.translatable("gui.maidconstruction.post.missing"));
                 return;
             }
 
             if (msg.unbind) {
                 if (post.isBoundTo(player.getUUID())) {
                     post.unbind();
-                    player.sendSystemMessage(Component.translatable("message.blueprint.post.unbound"));
+                    player.sendSystemMessage(Component.translatable("message.maidconstruction.post.unbound"));
                 } else {
-                    player.sendSystemMessage(Component.translatable("message.blueprint.post.not_yours"));
+                    player.sendSystemMessage(Component.translatable("message.maidconstruction.post.not_yours"));
                 }
                 return;
             }
 
             if (post.getOwner() == null) {
                 post.bind(player.getUUID(), player.getGameProfile().getName());
-                player.sendSystemMessage(Component.translatable("message.blueprint.post.bound",
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.bound",
                         player.getGameProfile().getName()));
             } else if (post.isBoundTo(player.getUUID())) {
-                player.sendSystemMessage(Component.translatable("message.blueprint.post.already_yours"));
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.already_yours"));
             } else {
-                player.sendSystemMessage(Component.translatable("message.blueprint.post.taken",
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.taken",
                         post.getOwnerName()));
             }
         });

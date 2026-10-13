@@ -22,7 +22,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /**
- * 蓝图终端：把 {@code blueprints} 目录里的建筑当图纸库翻。
+ * 蓝图终端：把 {@code maidconstruction/blueprints} 目录里的建筑当图纸库翻。
  * <p>
  * 与蓝图本身分开的理由：蓝图是"手上的那一张图"（录制、定位、交给女仆都围着它转），
  * 而终端看的是**目录**——浏览、比较、把某一份取到手上。两件事的生命周期不一样，
@@ -83,6 +83,6 @@ public class BlueprintTerminalItem extends Item {
 
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
-        tooltip.add(Component.translatable("tooltip.blueprint.terminal"));
+        tooltip.add(Component.translatable("tooltip.maidconstruction.terminal"));
     }
 }

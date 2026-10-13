@@ -9,7 +9,7 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.function.Supplier;
 
 /**
- * 服务端扫好的图纸数据，交给客户端落盘：{@code blueprints/<名字>.blueprint}。
+ * 服务端扫好的图纸数据，交给客户端落盘：{@code maidconstruction/blueprints/<名字>.blueprint}。
  * <p>
  * 带的是**已经编好码的字节**（{@link com.example.blueprint.schematic.Schematic#encode}），
  * 不是结构对象：客户端要做的只有"原样写进文件"，中间不再解析一遍——

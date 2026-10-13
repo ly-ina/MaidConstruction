@@ -32,25 +32,25 @@ public class ManualItem extends Item {
     /**
      * 目录里的章，一条一章，顺序就是左侧列表的顺序。
      * <p>
-     * 正文在 {@code assets/blueprint/lang/*.json} 里：改内容只动语言文件，
+     * 正文在 {@code assets/maidconstruction/lang/*.json} 里：改内容只动语言文件，
      * 加一章就往这个数组里加一条（列表里的名字取正文第一行【…】里那段，不必另写标题）。
      */
     public static final String[] PAGES = {
-            "manual.blueprint.page1",
-            "manual.blueprint.page2",
-            "manual.blueprint.page3",
-            "manual.blueprint.page4",
-            "manual.blueprint.page5",
-            "manual.blueprint.page6",
-            "manual.blueprint.page7",
-            "manual.blueprint.page8",
-            "manual.blueprint.page9",
-            "manual.blueprint.page10",
-            "manual.blueprint.page11",
-            "manual.blueprint.page12",
-            "manual.blueprint.page13",
-            "manual.blueprint.page14",
-            "manual.blueprint.page15",
+            "manual.maidconstruction.page1",
+            "manual.maidconstruction.page2",
+            "manual.maidconstruction.page3",
+            "manual.maidconstruction.page4",
+            "manual.maidconstruction.page5",
+            "manual.maidconstruction.page6",
+            "manual.maidconstruction.page7",
+            "manual.maidconstruction.page8",
+            "manual.maidconstruction.page9",
+            "manual.maidconstruction.page10",
+            "manual.maidconstruction.page11",
+            "manual.maidconstruction.page12",
+            "manual.maidconstruction.page13",
+            "manual.maidconstruction.page14",
+            "manual.maidconstruction.page15",
     };
 
     public ManualItem(Properties properties) {
@@ -69,7 +69,7 @@ public class ManualItem extends Item {
 
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
-        tooltip.add(Component.translatable("tooltip.blueprint.manual"));
+        tooltip.add(Component.translatable("tooltip.maidconstruction.manual"));
     }
 
     /** 一本说明书；它不存任何数据，所以直接给默认实例即可 */

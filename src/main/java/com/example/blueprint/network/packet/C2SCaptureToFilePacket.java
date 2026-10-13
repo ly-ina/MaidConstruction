@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * 框选完成后，请服务端扫描世界，扫出来的结构**直接变成一张图纸文件**。
  * <p>
  * 与 {@link C2SCapturePacket} 的分工：那条路把结构写进**手上的蓝图**（手持蓝图框选用它），
- * 这条路只交出一份数据，落到 {@code blueprints} 目录里由玩家自己去拿。
+ * 这条路只交出一份数据，落到 {@code maidconstruction/blueprints} 目录里由玩家自己去拿。
  * 蓝图在这条路上只是"以后把某一份取到手上"的容器，录制本身不经过它。
  * <p>
  * 所以这里是三步两折：扫描必须在服务端做（客户端读到的方块实体 NBT 往往不完整），
@@ -57,16 +57,16 @@ public class C2SCaptureToFilePacket {
                 ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new S2CSchematicFilePacket(msg.name, Schematic.encode(schematic)));
 
-                player.sendSystemMessage(Component.translatable("message.blueprint.captured",
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.captured",
                         schematic.getWidth(), schematic.getHeight(), schematic.getLength(),
                         schematic.countBlocks()));
             } catch (IllegalStateException e) {
                 // 这份是"框选区域太大了"那类：报错文案本身就是语言键（见 Schematic.capture）
                 player.sendSystemMessage(Component.translatable(e.getMessage() == null
-                        ? "message.blueprint.capture_failed" : e.getMessage()));
+                        ? "message.maidconstruction.capture_failed" : e.getMessage()));
             } catch (Exception e) {
                 BlueprintMod.LOGGER.error("蓝图扫描失败", e);
-                player.sendSystemMessage(Component.translatable("message.blueprint.capture_failed"));
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.capture_failed"));
             }
         });
         context.setPacketHandled(true);

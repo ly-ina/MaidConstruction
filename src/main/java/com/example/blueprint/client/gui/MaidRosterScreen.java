@@ -72,7 +72,7 @@ public class MaidRosterScreen extends Screen {
     private double mouseY;
 
     public MaidRosterScreen(@Nullable BlockPos targetPost) {
-        super(Component.translatable("gui.blueprint.maids.title"));
+        super(Component.translatable("gui.maidconstruction.maids.title"));
         this.targetPost = targetPost;
     }
 
@@ -86,9 +86,9 @@ public class MaidRosterScreen extends Screen {
         int left = (this.width - WINDOW_WIDTH) / 2;
         int top = (this.height - WINDOW_HEIGHT) / 2;
         int y = top + WINDOW_HEIGHT - 22;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.post.close"), b -> onClose())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.post.close"), b -> onClose())
                 .bounds(left + WINDOW_WIDTH - 66, y, 60, 18).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.maids.refresh"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.maids.refresh"),
                         b -> MaidRoster.request())
                 .bounds(left + 6, y, 60, 18).build());
     }
@@ -113,7 +113,7 @@ public class MaidRosterScreen extends Screen {
 
         List<S2CMaidListPacket.Entry> roster = MaidRoster.entries();
         if (roster.isEmpty()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.maids.empty"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.maids.empty"),
                     left + 8, top + 34, COLOR_LABEL, false);
         } else {
             for (int i = 0; i < roster.size(); i++) {
@@ -151,7 +151,7 @@ public class MaidRosterScreen extends Screen {
                     (float) centerX - (float) mouseX,
                     (float) (feetY - PORTRAIT_PIXELS / 2) - (float) mouseY, living);
         } else {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.maids.not_loaded"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.maids.not_loaded"),
                     x + 6, y + PORTRAIT_PIXELS / 2, COLOR_LABEL, false);
         }
 
@@ -186,13 +186,13 @@ public class MaidRosterScreen extends Screen {
     private void toggle(S2CMaidListPacket.Entry maid) {
         BlockPos post = target();
         if (post == null) {
-            setStatus(Component.translatable("gui.blueprint.detail.no_post"));
+            setStatus(Component.translatable("gui.maidconstruction.detail.no_post"));
             return;
         }
         boolean assigned = post.equals(maid.post());
         ModNetwork.CHANNEL.sendToServer(new C2SAssignMaidPacket(post, maid.id(), !assigned));
         setStatus(Component.translatable(assigned
-                ? "gui.blueprint.post.unassigned" : "gui.blueprint.post.assigned", maid.name()));
+                ? "gui.maidconstruction.post.unassigned" : "gui.maidconstruction.post.assigned", maid.name()));
         MaidRoster.request();
     }
 

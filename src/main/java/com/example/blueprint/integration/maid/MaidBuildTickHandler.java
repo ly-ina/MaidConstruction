@@ -156,15 +156,15 @@ public class MaidBuildTickHandler {
             return;
         }
         LAST_OFF_DUTY.put(maid.getUUID(), now);
-        MaidSpeech.say(maid, "message.blueprint.craft.off_duty");
+        MaidSpeech.say(maid, "message.maidconstruction.craft.off_duty");
         BlueprintMod.LOGGER.info("女仆 {} 在施工模式，但此刻不是她的工作时间（作息 {}）；"
-                        + "想让她昼夜不停地建，把 config/blueprint-common.toml 里的 "
+                        + "想让她昼夜不停地建，把 config/maidconstruction-common.toml 里的 "
                         + "schedule.build_only_on_shift 设成 false",
                 maid.getUUID(), maid.getSchedule());
     }
 
     /**
-     * 正在施工的女仆（跨维度）。给 {@code /blueprint} 命令用。
+     * 正在施工的女仆（跨维度）。给 {@code /maidconstruction} 命令用。
      * <p>
      * 判据是"控制器表里有她"而不是"她拿着蓝图"：表里有，说明她真的被驱动过；
      * 只是拿着图、任务不对的女仆不该出现在"正在施工"的名单里。

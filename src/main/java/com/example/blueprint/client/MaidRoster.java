@@ -68,9 +68,9 @@ public final class MaidRoster {
     /** 状态文案：空闲 / 待命 / 正在建（女仆卡片与终端主页共用同一套，两处不会写岔） */
     public static Component statusText(S2CMaidListPacket.Status status) {
         return Component.translatable(switch (status) {
-            case FREE -> "gui.blueprint.maids.free";
-            case STANDBY -> "gui.blueprint.maids.standby";
-            case BUILDING -> "gui.blueprint.maids.building";
+            case FREE -> "gui.maidconstruction.maids.free";
+            case STANDBY -> "gui.maidconstruction.maids.standby";
+            case BUILDING -> "gui.maidconstruction.maids.building";
         });
     }
 

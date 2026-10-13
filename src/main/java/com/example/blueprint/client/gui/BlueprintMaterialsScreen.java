@@ -97,7 +97,7 @@ public class BlueprintMaterialsScreen extends Screen {
      *                    但只要它去缓存里取结构，就得报上完整的朝向，否则取到的是别的朝向那份
      */
     public BlueprintMaterialsScreen(Screen parent, UUID schematicId, Rotation rotation, Mirror mirror) {
-        super(Component.translatable("gui.blueprint.materials.title"));
+        super(Component.translatable("gui.maidconstruction.materials.title"));
         this.parent = parent;
         this.schematicId = schematicId;
         this.rotation = rotation;
@@ -121,7 +121,7 @@ public class BlueprintMaterialsScreen extends Screen {
         this.listHeight = WINDOW_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - 6;
 
         this.addRenderableWidget(Button
-                .builder(Component.translatable("gui.blueprint.materials.back"), b -> onClose())
+                .builder(Component.translatable("gui.maidconstruction.materials.back"), b -> onClose())
                 .bounds(left + WINDOW_WIDTH - 76, top + WINDOW_HEIGHT - 22, 70, 18)
                 .build());
     }
@@ -222,14 +222,14 @@ public class BlueprintMaterialsScreen extends Screen {
 
         Schematic current = resolve();
         if (current == null) {
-            graphics.drawCenteredString(this.font, Component.translatable("gui.blueprint.materials.loading"),
+            graphics.drawCenteredString(this.font, Component.translatable("gui.maidconstruction.materials.loading"),
                     left + WINDOW_WIDTH / 2, top + WINDOW_HEIGHT / 2, COLOR_LABEL);
         } else if (lines.isEmpty()) {
-            graphics.drawCenteredString(this.font, Component.translatable("gui.blueprint.materials.empty"),
+            graphics.drawCenteredString(this.font, Component.translatable("gui.maidconstruction.materials.empty"),
                     left + WINDOW_WIDTH / 2, top + WINDOW_HEIGHT / 2, COLOR_LABEL);
         } else {
             graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.materials.summary", lines.size(), totalMaterials),
+                    Component.translatable("gui.maidconstruction.materials.summary", lines.size(), totalMaterials),
                     left + 96, top + 7, COLOR_LABEL, false);
             drawPageIndicator(graphics, left, top);
             drawList(graphics, mouseX, mouseY);
@@ -269,8 +269,8 @@ public class BlueprintMaterialsScreen extends Screen {
                 int full = line.count() / STACK_SIZE;
                 int rest = line.count() % STACK_SIZE;
                 stacks = rest == 0
-                        ? Component.translatable("gui.blueprint.materials.stacks", full).getString()
-                        : Component.translatable("gui.blueprint.materials.stacks_partial", full, rest)
+                        ? Component.translatable("gui.maidconstruction.materials.stacks", full).getString()
+                        : Component.translatable("gui.maidconstruction.materials.stacks_partial", full, rest)
                                 .getString();
             }
             int countX = listX + listWidth - 6 - this.font.width(count);
@@ -302,7 +302,7 @@ public class BlueprintMaterialsScreen extends Screen {
             return;
         }
         int pages = (lines.size() + VISIBLE_ROWS - 1) / VISIBLE_ROWS;
-        Component text = Component.translatable("gui.blueprint.materials.scroll",
+        Component text = Component.translatable("gui.maidconstruction.materials.scroll",
                 scrollRow / VISIBLE_ROWS + 1, pages);
         graphics.drawString(this.font, text,
                 left + WINDOW_WIDTH - 8 - this.font.width(text), top + 7, COLOR_LABEL, false);
@@ -319,7 +319,7 @@ public class BlueprintMaterialsScreen extends Screen {
         // 右边那段留给"返回"按钮
         int width = WINDOW_WIDTH - 8 - 84;
         graphics.drawString(this.font, this.font.plainSubstrByWidth(
-                        Component.translatable("gui.blueprint.materials.plain", plainBlocks).getString(), width),
+                        Component.translatable("gui.maidconstruction.materials.plain", plainBlocks).getString(), width),
                 left + 8, top + WINDOW_HEIGHT - 17, COLOR_LABEL, false);
     }
 

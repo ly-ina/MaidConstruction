@@ -26,7 +26,7 @@ public final class ModCreativeTabs {
 
     public static final RegistryObject<CreativeModeTab> MAIN = TABS.register("main",
             () -> CreativeModeTab.builder()
-                    .title(Component.translatable("itemGroup.blueprint.main"))
+                    .title(Component.translatable("itemGroup.maidconstruction.main"))
                     .icon(() -> ModItems.BLUEPRINT.get().getDefaultInstance())
                     .displayItems((params, output) -> {
                         output.accept(ModItems.BLUEPRINT.get());

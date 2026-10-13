@@ -62,19 +62,19 @@ public class C2SCommandPostStartPacket {
             }
             if (!post.isBoundTo(player.getUUID())) {
                 player.displayClientMessage(
-                        Component.translatable("message.blueprint.post.not_yours"), true);
+                        Component.translatable("message.maidconstruction.post.not_yours"), true);
                 return;
             }
             if (msg.start && post.getSchematicId() == null) {
                 // 没有投影就没有"开工"的对象：说清楚，别让她白跑一趟
                 player.displayClientMessage(
-                        Component.translatable("message.blueprint.post.no_projection"), true);
+                        Component.translatable("message.maidconstruction.post.no_projection"), true);
                 return;
             }
 
             post.setStarted(msg.start);
             player.displayClientMessage(Component.translatable(msg.start
-                    ? "message.blueprint.post.started" : "message.blueprint.post.stopped"), true);
+                    ? "message.maidconstruction.post.started" : "message.maidconstruction.post.stopped"), true);
         });
         context.setPacketHandled(true);
     }

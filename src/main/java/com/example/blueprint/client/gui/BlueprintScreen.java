@@ -56,7 +56,7 @@ import java.util.UUID;
  * 蓝图面板：Shift + 右键空气打开。
  * <p>
  * 左上角改名字，左边是 3D 预览（可拖动旋转），中间是操作按钮，
- * 右边是 blueprints/ 目录下的文件，点一下选中再导入。
+ * 右边是 maidconstruction/blueprints/ 目录下的文件，点一下选中再导入。
  * <p>
  * 这里不缓存 ItemStack：服务端改完 NBT 会连槽位一起替换掉，
  * 抓着打开界面时那个旧引用不放的话，导入完得关掉重开才看得到变化。
@@ -121,7 +121,7 @@ public class BlueprintScreen extends Screen {
     private Component status = Component.empty();
 
     public BlueprintScreen() {
-        super(Component.translatable("gui.blueprint.title"));
+        super(Component.translatable("gui.maidconstruction.title"));
     }
 
     /**
@@ -153,10 +153,10 @@ public class BlueprintScreen extends Screen {
 
         // 左上角：蓝图名称，导出时拿它当文件名
         this.nameBox = new EditBox(this.font, left + 76, top + 4, 132, 14,
-                Component.translatable("gui.blueprint.name_label"));
+                Component.translatable("gui.maidconstruction.name_label"));
         this.nameBox.setMaxLength(48);
         this.nameBox.setValue(BlueprintItem.getBlueprintName(getStack()));
-        this.nameBox.setHint(Component.translatable("tooltip.blueprint.unnamed"));
+        this.nameBox.setHint(Component.translatable("tooltip.maidconstruction.unnamed"));
         this.addRenderableWidget(this.nameBox);
 
         int buttonX = left + PREVIEW_WIDTH + 8;
@@ -165,20 +165,20 @@ public class BlueprintScreen extends Screen {
         // 「旋转」与「镜像」并排：都是同一件"把它摆到哪个方向"的事，各占半行。
         // 面板高度已经排满，再占一整行就会顶到状态行上
         int halfWidth = (BUTTON_WIDTH - 4) / 2;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.rotate"), b -> onRotate())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.rotate"), b -> onRotate())
                 .bounds(buttonX, y, halfWidth, 20).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.mirror"), b -> onMirror())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.mirror"), b -> onMirror())
                 .bounds(buttonX + halfWidth + 4, y, halfWidth, 20).build());
         y += 22;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.clear_anchor"), b -> onClearAnchor())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.clear_anchor"), b -> onClearAnchor())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.clear_schematic"), b -> onClearSchematic())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.clear_schematic"), b -> onClearSchematic())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
         // 建筑清单：这座建筑要备多少料。摆在"清空录制"后面——上面三个都是改这张图的，
         // 从这里往下是"拿它干点什么"（看清单、导出、导入）
-        this.materialsButton = Button.builder(Component.translatable("gui.blueprint.materials"),
+        this.materialsButton = Button.builder(Component.translatable("gui.maidconstruction.materials"),
                         b -> onMaterials())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build();
         this.addRenderableWidget(this.materialsButton);
@@ -186,16 +186,16 @@ public class BlueprintScreen extends Screen {
         // 之后导入或录制完成时由 onSchematicArrived 把它点亮
         refreshDynamicState();
         y += 30;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.export_file"), b -> onExport())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.export_file"), b -> onExport())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.import_file"), b -> onImport())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.import_file"), b -> onImport())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.open_folder"), b -> onOpenFolder())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.open_folder"), b -> onOpenFolder())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 30;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.close"), b -> onClose())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.close"), b -> onClose())
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
 
         this.fileListX = left + WINDOW_WIDTH - FILE_WIDTH - 8;
@@ -223,9 +223,9 @@ public class BlueprintScreen extends Screen {
         graphics.fill(this.fileListX - 6, top + HEADER_HEIGHT, this.fileListX - 5, top + WINDOW_HEIGHT, COLOR_DIVIDER);
 
         graphics.drawString(this.font, this.title, left + 6, top + 7, COLOR_TEXT, false);
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.name_label"),
+        graphics.drawString(this.font, Component.translatable("gui.maidconstruction.name_label"),
                 left + 48, top + 7, COLOR_LABEL, false);
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.file_hint"),
+        graphics.drawString(this.font, Component.translatable("gui.maidconstruction.file_hint"),
                 this.fileListX, top + 7, COLOR_LABEL, false);
 
         drawPreview(graphics, left, top);
@@ -274,7 +274,7 @@ public class BlueprintScreen extends Screen {
                 // 数据到了：把"正在导入…"换成结果，别让它挂在那儿
                 this.importPending = false;
                 Vec3i size = schematic.getSize();
-                setStatus(Component.translatable("message.blueprint.imported",
+                setStatus(Component.translatable("message.maidconstruction.imported",
                         size.getX(), size.getY(), size.getZ()));
             } else if (System.currentTimeMillis() - this.importAskedAt > IMPORT_TIMEOUT_MS) {
                 // 这么久还没回来，多半是导入失败（文件坏了、太大）。服务端已经往聊天栏说过
@@ -291,7 +291,7 @@ public class BlueprintScreen extends Screen {
         int cy = top + HEADER_HEIGHT + (WINDOW_HEIGHT - HEADER_HEIGHT) / 2;
 
         if (schematic == null) {
-            graphics.drawCenteredString(this.font, Component.translatable("gui.blueprint.no_preview"), cx, cy, 0x888888);
+            graphics.drawCenteredString(this.font, Component.translatable("gui.maidconstruction.no_preview"), cx, cy, 0x888888);
             return;
         }
 
@@ -444,7 +444,7 @@ public class BlueprintScreen extends Screen {
         graphics.enableScissor(fileListX, fileListY, fileListX + FILE_WIDTH, fileListY + fileListHeight);
 
         if (files.isEmpty()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.no_files"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.no_files"),
                     fileListX + 2, fileListY + 4, 0x777777, false);
         }
 
@@ -518,7 +518,7 @@ public class BlueprintScreen extends Screen {
         Rotation next = BlueprintItem.cycleRotation(stack);
         // 翻面状态照原样带上：服务端那边朝向是"旋转 + 翻面"两个数，漏一个就等于把它复位了
         ModNetwork.CHANNEL.sendToServer(new C2SSetOrientationPacket(next, BlueprintItem.getMirror(stack)));
-        setStatus(Component.translatable("gui.blueprint.rotated_to", (next.ordinal() * 90) + "°"));
+        setStatus(Component.translatable("gui.maidconstruction.rotated_to", (next.ordinal() * 90) + "°"));
     }
 
     /**
@@ -533,13 +533,13 @@ public class BlueprintScreen extends Screen {
         ModNetwork.CHANNEL.sendToServer(
                 new C2SSetOrientationPacket(BlueprintItem.getRotation(stack), BlueprintItem.getMirror(stack)));
         setStatus(Component.translatable(BlueprintItem.isMirrored(stack)
-                ? "gui.blueprint.mirrored_on" : "gui.blueprint.mirrored_off"));
+                ? "gui.maidconstruction.mirrored_on" : "gui.maidconstruction.mirrored_off"));
     }
 
     private void onClearAnchor() {
         BlueprintItem.clearAnchor(getStack());
         ModNetwork.CHANNEL.sendToServer(new C2SSetAnchorPacket(true));
-        setStatus(Component.translatable("message.blueprint.anchor_cleared"));
+        setStatus(Component.translatable("message.maidconstruction.anchor_cleared"));
     }
 
     private void onClearSchematic() {
@@ -562,7 +562,7 @@ public class BlueprintScreen extends Screen {
         ItemStack stack = getStack();
         UUID id = BlueprintItem.getSchematicId(stack);
         if (id == null) {
-            setStatus(Component.translatable("gui.blueprint.no_preview"));
+            setStatus(Component.translatable("gui.maidconstruction.no_preview"));
             return;
         }
         syncName();
@@ -584,34 +584,34 @@ public class BlueprintScreen extends Screen {
     private void onExport() {
         Schematic schematic = getPreview();
         if (schematic == null) {
-            setStatus(Component.translatable("gui.blueprint.nothing_to_export"));
+            setStatus(Component.translatable("gui.maidconstruction.nothing_to_export"));
             return;
         }
         try {
             // 文件名跟随左上角输入的名称
             String name = nameBox.getValue().trim();
             if (name.isEmpty()) {
-                name = Component.translatable("tooltip.blueprint.unnamed").getString();
+                name = Component.translatable("tooltip.maidconstruction.unnamed").getString();
             }
             byte[] data = BlueprintTransfer.encode(schematic);
             Path file = BlueprintTransfer.writeToFile(name, data);
-            setStatus(Component.translatable("gui.blueprint.exported", file.getFileName().toString()));
+            setStatus(Component.translatable("gui.maidconstruction.exported", file.getFileName().toString()));
             refreshFiles();
         } catch (IOException e) {
-            setStatus(Component.translatable("gui.blueprint.export_failed"));
+            setStatus(Component.translatable("gui.maidconstruction.export_failed"));
         }
     }
 
     private void onImport() {
         if (selectedFile < 0 || selectedFile >= files.size()) {
-            setStatus(Component.translatable("gui.blueprint.no_file_selected"));
+            setStatus(Component.translatable("gui.maidconstruction.no_file_selected"));
             return;
         }
         Path selected = files.get(selectedFile);
         try {
             byte[] data = Files.readAllBytes(selected);
             if (data.length > BlueprintTransfer.MAX_FILE_BYTES) {
-                setStatus(Component.translatable("message.blueprint.import_too_large"));
+                setStatus(Component.translatable("message.maidconstruction.import_too_large"));
                 return;
             }
             // 导入后蓝图名字跟随文件名，输入框当场同步
@@ -621,9 +621,9 @@ public class BlueprintScreen extends Screen {
             // 记一笔：结构回来之后由 refreshDynamicState 把这句话换成导入结果
             this.importPending = true;
             this.importAskedAt = System.currentTimeMillis();
-            setStatus(Component.translatable("gui.blueprint.importing"));
+            setStatus(Component.translatable("gui.maidconstruction.importing"));
         } catch (IOException e) {
-            setStatus(Component.translatable("message.blueprint.import_failed"));
+            setStatus(Component.translatable("message.maidconstruction.import_failed"));
         }
     }
 
@@ -631,9 +631,9 @@ public class BlueprintScreen extends Screen {
         Path dir = BlueprintTransfer.getExportDirectory();
         try {
             Util.getPlatform().openFile(dir.toFile());
-            setStatus(Component.translatable("gui.blueprint.opened_folder", dir.toString()));
+            setStatus(Component.translatable("gui.maidconstruction.opened_folder", dir.toString()));
         } catch (Exception e) {
-            setStatus(Component.translatable("gui.blueprint.open_folder_failed"));
+            setStatus(Component.translatable("gui.maidconstruction.open_folder_failed"));
         }
     }
 

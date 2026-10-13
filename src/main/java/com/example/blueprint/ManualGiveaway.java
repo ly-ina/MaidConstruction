@@ -56,7 +56,7 @@ public final class ManualGiveaway {
             // 而"发过"的标记已经记上，他再也不会收到第二本
             player.drop(book, false);
         }
-        player.sendSystemMessage(Component.translatable("manual.blueprint.given")
+        player.sendSystemMessage(Component.translatable("manual.maidconstruction.given")
                 .withStyle(ChatFormatting.GOLD));
         // 顺手点亮"拿到说明书"那条进度（以及它的根）：这是玩家与本模组的第一次照面
         Advancements.grant(player, Advancements.GUIDE_BOOK);

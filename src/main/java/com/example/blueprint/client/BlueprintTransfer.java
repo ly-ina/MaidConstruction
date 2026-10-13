@@ -19,25 +19,93 @@ import java.util.stream.Stream;
 /**
  * 蓝图的导入导出，一律走文件，不碰剪贴板。
  * <p>
- * 文件名就是蓝图名（例如「城堡.blueprint」），不加时间戳之类的后缀，
+ * 文件名就是蓝图名（例如「城堡.maidbp」），不加时间戳之类的后缀，
  * 想留档就自己改名字。文件可以直接拷给别人，放进同一个目录就能导入。
+ * <p>
+ * 目录是 {@code <游戏目录>/maidconstruction/blueprints/}：模组 id 换成 {@code maidconstruction}
+ * 之后（见 DEVELOPER §7.21），图纸也跟着搬了家——原来那个光秃秃的 {@code blueprints/}
+ * 谁都能用，撞名只是时间问题。老目录第一次访问时会**自动搬一次**（见 {@link #migrateLegacy}）。
  */
 @OnlyIn(Dist.CLIENT)
 public class BlueprintTransfer {
 
-    public static final String FILE_EXTENSION = ".blueprint";
-    /** 早期版本用过双后缀，列表里也认，免得老文件看不见 */
-    private static final String LEGACY_EXTENSION = ".blueprint.nbt";
+    /**
+     * 图纸文件的后缀。
+     * <p>
+     * 1.8.3 及以前是 {@code .blueprint}——modid 换了名字之后跟着改：文件后缀里留着旧名，
+     * 翻目录的人只会更糊涂。
+     */
+    public static final String FILE_EXTENSION = ".maidbp";
+    /**
+     * 老后缀，列表里照样认（免得老文件在新列表里凭空消失），搬进新目录时会顺手改成新的。
+     * <p>
+     * 两个都在：{@code .blueprint} 是 1.8.3 及以前用的，{@code .blueprint.nbt} 是最早那个双后缀。
+     * 长的写在前面：{@code .blueprint.nbt} 也以 {@code .nbt} 结尾，先比长的不容易配错。
+     */
+    private static final List<String> LEGACY_EXTENSIONS = List.of(".blueprint.nbt", ".blueprint");
     /** 单个文件再大就不往网络包里塞了 */
     public static final int MAX_FILE_BYTES = 1_000_000;
 
+    /** 1.8.3 及以前的图纸目录：只在第一次访问时读一遍，把里面的图纸搬进新家 */
+    private static final String LEGACY_DIRECTORY = "blueprints";
+    /** 搬过了就不再去找老目录（每次开界面都去探一遍没必要） */
+    private static boolean migrated;
+
     public static Path getExportDirectory() {
-        Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("blueprints");
+        Path dir = Minecraft.getInstance().gameDirectory.toPath()
+                .resolve("maidconstruction").resolve("blueprints");
         try {
             Files.createDirectories(dir);
         } catch (IOException ignored) {
         }
+        migrateLegacy(dir);
         return dir;
+    }
+
+    /**
+     * 把老目录里的图纸搬进新家，只做一次。
+     * <p>
+     * 为什么不能只是改个目录名：老图纸会**一份都看不见**——那看起来就是"我的图纸丢了"。
+     * 搬一次（顺手把后缀也换成新的）比留一个说不清的坑好。
+     * <p>
+     * 只认图纸后缀，他自己放进那个目录的别的东西一律不动；同名的**不搬**，以新目录里的为准，
+     * 旧的留在原地由他处置——覆盖他的东西比多个重名更坏。
+     */
+    private static void migrateLegacy(Path dir) {
+        if (migrated) {
+            return;
+        }
+        migrated = true;
+        Path old = Minecraft.getInstance().gameDirectory.toPath().resolve(LEGACY_DIRECTORY);
+        if (!Files.isDirectory(old)) {
+            return;
+        }
+        int moved = 0;
+        try (Stream<Path> files = Files.list(old)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                String name = file.getFileName().toString();
+                String extension = blueprintExtension(name);
+                if (extension == null) {
+                    continue;
+                }
+                Path target = dir.resolve(
+                        name.substring(0, name.length() - extension.length()) + FILE_EXTENSION);
+                if (Files.exists(target)) {
+                    continue;
+                }
+                try {
+                    Files.move(file, target);
+                    moved++;
+                } catch (IOException e) {
+                    BlueprintMod.LOGGER.warn("老图纸没能搬进新目录：{}", file, e);
+                }
+            }
+        } catch (IOException e) {
+            BlueprintMod.LOGGER.warn("读不了老图纸目录 {}", old, e);
+        }
+        if (moved > 0) {
+            BlueprintMod.LOGGER.info("把 {} 份老图纸从 {}/ 搬到了 {}", moved, LEGACY_DIRECTORY, dir);
+        }
     }
 
     /** 与 {@link Schematic#encode} 是同一份实现：文件与网络共用一种格式，只留一处定义 */
@@ -72,14 +140,14 @@ public class BlueprintTransfer {
             if (player != null) {
                 // 录制完就在世界里（录制态没有界面），这句只能走动作栏
                 player.displayClientMessage(
-                        Component.translatable("message.blueprint.record.saved", file.getFileName().toString()),
+                        Component.translatable("message.maidconstruction.record.saved", file.getFileName().toString()),
                         true);
             }
         } catch (IOException e) {
             BlueprintMod.LOGGER.warn("图纸没能写进目录：{}", name, e);
             if (player != null) {
                 player.displayClientMessage(
-                        Component.translatable("message.blueprint.record.save_failed"), false);
+                        Component.translatable("message.maidconstruction.record.save_failed"), false);
             }
         }
     }
@@ -107,17 +175,24 @@ public class BlueprintTransfer {
     /** 显示名：去掉扩展名 */
     public static String displayName(Path path) {
         String name = path.getFileName().toString();
-        if (name.endsWith(LEGACY_EXTENSION)) {
-            return name.substring(0, name.length() - LEGACY_EXTENSION.length());
-        }
-        if (name.endsWith(FILE_EXTENSION)) {
-            return name.substring(0, name.length() - FILE_EXTENSION.length());
-        }
-        return name;
+        String extension = blueprintExtension(name);
+        return extension == null ? name : name.substring(0, name.length() - extension.length());
     }
 
     private static boolean isBlueprintFile(Path path) {
-        String name = path.getFileName().toString();
-        return name.endsWith(FILE_EXTENSION) || name.endsWith(LEGACY_EXTENSION);
+        return blueprintExtension(path.getFileName().toString()) != null;
+    }
+
+    /** 它是图纸文件吗：是就返回那个后缀（新的或老的），不是则 null */
+    private static String blueprintExtension(String fileName) {
+        if (fileName.endsWith(FILE_EXTENSION)) {
+            return FILE_EXTENSION;
+        }
+        for (String extension : LEGACY_EXTENSIONS) {
+            if (fileName.endsWith(extension)) {
+                return extension;
+            }
+        }
+        return null;
     }
 }

@@ -5,10 +5,10 @@
       "item": "minecraft:bell"
     },
     "title": {
-      "translate": "advancements.blueprint.build_done.title"
+      "translate": "advancements.maidconstruction.build_done.title"
     },
     "description": {
-      "translate": "advancements.blueprint.build_done.description"
+      "translate": "advancements.maidconstruction.build_done.description"
     },
     "frame": "goal",
     "show_toast": true,

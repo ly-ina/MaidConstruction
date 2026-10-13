@@ -59,7 +59,7 @@ public class BlueprintHomeScreen extends Screen {
     private Button startButton;
 
     public BlueprintHomeScreen(@Nullable BlockPos targetPost) {
-        super(Component.translatable("gui.blueprint.home.title"));
+        super(Component.translatable("gui.maidconstruction.home.title"));
         this.targetPost = targetPost;
     }
 
@@ -76,25 +76,25 @@ public class BlueprintHomeScreen extends Screen {
 
         // 口令那一行：一个按钮，两种意思（还没开工 / 已经在建）
         int orderY = top + WINDOW_HEIGHT - 48;
-        this.startButton = Button.builder(Component.translatable("gui.blueprint.home.start"),
+        this.startButton = Button.builder(Component.translatable("gui.maidconstruction.home.start"),
                         b -> onOrder())
                 .bounds(left + 6, orderY, 110, 18).build();
         this.addRenderableWidget(this.startButton);
         // 取消投影也放在这儿：终端本来就是"托管投影"的那个入口（放它的是图纸库，
         // 撤它的是这里），不必为了撤销专门跑回指挥台那边按一次
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.post.clear"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.post.clear"),
                         b -> onClearProjection())
                 .bounds(left + 120, orderY, 90, 18).build());
 
         // 页脚：图纸库 | 女仆（指派） | 关闭。这一行是"去哪儿"的入口，与上面那个"做什么"分开
         int y = top + WINDOW_HEIGHT - 24;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.library.title"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.library.title"),
                         b -> Minecraft.getInstance().setScreen(new BlueprintLibraryScreen(this.targetPost)))
                 .bounds(left + 6, y, 96, 18).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.maids.title"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.maids.title"),
                         b -> Minecraft.getInstance().setScreen(new MaidRosterScreen(this.targetPost)))
                 .bounds(left + 106, y, 90, 18).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.post.close"), b -> onClose())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.post.close"), b -> onClose())
                 .bounds(left + WINDOW_WIDTH - 66, y, 60, 18).build());
     }
 
@@ -112,7 +112,7 @@ public class BlueprintHomeScreen extends Screen {
         CommandPostBlockEntity post = post();
         boolean started = post != null && post.isStarted();
         this.startButton.setMessage(Component.translatable(
-                started ? "gui.blueprint.home.stop" : "gui.blueprint.home.start"));
+                started ? "gui.maidconstruction.home.stop" : "gui.maidconstruction.home.start"));
         // 没投影就没有"开工"的对象；那台不是我的也按不动（服务端还会再验一次）
         this.startButton.active = post != null && post.getSchematicId() != null && isMine(post);
     }
@@ -130,17 +130,17 @@ public class BlueprintHomeScreen extends Screen {
             return;
         }
         if (!isMine(post)) {
-            setStatus(Component.translatable("gui.blueprint.post.need_bind"));
+            setStatus(Component.translatable("gui.maidconstruction.post.need_bind"));
             return;
         }
         if (post.getSchematicId() == null) {
-            setStatus(Component.translatable("gui.blueprint.post.no_blueprint"));
+            setStatus(Component.translatable("gui.maidconstruction.post.no_blueprint"));
             return;
         }
         boolean start = !post.isStarted();
         ModNetwork.CHANNEL.sendToServer(new C2SCommandPostStartPacket(this.postPos(), start));
         setStatus(Component.translatable(start
-                ? "message.blueprint.post.started" : "message.blueprint.post.stopped"));
+                ? "message.maidconstruction.post.started" : "message.maidconstruction.post.stopped"));
     }
 
     private void setStatus(Component message) {
@@ -160,15 +160,15 @@ public class BlueprintHomeScreen extends Screen {
             return;
         }
         if (!isMine(post)) {
-            setStatus(Component.translatable("gui.blueprint.post.need_bind"));
+            setStatus(Component.translatable("gui.maidconstruction.post.need_bind"));
             return;
         }
         if (post.getSchematicId() == null) {
-            setStatus(Component.translatable("gui.blueprint.post.no_blueprint"));
+            setStatus(Component.translatable("gui.maidconstruction.post.no_blueprint"));
             return;
         }
         ModNetwork.CHANNEL.sendToServer(C2SCommandPostProjectionPacket.cancel(pos));
-        setStatus(Component.translatable("gui.blueprint.post.cleared"));
+        setStatus(Component.translatable("gui.maidconstruction.post.cleared"));
     }
 
     /** 这台的状态归不归我管：绑定它的那个玩家才能下口令（与放置投影同一条规矩） */
@@ -227,13 +227,13 @@ public class BlueprintHomeScreen extends Screen {
         BlockPos pos = postPos();
         CommandPostBlockEntity post = post();
 
-        Component label = Component.translatable("gui.blueprint.home.post");
+        Component label = Component.translatable("gui.maidconstruction.home.post");
         graphics.drawString(this.font, label, x, y, COLOR_LABEL, false);
         if (post == null) {
             // 没同步过来（走远了 / 区块卸了 / 根本还没放）；坐标还说得出是哪一台
             graphics.drawString(this.font, pos == null
-                            ? Component.translatable("gui.blueprint.home.no_post")
-                            : Component.translatable("gui.blueprint.post.missing"),
+                            ? Component.translatable("gui.maidconstruction.home.no_post")
+                            : Component.translatable("gui.maidconstruction.post.missing"),
                     x + 8, y + ROW_HEIGHT, COLOR_WARN, false);
             return y + ROW_HEIGHT * 2;
         }
@@ -248,7 +248,7 @@ public class BlueprintHomeScreen extends Screen {
         Component state = CommandPostProjections.stateText(post);
         int stateX = left + WINDOW_WIDTH - 8 - this.font.width(state);
         if (post.getSchematicId() == null) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.post.no_blueprint"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.no_blueprint"),
                     x + 8, y, COLOR_LABEL, false);
         } else {
             // 图纸名可以很长：截到状态左边为止，别让名字把状态挤没（两边都是要紧信息）
@@ -256,7 +256,7 @@ public class BlueprintHomeScreen extends Screen {
             int room = Math.max(40, stateX - (x + 8) - 6);
             graphics.drawString(this.font,
                     this.font.plainSubstrByWidth(
-                            Component.translatable("gui.blueprint.post.blueprint", name).getString(), room),
+                            Component.translatable("gui.maidconstruction.post.blueprint", name).getString(), room),
                     x + 8, y, COLOR_TEXT, false);
         }
         graphics.drawString(this.font, state, stateX, y,
@@ -264,11 +264,11 @@ public class BlueprintHomeScreen extends Screen {
         y += ROW_HEIGHT;
 
         if (post.getOwner() == null) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.post.unbound"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.unbound"),
                     x + 8, y, COLOR_WARN, false);
         } else if (!isMine(post)) {
             graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.post.bound", post.getOwnerName()),
+                    Component.translatable("gui.maidconstruction.post.bound", post.getOwnerName()),
                     x + 8, y, COLOR_WARN, false);
         }
         return y + ROW_HEIGHT;
@@ -279,10 +279,10 @@ public class BlueprintHomeScreen extends Screen {
         int x = left + 8;
         List<S2CMaidListPacket.Entry> roster = MaidRoster.entries();
 
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.post.maids"),
+        graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.maids"),
                 x, y, COLOR_LABEL, false);
         // 汇总写在右边：一眼看出"有几只在干活"
-        Component summary = Component.translatable("gui.blueprint.home.summary",
+        Component summary = Component.translatable("gui.maidconstruction.home.summary",
                 MaidRoster.count(S2CMaidListPacket.Status.BUILDING),
                 MaidRoster.count(S2CMaidListPacket.Status.STANDBY),
                 MaidRoster.count(S2CMaidListPacket.Status.FREE));
@@ -291,7 +291,7 @@ public class BlueprintHomeScreen extends Screen {
         y += ROW_HEIGHT;
 
         if (roster.isEmpty()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.maids.empty"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.maids.empty"),
                     x + 8, y, COLOR_LABEL, false);
             return y + ROW_HEIGHT;
         }
@@ -301,7 +301,7 @@ public class BlueprintHomeScreen extends Screen {
         int shown = 0;
         for (S2CMaidListPacket.Entry maid : roster) {
             if (shown >= MAX_MAIDS || y + ROW_HEIGHT > limit) {
-                graphics.drawString(this.font, Component.translatable("gui.blueprint.home.more",
+                graphics.drawString(this.font, Component.translatable("gui.maidconstruction.home.more",
                         roster.size() - shown), x + 8, y, COLOR_LABEL, false);
                 return y + ROW_HEIGHT;
             }

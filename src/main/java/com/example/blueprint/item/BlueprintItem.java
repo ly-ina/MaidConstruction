@@ -387,7 +387,7 @@ public class BlueprintItem extends Item {
             if (level.isClientSide) {
                 ModNetwork.CHANNEL.sendToServer(new C2SSetAnchorPacket(anchor));
                 player.displayClientMessage(
-                        Component.translatable("message.blueprint.anchor_set", formatPos(anchor)), true);
+                        Component.translatable("message.maidconstruction.anchor_set", formatPos(anchor)), true);
             }
             return InteractionResult.SUCCESS;
         }
@@ -396,7 +396,7 @@ public class BlueprintItem extends Item {
             if (level.isClientSide) {
                 setPos1(stack, target);
                 player.displayClientMessage(
-                        Component.translatable("message.blueprint.pos1_set", formatPos(target)), true);
+                        Component.translatable("message.maidconstruction.pos1_set", formatPos(target)), true);
             }
             return InteractionResult.SUCCESS;
         }
@@ -423,7 +423,7 @@ public class BlueprintItem extends Item {
             }
 
             if (!hasSchematic(stack)) {
-                player.displayClientMessage(Component.translatable("message.blueprint.no_schematic"), true);
+                player.displayClientMessage(Component.translatable("message.maidconstruction.no_schematic"), true);
                 return InteractionResultHolder.success(stack);
             }
 
@@ -431,7 +431,7 @@ public class BlueprintItem extends Item {
             // 只转不翻面：翻面是"这栋楼要不要照镜子"，比转个角度不常用得多，留给面板上的按钮。
             Rotation next = cycleRotation(stack);
             ModNetwork.CHANNEL.sendToServer(new C2SSetOrientationPacket(next, getMirror(stack)));
-            player.displayClientMessage(Component.translatable("message.blueprint.rotated", angleText(next)), true);
+            player.displayClientMessage(Component.translatable("message.maidconstruction.rotated", angleText(next)), true);
             return InteractionResultHolder.success(stack);
         }
 
@@ -443,49 +443,49 @@ public class BlueprintItem extends Item {
      */
     @Override
     public String getDescriptionId(ItemStack stack) {
-        return hasSchematic(stack) ? "item.blueprint.blueprint" : "item.blueprint.blueprint.empty";
+        return hasSchematic(stack) ? "item.maidconstruction.blueprint" : "item.maidconstruction.blueprint.empty";
     }
 
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
         if (hasSchematic(stack)) {
             String name = getBlueprintName(stack);
-            tooltip.add(Component.translatable("tooltip.blueprint.name", name.isEmpty()
-                    ? Component.translatable("tooltip.blueprint.unnamed").getString() : name));
+            tooltip.add(Component.translatable("tooltip.maidconstruction.name", name.isEmpty()
+                    ? Component.translatable("tooltip.maidconstruction.unnamed").getString() : name));
 
             Vec3i size = getSize(stack);
             if (size != null) {
-                tooltip.add(Component.translatable("tooltip.blueprint.size",
+                tooltip.add(Component.translatable("tooltip.maidconstruction.size",
                         size.getX(), size.getY(), size.getZ()));
             }
             Rotation rotation = getRotation(stack);
             if (rotation != Rotation.NONE) {
-                tooltip.add(Component.translatable("tooltip.blueprint.rotation", angleText(rotation)));
+                tooltip.add(Component.translatable("tooltip.maidconstruction.rotation", angleText(rotation)));
             }
             if (getMirror(stack) != Mirror.NONE) {
-                tooltip.add(Component.translatable("tooltip.blueprint.mirror"));
+                tooltip.add(Component.translatable("tooltip.maidconstruction.mirror"));
             }
             if (hasAnchor(stack)) {
-                tooltip.add(Component.translatable("tooltip.blueprint.anchor", formatPos(getAnchor(stack))));
+                tooltip.add(Component.translatable("tooltip.maidconstruction.anchor", formatPos(getAnchor(stack))));
                 tooltip.add(Component.translatable(isCompleted(stack)
-                        ? "tooltip.blueprint.completed" : "tooltip.blueprint.incomplete"));
-                tooltip.add(Component.translatable("tooltip.blueprint.hint_maid_build"));
+                        ? "tooltip.maidconstruction.completed" : "tooltip.maidconstruction.incomplete"));
+                tooltip.add(Component.translatable("tooltip.maidconstruction.hint_maid_build"));
             } else {
-                tooltip.add(Component.translatable("tooltip.blueprint.hint_anchor"));
+                tooltip.add(Component.translatable("tooltip.maidconstruction.hint_anchor"));
             }
-            tooltip.add(Component.translatable("tooltip.blueprint.hint_rotate"));
+            tooltip.add(Component.translatable("tooltip.maidconstruction.hint_rotate"));
             tooltip.add(Component.translatable(isMaidBuildEnabled(stack)
-                    ? "tooltip.blueprint.maid_on" : "tooltip.blueprint.maid_off"));
+                    ? "tooltip.maidconstruction.maid_on" : "tooltip.maidconstruction.maid_off"));
         } else {
-            tooltip.add(Component.translatable("tooltip.blueprint.empty"));
+            tooltip.add(Component.translatable("tooltip.maidconstruction.empty"));
             if (hasPos1(stack)) {
-                tooltip.add(Component.translatable("tooltip.blueprint.pos1", formatPos(getPos1(stack))));
-                tooltip.add(Component.translatable("tooltip.blueprint.hint_select2"));
+                tooltip.add(Component.translatable("tooltip.maidconstruction.pos1", formatPos(getPos1(stack))));
+                tooltip.add(Component.translatable("tooltip.maidconstruction.hint_select2"));
             } else {
-                tooltip.add(Component.translatable("tooltip.blueprint.hint_select"));
+                tooltip.add(Component.translatable("tooltip.maidconstruction.hint_select"));
             }
             // 空气里怎么选点：不规则建筑的外围没有方块可点，这一步不说玩家想不到
-            tooltip.add(Component.translatable("tooltip.blueprint.hint_select_outside"));
+            tooltip.add(Component.translatable("tooltip.maidconstruction.hint_select_outside"));
         }
     }
 

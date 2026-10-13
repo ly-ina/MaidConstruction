@@ -59,7 +59,7 @@ public class CommandPostScreen extends Screen {
 
 
     public CommandPostScreen(BlockPos pos) {
-        super(Component.translatable("gui.blueprint.post.title"));
+        super(Component.translatable("gui.maidconstruction.post.title"));
         this.pos = pos;
     }
 
@@ -78,21 +78,21 @@ public class CommandPostScreen extends Screen {
         // 投影那一行只留「取消投影」。**放**这件事属于图纸库：打开图纸库、点开一份、点「投影」，
         // 放的就落到这台指挥台上——下面那个按钮把自己那一格带进图纸库，就是"放到这一台"的意思
         int actionY = top + WINDOW_HEIGHT - 46;
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.post.clear"), b -> onClear())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.post.clear"), b -> onClear())
                 .bounds(left + 6, actionY, 90, 18).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.maids.title"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.maids.title"),
                         b -> Minecraft.getInstance().setScreen(new MaidRosterScreen(this.pos)))
                 .bounds(left + 100, actionY, 90, 18).build());
         // 口令：放好投影、指派好女仆都只是准备，这一下才是开工（见 C2SCommandPostStartPacket）
-        this.startButton = Button.builder(Component.translatable("gui.blueprint.home.start"),
+        this.startButton = Button.builder(Component.translatable("gui.maidconstruction.home.start"),
                         b -> onOrder())
                 .bounds(left + 194, actionY, 100, 18).build();
         this.addRenderableWidget(this.startButton);
 
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.library.title"),
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.library.title"),
                         b -> Minecraft.getInstance().setScreen(new BlueprintLibraryScreen(this.pos)))
                 .bounds(left + 6, y, 96, 18).build());
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.blueprint.post.close"), b -> onClose())
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.post.close"), b -> onClose())
                 .bounds(left + WINDOW_WIDTH - 66, y, 60, 18).build());
     }
 
@@ -109,11 +109,11 @@ public class CommandPostScreen extends Screen {
             return;
         }
         if (!post.isBoundTo(player.getUUID())) {
-            setStatus(Component.translatable("gui.blueprint.post.need_bind"));
+            setStatus(Component.translatable("gui.maidconstruction.post.need_bind"));
             return;
         }
         ModNetwork.CHANNEL.sendToServer(C2SCommandPostProjectionPacket.cancel(this.pos));
-        setStatus(Component.translatable("gui.blueprint.post.cleared"));
+        setStatus(Component.translatable("gui.maidconstruction.post.cleared"));
     }
 
     private void setStatus(Component message) {
@@ -133,7 +133,7 @@ public class CommandPostScreen extends Screen {
         }
         CommandPostBlockEntity post = post();
         this.startButton.setMessage(Component.translatable(post != null && post.isStarted()
-                ? "gui.blueprint.home.stop" : "gui.blueprint.home.start"));
+                ? "gui.maidconstruction.home.stop" : "gui.maidconstruction.home.start"));
         // 没投影就没有"开工"的对象（那台不是我的，服务端还会再拦一次）
         this.startButton.active = post != null && post.getSchematicId() != null;
     }
@@ -146,17 +146,17 @@ public class CommandPostScreen extends Screen {
             return;
         }
         if (!post.isBoundTo(player.getUUID())) {
-            setStatus(Component.translatable("gui.blueprint.post.need_bind"));
+            setStatus(Component.translatable("gui.maidconstruction.post.need_bind"));
             return;
         }
         if (post.getSchematicId() == null) {
-            setStatus(Component.translatable("gui.blueprint.post.no_blueprint"));
+            setStatus(Component.translatable("gui.maidconstruction.post.no_blueprint"));
             return;
         }
         boolean start = !post.isStarted();
         ModNetwork.CHANNEL.sendToServer(new C2SCommandPostStartPacket(this.pos, start));
         setStatus(Component.translatable(start
-                ? "message.blueprint.post.started" : "message.blueprint.post.stopped"));
+                ? "message.maidconstruction.post.started" : "message.maidconstruction.post.stopped"));
     }
 
     /** 这块指挥台；没加载出来（例如刚被拆掉）时返回 null */
@@ -185,7 +185,7 @@ public class CommandPostScreen extends Screen {
 
         CommandPostBlockEntity post = post();
         if (post == null) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.post.missing"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.missing"),
                     left + 8, top + 34, COLOR_WARN, false);
         } else {
             drawState(graphics, post, left, top);
@@ -200,31 +200,31 @@ public class CommandPostScreen extends Screen {
 
         // 绑定：没有它就没有"指派女仆"这一步，所以放在最上面
         if (post.getOwner() == null) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.post.unbound"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.unbound"),
                     x, y, COLOR_WARN, false);
         } else {
             graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.post.bound", post.getOwnerName()),
+                    Component.translatable("gui.maidconstruction.post.bound", post.getOwnerName()),
                     x, y, COLOR_GOOD, false);
         }
 
         // 投影
         y += 20;
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.post.projection"),
+        graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.projection"),
                 x, y, COLOR_LABEL, false);
         y += ROW_HEIGHT;
         if (post.getSchematicId() == null) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.post.no_blueprint"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.no_blueprint"),
                     x + 8, y, COLOR_LABEL, false);
         } else {
             graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.post.blueprint",
+                    Component.translatable("gui.maidconstruction.post.blueprint",
                             post.getBlueprintName().isEmpty() ? "?" : post.getBlueprintName()),
                     x + 8, y, COLOR_TEXT, false);
             y += ROW_HEIGHT;
             BlockPos anchor = post.getAnchor();
             graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.post.anchor",
+                    Component.translatable("gui.maidconstruction.post.anchor",
                             anchor == null ? "-" : anchor.getX() + ", " + anchor.getY() + ", " + anchor.getZ()),
                     x + 8, y, COLOR_LABEL, false);
             // 下一步在哪：待命（等着开工口令）/ 正在建 / 已完工 / 已暂停。
@@ -236,12 +236,12 @@ public class CommandPostScreen extends Screen {
 
         // 女仆：这一栏只说"这台手底下有谁"；完整名册（带立绘、能指派）走下面那个「女仆」按钮单开
         y += 20;
-        graphics.drawString(this.font, Component.translatable("gui.blueprint.post.maids"),
+        graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.maids"),
                 x, y, COLOR_LABEL, false);
         y += ROW_HEIGHT;
         Map<UUID, String> maids = post.getMaids();
         if (maids.isEmpty()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.post.no_maids"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.post.no_maids"),
                     x + 8, y, COLOR_LABEL, false);
             return;
         }

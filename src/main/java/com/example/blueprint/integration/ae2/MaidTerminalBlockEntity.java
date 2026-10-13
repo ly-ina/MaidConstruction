@@ -214,26 +214,26 @@ public class MaidTerminalBlockEntity extends BlockEntity
     @Nullable
     public Component diagnose() {
         if (!nodeCreated || !mainNode.isReady()) {
-            return Component.translatable("message.blueprint.terminal_not_ready");
+            return Component.translatable("message.maidconstruction.terminal_not_ready");
         }
         IGridNode node = mainNode.getNode();
         if (node == null) {
-            return Component.translatable("message.blueprint.terminal_not_ready");
+            return Component.translatable("message.maidconstruction.terminal_not_ready");
         }
         // 六个方向一个 AE 邻居都没有，那它只是孤零零地摆在地上，
         // 这时候网格虽然存在，却是个只装了自己的空网，报"没电"会把人带偏
         if (node.getConnectedSides().isEmpty()) {
-            return Component.translatable("message.blueprint.terminal_not_connected");
+            return Component.translatable("message.maidconstruction.terminal_not_connected");
         }
         IGrid grid = node.getGrid();
         if (grid == null) {
-            return Component.translatable("message.blueprint.terminal_no_network");
+            return Component.translatable("message.maidconstruction.terminal_no_network");
         }
         if (!mainNode.isPowered()) {
-            return Component.translatable("message.blueprint.terminal_no_power");
+            return Component.translatable("message.maidconstruction.terminal_no_power");
         }
         if (!node.meetsChannelRequirements()) {
-            return Component.translatable("message.blueprint.terminal_no_channel");
+            return Component.translatable("message.maidconstruction.terminal_no_channel");
         }
         return null;
     }

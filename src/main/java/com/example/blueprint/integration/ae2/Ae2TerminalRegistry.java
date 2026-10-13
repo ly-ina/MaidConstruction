@@ -168,7 +168,7 @@ public final class Ae2TerminalRegistry {
         // 第四个参数是这张卡在工具提示里显示的那句话，由 AE2 自己拼进卡片的
         // 说明列表（跟着卡片走，所以写在卡上而不是终端上）
         Upgrades.add(MAID_BINDING_CARD.get(), WIRELESS_MAID_TERMINAL.get(), 1,
-                "tooltip.blueprint.maid_binding_card");
+                "tooltip.maidconstruction.maid_binding_card");
 
         // 直接复用官方那个链接处理器：它的 canLink 就是 instanceof WirelessTerminalItem
         // （我们的终端本来就是子类），link/unlink 读写的也是官方终端那套 NBT 键。

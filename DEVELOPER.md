@@ -466,7 +466,7 @@ public class MyRotation implements BlockEntityRotation {
 - 给创造模式用的物品，加进 `ModCreativeTabs` 的 `displayItems` 回调（模组独占一栏，不要塞原版标签页）
 - **涉及软依赖模组物品的配方必须用 `forge:conditional` 包住**，否则没装那个模组的整合包会加载失败
 
-**创造物品栏的注意点**：`ModCreativeTabs.MAIN` 的 `displayItems` 里，`ModItems` 的注册对象要 `.get()` 之后再 `accept`（`Output` 只收 `ItemLike`/`ItemStack`，不收 `RegistryObject`）。软依赖模组的物品**必须先在 `Ae2Compat.isLoaded()` 里包一层**再取 `.get()` —— 触碰 `Ae2TerminalRegistry` 的静态字段会初始化整个类，没装 AE2 时那是个 `NoClassDefFoundError`。标签页标题走 `itemGroup.blueprint.main` 这个翻译键。
+**创造物品栏的注意点**：`ModCreativeTabs.MAIN` 的 `displayItems` 里，`ModItems` 的注册对象要 `.get()` 之后再 `accept`（`Output` 只收 `ItemLike`/`ItemStack`，不收 `RegistryObject`）。软依赖模组的物品**必须先在 `Ae2Compat.isLoaded()` 里包一层**再取 `.get()` —— 触碰 `Ae2TerminalRegistry` 的静态字段会初始化整个类，没装 AE2 时那是个 `NoClassDefFoundError`。标签页标题走 `itemGroup.maidconstruction.main` 这个翻译键。
 
 ---
 
@@ -806,7 +806,7 @@ owner.sendSystemMessage(component);              // 聊天栏：同上
 
 按键一侧的规矩：只有**世界里没开着任何界面**时才抢键。左键归那个**可取消**的 `InputEvent.MouseButton.Pre`（录制时贴着建筑看，很容易顺手挖掉一块）；`E`（开背包）与 `Q`（丢东西）则**不能**靠事件取消——`InputEvent.Key` **不可取消**，对它调 `setCanceled()` 会抛 `UnsupportedOperationException`，而且那一抛会把整段处理打断，按键白按、日志里还多一条 ERROR（这个坑踩过一次）。也**不能**靠"抢在原版读按键之前把 click 收掉"：在 `TickEvent.ClientTickEvent` 的 `START` 相位 `consumeClick()` 试过，玩家按 Q 照样把东西丢出去——原版读按键比任何一个 tick 阶段都早。**确定生效的做法是把这两个键在录制期间摘掉**（`KeyMapping.setKey(InputConstants.UNKNOWN)`，退出、取消、断线时原样还回去）：键都没绑，原版那句 `consumeClick()` 永远是 false。摘的是**客户端**的控制设置（`KeyMapping` 本来就是客户端状态），代价只有"这中间崩了要自己去控制里绑回来"这一点。方向键微调按"起点 / 终点"分工（起点 = 先点的那一角，终点 = 后点的）：`←` 终点 X+1、`→` 终点 Z+1、`↑` 终点 Y+1、`↓` 起点 Y−1，`Ctrl` 把这一下从终点换成起点（`Ctrl+←` 起点 X+1、`Ctrl+→` 起点 Z+1、`Ctrl+↑` 起点 Y+1、`Ctrl+↓` 终点 Y−1），Shift 一律反向。高度之所以分成上下界两条键（↑ 抬终点、↓ 压起点），是因为框的顶与底最常分开动；水平方向一根轴一个键就够。三根轴各给各的键，不让方向键去猜"你想调哪根"，猜错了反而要点两次才知道偏了。只点了一个角时，方向键照样能动它。E 那一下还留了兜底：万一还是把背包开了，就关掉背包并按"完成"处理，绝不让玩家按了 E 只看到背包、不知道录没录成。
 
-**录下来的结构落在哪**：**直接就是 `blueprints` 目录里的文件**——`C2SCaptureToFilePacket` → 服务端 `Schematic.capture` → `S2CSchematicFilePacket` → 客户端 `BlueprintTransfer.writeToFile` + `BlueprintLibrary.refresh`。蓝图物品在这条路上只是"把某一份取到手上"的容器，录制不经过它：让录制先写进手上一张纸、再让玩家去导出，等于凭空多一步，还要占住他手上的格子。
+**录下来的结构落在哪**：**直接就是 `maidconstruction/blueprints` 目录里的文件**——`C2SCaptureToFilePacket` → 服务端 `Schematic.capture` → `S2CSchematicFilePacket` → 客户端 `BlueprintTransfer.writeToFile` + `BlueprintLibrary.refresh`。蓝图物品在这条路上只是"把某一份取到手上"的容器，录制不经过它：让录制先写进手上一张纸、再让玩家去导出，等于凭空多一步，还要占住他手上的格子。
 
 **扫描与落盘为什么不在同一端**：扫描只有服务端做得准（客户端的方块实体 NBT 常常是残的），而文件只能写在**玩家自己那台机器**的游戏目录里——所以数据要在网络上来回一趟。中间那段字节只有一种写法（`Schematic.encode` / `decode`，文件与网络共用），别再在客户端解一遍再编一遍。
 
@@ -839,20 +839,34 @@ owner.sendSystemMessage(component);              // 聊天栏：同上
 - `BlueprintMod.MOD_ID`（注册表项、包通道 `newSimpleChannel(new ResourceLocation(MOD_ID, ...))`
   都由它拼出来）；
 - 资源目录 `assets/<id>`、`data/<id>`（`git mv`），以及里面所有 `"<id>:xxx"` 引用：模型与方块状态、
-  配方、掉落表、进度、标签——**替换要大小写敏感**，否则会打中 `"Blueprint: %s"` 这类文案。
+  配方、掉落表、进度、标签；
+- **翻译键里带命名空间的那几类**（`item.`/`block.`/`itemGroup.`/`task.`/`advancements.`/`command.`……）：
+  它们和注册名同源——漏改的表现是"物品名显示成一行原始键"，比不认识新名字难查得多。
 
-**别跟着改的四样**（它们不是命名空间的一部分，改了反而伤玩家或纯属白费）：
+**跟着改名、但不是命名空间的那几样**（1.8.4 一起改了，理由是同一个：名字里留着旧名只会让人更糊涂）：
 
-- `blueprints/` 游戏目录与 `.blueprint` 文件后缀——那是**玩家的文件**；
-- 语言键 `gui.blueprint.*`——译文键只是字符串，不走命名空间（撞了顶多某行字不对，不值当全量改）；
-- 玩家持久数据里的键（`ManualGiveaway.GIVEN_TAG`）——改了等于给每个人重发一次东西；
-- Java 包名与类名（`com.example.blueprint`）——只是路径，对加载没有影响。
+| 旧 | 新 | 玩家要做什么 |
+|---|---|---|
+| `blueprints/`（游戏目录） | `maidconstruction/blueprints/` | 不用——第一次访问自动搬 |
+| `.blueprint`（图纸后缀） | `.maidbp` | 不用——搬家时顺手改；老后缀列表里也认 |
+| `/blueprint`（命令） | `/maidconstruction` | 换个词敲 |
+| `gui.blueprint.*`（语言键） | `gui.maidconstruction.*` | 不用 |
+| `config/blueprint-common.toml` | `config/maidconstruction-common.toml` | **要**：旧的那份不再读，开关得重设一遍 |
 
-命令名 `/blueprint` 也留着了：玩家键入的词不是命名空间，Brigadier 同名的根节点会**合并**而不是崩，
-而改它伤的是肌肉记忆。
+**别跟着改的两样**（改了会直接伤到人）：
 
-**代价要提前说清**：命名空间一变，**旧世界里的物品与方块会变成"未知物品"**。这类改动必须配一句
-"升级请新开世界"，而且要挑版本发（见 CHANGELOG 1.8.4）。
+- 玩家持久数据里的键（`ManualGiveaway.GIVEN_TAG`）——它不是注册名，改了等于给每个进过服的人重发一次说明书；
+- Java 包名与类名（`com.example.blueprint`）——只是路径，对加载没有影响，改了白改。
+
+**改名的实操顺序**（照它走不容易漏）：`gradle.properties` 与 `MOD_ID` → 资源目录 `git mv` →
+全仓替换 `"<旧id>:` 与 `` "<前缀>.<旧id>." `` → 文案与文档 → 编译 + `jar tf` 里确认命名空间 →
+提交（顺手记进 CHANGELOG 的"破坏性更新"）。**替换一定要带上下文**（引号、斜杠、前缀），别裸替一个词：
+`blueprint` 满仓都是（类名、概念名、贴图路径）——我第一遍就是裸替了 `/blueprint`，
+把 `maidconstruction:item/blueprint` 这种贴图路径一起换掉了。
+
+**代价要提前说清**：命名空间一变，**旧世界里的物品与方块会变成"未知物品"**；这一版还顺带改了目录、
+后缀、语言键、命令名与配置文件名（上表）。这类改动必须配一句"升级请新开世界"，而且要挑版本发
+（见 CHANGELOG 1.8.4）。
 
 
 
@@ -1092,7 +1106,7 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 
 ### 图纸格式：现在认什么、缺哪几家
 
-**能读的**：自家 `.blueprint`（gzip NBT：`size` / `palette` / `blocks` / `block_entities`）；
+**能读的**：自家 `.maidbp`（gzip NBT：`size` / `palette` / `blocks` / `block_entities`）；
 机械动力的蓝图（`CreateSchematic`，只读）。**导出的**只有自家格式。
 
 | 生态 | 格式 | 里面装什么 | 接入成本 |

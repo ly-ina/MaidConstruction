@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 图纸库：把 {@code blueprints} 目录里的文件读成结构，供蓝图终端浏览。
+ * 图纸库：把 {@code maidconstruction/blueprints} 目录里的文件读成结构，供蓝图终端浏览。
  * <p>
  * 为什么要有个库：终端要把**目录里所有建筑**都摆出来（缩略图、名字、尺寸、材料），
  * 同一份文件会被反复用到好几帧。读盘与解析（gzip + palette 展开）在这里只做一次，

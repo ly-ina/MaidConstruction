@@ -53,7 +53,7 @@ public class C2SImportBlueprintPacket {
                 return;
             }
             if (msg.data.length > MAX_BYTES) {
-                player.sendSystemMessage(Component.translatable("message.blueprint.import_too_large"));
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.import_too_large"));
                 return;
             }
 
@@ -62,14 +62,14 @@ public class C2SImportBlueprintPacket {
                 schematic = Schematic.read(NbtIo.readCompressed(new ByteArrayInputStream(msg.data)));
             } catch (Exception e) {
                 BlueprintMod.LOGGER.warn("蓝图导入失败", e);
-                player.sendSystemMessage(Component.translatable("message.blueprint.import_failed"));
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.import_failed"));
                 return;
             }
 
             // 读出来了才动背包：解析失败时不该先把玩家手里的东西换一遍
             ItemStack stack = BlueprintItem.findBlankToHand(player);
             if (stack.isEmpty()) {
-                player.sendSystemMessage(Component.translatable("message.blueprint.no_empty"));
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.no_empty"));
                 return;
             }
 
@@ -87,7 +87,7 @@ public class C2SImportBlueprintPacket {
             ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new S2CSchematicDataPacket(id, msg.name, schematic.write(new CompoundTag())));
 
-            player.sendSystemMessage(Component.translatable("message.blueprint.imported",
+            player.sendSystemMessage(Component.translatable("message.maidconstruction.imported",
                     schematic.getWidth(), schematic.getHeight(), schematic.getLength()));
         });
         context.setPacketHandled(true);

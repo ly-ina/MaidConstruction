@@ -164,8 +164,8 @@ public class MaidCraftTickHandler {
      */
     private static void goOffDuty(EntityMaid maid) {
         MaidSpeech.say(maid, MaidCraftOrder.first(maid) != null
-                ? "message.blueprint.craft.off_work_pending"
-                : "message.blueprint.craft.off_work");
+                ? "message.maidconstruction.craft.off_work_pending"
+                : "message.maidconstruction.craft.off_work");
         maid.tryPlayMaidPickupSound(); // 高兴一下（跟"做好了"那一次同一个声音）
         // 刚说完下班，别紧接着又念一句"还没到上班时间"——同一个意思说两遍
         LAST_OFF_DUTY.put(maid.getUUID(), System.currentTimeMillis());
@@ -192,7 +192,7 @@ public class MaidCraftTickHandler {
         }
         OFF_DUTY_TOLD.put(maid.getUUID(), state);
         LAST_OFF_DUTY.put(maid.getUUID(), System.currentTimeMillis());
-        MaidSpeech.say(maid, "message.blueprint.craft.off_duty");
+        MaidSpeech.say(maid, "message.maidconstruction.craft.off_duty");
         BlueprintMod.LOGGER.info("女仆 {} 手上有单，但此刻不是她的工作时间（作息 {}）",
                 maid.getUUID(), maid.getSchedule());
     }
@@ -243,7 +243,7 @@ public class MaidCraftTickHandler {
         if (recipe == null) {
             // 池子里没有"怎么做"（或者那条配方 id 已经不在了）：这张单做不了。
             // 撤掉它而不是留着卡住——不然排在后面的单永远轮不到
-            warn(level, maid, true, "message.blueprint.craft.no_recipe",
+            warn(level, maid, true, "message.maidconstruction.craft.no_recipe",
                     order.product().getHoverName());
             MaidCraftOrder.updateFirst(maid, order.withRemaining(0));
             return;
@@ -252,7 +252,7 @@ public class MaidCraftTickHandler {
         MaidItemSource self = new MaidItemSource(maid);
         IItemHandler backpack = self.getBackpack();
         if (backpack == null) {
-            warn(level, maid, true, "message.blueprint.maid_no_backpack");
+            warn(level, maid, true, "message.maidconstruction.maid_no_backpack");
             return;
         }
 
@@ -276,7 +276,7 @@ public class MaidCraftTickHandler {
             // 分两种说：她身上压根没有绑定书（那就不是"仓库里没有"，是书没给她），
             // 还是书在、只是里面确实没有这几样
             if (BlueprintBuildController.findBindingBook(maid).isEmpty()) {
-                warn(level, maid, false, "message.blueprint.craft.no_book");
+                warn(level, maid, false, "message.maidconstruction.craft.no_book");
             } else {
                 warnWholeChain(level, maid, self);
             }
@@ -299,7 +299,7 @@ public class MaidCraftTickHandler {
             }
             if (hasWanted) {
                 // 背包塞不下说的是"这一趟搬运"的事，照排头那张单说就够准
-                warn(level, maid, false, "message.blueprint.craft.backpack_full",
+                warn(level, maid, false, "message.maidconstruction.craft.backpack_full",
                         order.product().getHoverName());
             } else {
                 warnWholeChain(level, maid, self);
@@ -338,7 +338,7 @@ public class MaidCraftTickHandler {
                     uuid, product.getHoverName().getString(), t);
         }
         if (!product.isEmpty()) {
-            warn(level, maid, false, "message.blueprint.craft.recipe_error", product.getHoverName());
+            warn(level, maid, false, "message.maidconstruction.craft.recipe_error", product.getHoverName());
         }
     }
 
@@ -364,7 +364,7 @@ public class MaidCraftTickHandler {
             }
             if (!recipe.matches(grid, level)) {
                 MaidCraftOrder.Order stuck = MaidCraftOrder.first(maid);
-                warn(level, maid, true, "message.blueprint.craft.make_failed",
+                warn(level, maid, true, "message.maidconstruction.craft.make_failed",
                         stuck == null ? ItemStack.EMPTY.getHoverName() : stuck.product().getHoverName());
                 return;
             }
@@ -551,7 +551,7 @@ public class MaidCraftTickHandler {
         if (!looped.isEmpty()) {
             // 说清是"绕回来了"，别落进"还缺材料"那一句：那会把主人支去再塞点材料，
             // 而这条路塞多少材料都走不通
-            warn(level, maid, false, "message.blueprint.craft.recipe_loop",
+            warn(level, maid, false, "message.maidconstruction.craft.recipe_loop",
                     order.product().getHoverName(), looped.getHoverName());
             return true; // 这一步有交代了，别再叠一句"还缺材料"
         }
@@ -590,7 +590,7 @@ public class MaidCraftTickHandler {
         if (missing.isEmpty()) {
             return;
         }
-        warn(level, maid, false, "message.blueprint.craft.missing",
+        warn(level, maid, false, "message.maidconstruction.craft.missing",
                 root.product().getHoverName(), describe(missing));
     }
 
@@ -705,7 +705,7 @@ public class MaidCraftTickHandler {
         }
         maid.getNavigation().stop();
         maid.getLookControl().setLookAt(owner, 30.0F, 30.0F);
-        MaidSpeech.say(maid, "message.blueprint.craft.finished", describeProducts(finished));
+        MaidSpeech.say(maid, "message.maidconstruction.craft.finished", describeProducts(finished));
         // 报告的同时高兴一下：她也是跑过来的
         maid.tryPlayMaidPickupSound();
         forgetReport(uuid);

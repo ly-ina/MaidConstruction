@@ -73,12 +73,12 @@ public class BoundBlockHighlighter {
         Level level = player.level();
         if (boundDimension != null && !boundDimension.equals(level.dimension().location())) {
             player.displayClientMessage(
-                    Component.translatable("message.blueprint.highlight_other_dimension"), true);
+                    Component.translatable("message.maidconstruction.highlight_other_dimension"), true);
         } else if (!level.isLoaded(pos)) {
             player.displayClientMessage(
-                    Component.translatable("message.blueprint.highlight_not_loaded"), true);
+                    Component.translatable("message.maidconstruction.highlight_not_loaded"), true);
         } else {
-            player.displayClientMessage(Component.translatable("message.blueprint.highlight_started",
+            player.displayClientMessage(Component.translatable("message.maidconstruction.highlight_started",
                     BindingBookItem.getBoundBlockName(stack)), true);
         }
     }

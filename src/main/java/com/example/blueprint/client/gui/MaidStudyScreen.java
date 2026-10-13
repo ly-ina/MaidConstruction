@@ -169,7 +169,7 @@ public class MaidStudyScreen extends Screen {
     private int top;
 
     public MaidStudyScreen(int maidEntityId) {
-        super(Component.translatable("gui.blueprint.study.title"));
+        super(Component.translatable("gui.maidconstruction.study.title"));
         this.maidEntityId = maidEntityId;
     }
 
@@ -180,9 +180,9 @@ public class MaidStudyScreen extends Screen {
 
         // 搜索框放在标题右边、标题栏里（面板从 HEADER_HEIGHT 下面才开始，不会压到槽位）
         this.searchBox = new EditBox(this.font, left + 70, top + 4, 180, 14,
-                Component.translatable("gui.blueprint.study.search"));
+                Component.translatable("gui.maidconstruction.study.search"));
         this.searchBox.setMaxLength(48);
-        this.searchBox.setHint(Component.translatable("gui.blueprint.study.search_hint"));
+        this.searchBox.setHint(Component.translatable("gui.maidconstruction.study.search_hint"));
         this.searchBox.setValue(filter);
         this.searchBox.setResponder(this::onSearchChanged);
         this.addRenderableWidget(this.searchBox);
@@ -193,14 +193,14 @@ public class MaidStudyScreen extends Screen {
         // 没选东西时不该有一排按钮杵在那儿。
         // 数量由主人自己敲：只收数字、最多三位，上限跟服务端那张单一致（256）
         this.countBox = new EditBox(this.font, left + PANEL_X, top + WINDOW_HEIGHT - 40,
-                PANEL_WIDTH, 16, Component.translatable("gui.blueprint.study.order_count"));
+                PANEL_WIDTH, 16, Component.translatable("gui.maidconstruction.study.order_count"));
         this.countBox.setMaxLength(3);
         this.countBox.setFilter(text -> text.isEmpty() || text.matches("\\d{1,3}"));
         this.countBox.setValue(DEFAULT_ORDER_COUNT);
-        this.countBox.setHint(Component.translatable("gui.blueprint.study.order_count"));
+        this.countBox.setHint(Component.translatable("gui.maidconstruction.study.order_count"));
         this.addRenderableWidget(this.countBox);
 
-        this.orderButton = Button.builder(Component.translatable("gui.blueprint.study.order"),
+        this.orderButton = Button.builder(Component.translatable("gui.maidconstruction.study.order"),
                         b -> sendOrder(selected, typedCount()))
                 .bounds(left + PANEL_X, top + WINDOW_HEIGHT - 22, PANEL_WIDTH, 18).build();
         this.addRenderableWidget(this.orderButton);
@@ -208,7 +208,7 @@ public class MaidStudyScreen extends Screen {
         // 撤单管的是**整个队列**，跟左下那块"她现在的活"是一回事，就放它下面。
         // 位置往下让过、也往右让了一点：上面三行列表 + 一行状态要用那片地方，
         // 而最左下角还立着那个"?"（x = left+8，宽 11），顶着它画会正好压住
-        this.cancelButton = Button.builder(Component.translatable("gui.blueprint.study.cancel_orders"),
+        this.cancelButton = Button.builder(Component.translatable("gui.maidconstruction.study.cancel_orders"),
                         b -> sendOrder(-1, 0))
                 .bounds(left + 26, top + WINDOW_HEIGHT - 20, 128, 18).build();
         this.addRenderableWidget(this.cancelButton);
@@ -324,7 +324,7 @@ public class MaidStudyScreen extends Screen {
     private void drawBody(GuiGraphics graphics, List<MaidStudyPool.Learned> pool,
                           int mouseX, int mouseY) {
         if (maid() == null) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.study.maid_gone"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.study.maid_gone"),
                     left + 10, top + GRID_Y + 4, COLOR_LABEL, false);
             return;
         }
@@ -332,7 +332,7 @@ public class MaidStudyScreen extends Screen {
         // 左下那块"她现在的活"跟池子里有没有东西无关，先画（要鼠标坐标画悬停）
         drawQueue(graphics, mouseX, mouseY);
         if (pool.isEmpty()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.study.empty"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.study.empty"),
                     left + 10, top + GRID_Y + 4, COLOR_LABEL, false);
             return;
         }
@@ -347,7 +347,7 @@ public class MaidStudyScreen extends Screen {
         scrollRow = Math.max(0, Math.min(maxScroll, scrollRow));
 
         if (matches.isEmpty()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.study.no_match"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.study.no_match"),
                     left + 10, top + GRID_Y + 4, COLOR_LABEL, false);
         } else {
             drawProductGrid(graphics, pool, matches, mouseX, mouseY);
@@ -360,14 +360,14 @@ public class MaidStudyScreen extends Screen {
                 drawRecipePanel(graphics, pool.get(selected), mouseX, mouseY);
             }
         } else {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.study.pick_hint"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.study.pick_hint"),
                     left + PANEL_X, top + GRID_Y + 4, COLOR_LABEL, false);
         }
         // 翻页提示挪到标题栏右边：网格底下那点地方要留给下单控件
         int totalRows = (matches.size() + COLUMNS - 1) / COLUMNS;
         if (totalRows > ROWS) {
             graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.study.scroll", scrollRow + 1,
+                    Component.translatable("gui.maidconstruction.study.scroll", scrollRow + 1,
                             totalRows - ROWS + 1),
                     left + 256, top + 7, COLOR_LABEL, false);
         }
@@ -396,13 +396,13 @@ public class MaidStudyScreen extends Screen {
         if (hovered && !flashOverlaps(x - 2, y - 2, x + HELP_SIZE + 2, y + HELP_SIZE + 2)) {
             // 行数记在 lang 里：一行一句，各自短，换语言也不会撑出去
             graphics.renderComponentTooltip(this.font, List.of(
-                    Component.translatable("gui.blueprint.study.help.pick"),
-                    Component.translatable("gui.blueprint.study.help.uses"),
-                    Component.translatable("gui.blueprint.study.help.cell"),
-                    Component.translatable("gui.blueprint.study.help.drill"),
-                    Component.translatable("gui.blueprint.study.help.forget"),
-                    Component.translatable("gui.blueprint.study.help.order"),
-                    Component.translatable("gui.blueprint.study.help.search")), mouseX, mouseY);
+                    Component.translatable("gui.maidconstruction.study.help.pick"),
+                    Component.translatable("gui.maidconstruction.study.help.uses"),
+                    Component.translatable("gui.maidconstruction.study.help.cell"),
+                    Component.translatable("gui.maidconstruction.study.help.drill"),
+                    Component.translatable("gui.maidconstruction.study.help.forget"),
+                    Component.translatable("gui.maidconstruction.study.help.order"),
+                    Component.translatable("gui.maidconstruction.study.help.search")), mouseX, mouseY);
         }
     }
 
@@ -466,7 +466,7 @@ public class MaidStudyScreen extends Screen {
         List<MaidCraftOrder.Order> orders = MaidCraftOrder.pending(maid);
         if (orders.isEmpty()) {
             ordersScrollRow = 0;
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.study.queue_empty"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.study.queue_empty"),
                     x, y + 4, COLOR_LABEL, false);
             return;
         }
@@ -485,13 +485,13 @@ public class MaidStudyScreen extends Screen {
         if (!MaidIndustryTask.isWorkingTime(maid)) {
             graphics.drawString(this.font,
                     this.font.plainSubstrByWidth(
-                            Component.translatable("gui.blueprint.study.off_duty").getString(),
+                            Component.translatable("gui.maidconstruction.study.off_duty").getString(),
                             PANEL_X - 20),
                     x, statusY, COLOR_LABEL, false);
         } else {
             graphics.drawString(this.font,
                     this.font.plainSubstrByWidth(
-                            Component.translatable("gui.blueprint.study.queue_summary",
+                            Component.translatable("gui.maidconstruction.study.queue_summary",
                                     orders.size(), MaidCraftOrder.pendingAmount(maid)).getString(),
                             PANEL_X - 20),
                     x, statusY, COLOR_LABEL, false);
@@ -515,7 +515,7 @@ public class MaidStudyScreen extends Screen {
         if (nested) {
             graphics.drawString(this.font,
                     this.font.plainSubstrByWidth(
-                            Component.translatable("gui.blueprint.study.queue_for",
+                            Component.translatable("gui.maidconstruction.study.queue_for",
                                     order.root().getHoverName()).getString(), 40),
                     x + 62, y + 5, COLOR_LABEL, false);
         }
@@ -562,7 +562,7 @@ public class MaidStudyScreen extends Screen {
     /** 撤掉队列里的第 index 张 */
     private void sendCancel(int index, int flashX, int flashY) {
         ModNetwork.CHANNEL.sendToServer(new C2SCancelCraftOrderPacket(maidEntityId, index));
-        flashAt(herLine("message.blueprint.craft.cleared_one"), flashX, flashY);
+        flashAt(herLine("message.maidconstruction.craft.cleared_one"), flashX, flashY);
     }
 
     /**
@@ -649,17 +649,17 @@ public class MaidStudyScreen extends Screen {
                         PANEL_WIDTH - 4),
                 x, y, COLOR_TEXT, false);
 
-        Component count = Component.translatable("gui.blueprint.study.recipe_count",
+        Component count = Component.translatable("gui.maidconstruction.study.recipe_count",
                 learned.recipes().size());
         graphics.drawString(this.font, count, x, y + 12, COLOR_LABEL, false);
         if (learned.hasMultipleRecipes()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.study.multi"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.study.multi"),
                     x + this.font.width(count) + 6, y + 12, COLOR_PRIORITY, false);
         }
 
         List<MaidStudyPool.Recipe> recipes = learned.recipes();
         if (recipes.isEmpty()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.study.no_recipe"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.study.no_recipe"),
                     x, y + 26, COLOR_LABEL, false);
             return;
         }
@@ -758,7 +758,7 @@ public class MaidStudyScreen extends Screen {
         if (learned.hasMultipleRecipes()) {
             // 按面板宽度截断——英文那句比 88 还宽，不截就会捅出面板
             String text = this.font.plainSubstrByWidth(
-                    Component.translatable("gui.blueprint.study.recipe_pick").getString(),
+                    Component.translatable("gui.maidconstruction.study.recipe_pick").getString(),
                     PANEL_WIDTH);
             graphics.drawString(this.font, text,
                     x + Math.max(0, (PANEL_WIDTH - this.font.width(text)) / 2), outY + 20,
@@ -888,7 +888,7 @@ public class MaidStudyScreen extends Screen {
             // 她没学过这东西。这话得**飘在界面上**说（理由见 flashAt）——之前发动作栏，
             // 而开着界面时动作栏是不画的，所以看着像"点了没反应"。
             // 这条判断客户端自己就能下（池子本来就同步在客户端），不用跑一趟服务端
-            flashAt(herLine("message.blueprint.study.not_learned"), mouseX, mouseY);
+            flashAt(herLine("message.maidconstruction.study.not_learned"), mouseX, mouseY);
             return true;
         }
         selected = target;
@@ -999,10 +999,10 @@ public class MaidStudyScreen extends Screen {
 
         List<ItemStack> uses = learnedUsesOf(usesMaterial);
         graphics.drawString(this.font,
-                Component.translatable("gui.blueprint.study.uses_count", uses.size()),
+                Component.translatable("gui.maidconstruction.study.uses_count", uses.size()),
                 x, y + 12, COLOR_LABEL, false);
         if (uses.isEmpty()) {
-            graphics.drawString(this.font, Component.translatable("gui.blueprint.study.no_uses"),
+            graphics.drawString(this.font, Component.translatable("gui.maidconstruction.study.no_uses"),
                     x, y + 26, COLOR_LABEL, false);
             return;
         }
@@ -1030,12 +1030,12 @@ public class MaidStudyScreen extends Screen {
         }
         if (totalRows > USES_ROWS) {
             graphics.drawString(this.font,
-                    Component.translatable("gui.blueprint.study.scroll", usesScrollRow + 1,
+                    Component.translatable("gui.maidconstruction.study.scroll", usesScrollRow + 1,
                             totalRows - USES_ROWS + 1),
                     x, listY + USES_ROWS * USES_CELL + 2, COLOR_LABEL, false);
         }
         graphics.drawString(this.font, this.font.plainSubstrByWidth(
-                        Component.translatable("gui.blueprint.study.uses_hint").getString(),
+                        Component.translatable("gui.maidconstruction.study.uses_hint").getString(),
                         PANEL_WIDTH),
                 x, listY + USES_ROWS * USES_CELL + 14, COLOR_LABEL, false);
     }
@@ -1291,14 +1291,14 @@ public class MaidStudyScreen extends Screen {
         // 撤单那颗按钮在左下，反馈就飘它旁边；下单的反馈飘面板底下那排控件上方
         if (productIndex < 0) {
             ModNetwork.CHANNEL.sendToServer(new C2SMaidCraftOrderPacket(maidEntityId, -1, 0));
-            flashAt(herLine("message.blueprint.craft.cleared"), left + 10, top + QUEUE_Y + 38);
+            flashAt(herLine("message.maidconstruction.craft.cleared"), left + 10, top + QUEUE_Y + 38);
             return;
         }
         // 排不排得上，客户端自己就能算（待做清单本来就同步在客户端，上限也是公开常量）。
         // 算出来排不上就**别发了**，直接飘一句：发过去只会被服务端静默拒掉，
         // 而主人开着界面，服务端说什么他都看不见
         if (!canFitInQueue(pool(), productIndex, count)) {
-            flashAt(herLine("message.blueprint.craft.order_full"),
+            flashAt(herLine("message.maidconstruction.craft.order_full"),
                     left + PANEL_X, top + WINDOW_HEIGHT - 46);
             return;
         }
@@ -1336,7 +1336,7 @@ public class MaidStudyScreen extends Screen {
         ModNetwork.CHANNEL.sendToServer(
                 new C2SSelectStudyRecipePacket(maidEntityId, productIndex, recipeIndex));
         // 反馈在界面里飘：服务端那边不再发聊天了（开着界面时聊天栏根本不画）
-        flashAt(herLine("message.blueprint.study.recipe_selected"), mouseX, mouseY);
+        flashAt(herLine("message.maidconstruction.study.recipe_selected"), mouseX, mouseY);
     }
 
     /** 忘掉一样产物（连同它的配方）。删完池子会经同步刷新，先把选中清掉给个即时反馈 */
@@ -1350,6 +1350,6 @@ public class MaidStudyScreen extends Screen {
         selected = -1;
         showUses = false;
         usesScrollRow = 0;
-        flashAt(herLine("message.blueprint.study.forgotten", product.getHoverName()), mouseX, mouseY);
+        flashAt(herLine("message.maidconstruction.study.forgotten", product.getHoverName()), mouseX, mouseY);
     }
 }

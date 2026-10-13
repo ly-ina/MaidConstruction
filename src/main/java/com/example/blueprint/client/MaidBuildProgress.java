@@ -102,10 +102,10 @@ public final class MaidBuildProgress {
          */
         public String phaseKey() {
             return switch (phase) {
-                case 1 -> "hud.blueprint.maid_phase.fetch";
-                case 2 -> "hud.blueprint.maid_phase.walk";
-                case 3 -> "hud.blueprint.maid_phase.stuck";
-                default -> "hud.blueprint.maid_phase.build";
+                case 1 -> "hud.maidconstruction.maid_phase.fetch";
+                case 2 -> "hud.maidconstruction.maid_phase.walk";
+                case 3 -> "hud.maidconstruction.maid_phase.stuck";
+                default -> "hud.maidconstruction.maid_phase.build";
             };
         }
     }

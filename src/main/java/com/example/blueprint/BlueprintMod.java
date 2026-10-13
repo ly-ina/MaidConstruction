@@ -29,7 +29,7 @@ public class BlueprintMod {
     public BlueprintMod() {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
 
-        // 行为开关落在 config/blueprint-common.toml，两边各读本地那份（见 BlueprintConfig）
+        // 行为开关落在 config/maidconstruction-common.toml，两边各读本地那份（见 BlueprintConfig）
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, BlueprintConfig.SPEC);
 
         ModItems.ITEMS.register(modBus);

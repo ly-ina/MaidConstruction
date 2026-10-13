@@ -80,7 +80,7 @@ public class BindingBookItem extends Item {
                 clearBinding(stack);
                 if (!level.isClientSide) {
                     context.getPlayer().displayClientMessage(
-                            Component.translatable("message.blueprint.binding_cleared"), true);
+                            Component.translatable("message.maidconstruction.binding_cleared"), true);
                 }
             }
             return InteractionResult.sidedSuccess(level.isClientSide);
@@ -92,7 +92,7 @@ public class BindingBookItem extends Item {
             ResourceLocation blockId = ForgeRegistries.BLOCKS.getKey(level.getBlockState(pos).getBlock());
             setBinding(stack, pos, level.dimension().location(), blockId);
             context.getPlayer().displayClientMessage(
-                    Component.translatable("message.blueprint.binding_set", describe(stack)), true);
+                    Component.translatable("message.maidconstruction.binding_set", describe(stack)), true);
         }
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
@@ -122,22 +122,22 @@ public class BindingBookItem extends Item {
 
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
-        tooltip.add(Component.translatable("tooltip.blueprint.binding_book").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.translatable("tooltip.maidconstruction.binding_book").withStyle(ChatFormatting.GRAY));
 
         if (hasBinding(stack)) {
-            tooltip.add(Component.translatable("tooltip.blueprint.binding_book_bound", describe(stack))
+            tooltip.add(Component.translatable("tooltip.maidconstruction.binding_book_bound", describe(stack))
                     .withStyle(ChatFormatting.AQUA));
-            tooltip.add(Component.translatable("tooltip.blueprint.binding_book_hint_highlight")
+            tooltip.add(Component.translatable("tooltip.maidconstruction.binding_book_hint_highlight")
                     .withStyle(ChatFormatting.DARK_GRAY));
-            tooltip.add(Component.translatable("tooltip.blueprint.binding_book_hint_clear")
+            tooltip.add(Component.translatable("tooltip.maidconstruction.binding_book_hint_clear")
                     .withStyle(ChatFormatting.DARK_GRAY));
         } else {
-            tooltip.add(Component.translatable("tooltip.blueprint.binding_book_unbound")
+            tooltip.add(Component.translatable("tooltip.maidconstruction.binding_book_unbound")
                     .withStyle(ChatFormatting.DARK_GRAY));
-            tooltip.add(Component.translatable("tooltip.blueprint.binding_book_hint_bind")
+            tooltip.add(Component.translatable("tooltip.maidconstruction.binding_book_hint_bind")
                     .withStyle(ChatFormatting.DARK_GRAY));
         }
-        tooltip.add(Component.translatable("tooltip.blueprint.binding_book_bauble")
+        tooltip.add(Component.translatable("tooltip.maidconstruction.binding_book_bauble")
                 .withStyle(ChatFormatting.DARK_GRAY));
     }
 
@@ -205,15 +205,15 @@ public class BindingBookItem extends Item {
     public static Component getBoundBlockName(ItemStack stack) {
         CompoundTag binding = bindingTag(stack);
         if (binding == null || !binding.contains(KEY_BLOCK, CompoundTag.TAG_STRING)) {
-            return Component.translatable("tooltip.blueprint.binding_book_unknown_block");
+            return Component.translatable("tooltip.maidconstruction.binding_book_unknown_block");
         }
         ResourceLocation id = ResourceLocation.tryParse(binding.getString(KEY_BLOCK));
         if (id == null) {
-            return Component.translatable("tooltip.blueprint.binding_book_unknown_block");
+            return Component.translatable("tooltip.maidconstruction.binding_book_unknown_block");
         }
         Block block = ForgeRegistries.BLOCKS.getValue(id);
         return block == null
-                ? Component.translatable("tooltip.blueprint.binding_book_unknown_block")
+                ? Component.translatable("tooltip.maidconstruction.binding_book_unknown_block")
                 : block.getName();
     }
 
@@ -226,7 +226,7 @@ public class BindingBookItem extends Item {
         ResourceLocation dimension = getBoundDimension(stack);
         String location = (dimension == null ? "?" : dimension.toString())
                 + " " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ();
-        return Component.translatable("tooltip.blueprint.binding_book_format",
+        return Component.translatable("tooltip.maidconstruction.binding_book_format",
                 getBoundBlockName(stack), location);
     }
 }
