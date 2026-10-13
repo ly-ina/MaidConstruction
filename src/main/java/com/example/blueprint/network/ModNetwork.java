@@ -45,7 +45,7 @@ public class ModNetwork {
     // 1.8.0 再往后：开工口令（C2SCommandPostStartPacket，见 DEVELOPER §12 第 4 步），升到 13。
     // 删掉录制态那个包之后，它后面那些包的 id 全都前移了一格，所以再升一档到 14。
     // 按约定：老客户端连新服务端（或反过来）是不允许的，宁可连不上也不要在游戏里出怪事
-    // 1.8.4：加了 S2CPostBindingPacket（"我绑的是哪一台"，给终端提示用），升到 15
+    // 2.0.0：加了 S2CPostBindingPacket（"我绑的是哪一台"，给终端提示用），升到 15
     private static final String PROTOCOL_VERSION = "15";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
