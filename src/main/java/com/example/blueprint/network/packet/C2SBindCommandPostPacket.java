@@ -68,6 +68,7 @@ public class C2SBindCommandPostPacket {
                 if (post.isBoundTo(player.getUUID())) {
                     post.unbind();
                     CommandPostBindings.unbind(player);
+                    CommandPostBindings.send(player);
                     player.sendSystemMessage(Component.translatable("message.maidconstruction.post.unbound"));
                 } else {
                     player.sendSystemMessage(Component.translatable("message.maidconstruction.post.not_yours"));
@@ -93,6 +94,8 @@ public class C2SBindCommandPostPacket {
             if (!post.isBoundTo(player.getUUID())) {
                 post.bind(player.getUUID(), player.getGameProfile().getName());
             }
+            // 提示里要写"绑的是哪一台"（客户端画），所以绑定/换绑之后同步一份过去
+            CommandPostBindings.send(player);
             if (previous == null) {
                 player.sendSystemMessage(Component.translatable("message.maidconstruction.post.bound",
                         player.getGameProfile().getName()));

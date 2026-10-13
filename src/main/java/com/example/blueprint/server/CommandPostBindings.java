@@ -1,6 +1,9 @@
 package com.example.blueprint.server;
 
+import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.block.CommandPostBlockEntity;
+import com.example.blueprint.network.ModNetwork;
+import com.example.blueprint.network.packet.S2CPostBindingPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.Registries;
@@ -10,6 +13,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.network.PacketDistributor;
 
 import javax.annotation.Nullable;
 
@@ -30,6 +37,7 @@ import javax.annotation.Nullable;
  * <b>老存档（1.8.3 及以前）没有这份记录</b>：那时可以绑多台。第一次用到某个绑定动作时**就地认下**
  * （把当前这一台记成他的），于是不会把人锁在门外——见 {@link #isCurrent}。
  */
+@Mod.EventBusSubscriber(modid = BlueprintMod.MOD_ID)
 public final class CommandPostBindings {
 
     /** 他绑的那一台在哪个维度（不记维度的话，换个世界坐标可能刚好又对上了） */
@@ -96,6 +104,23 @@ public final class CommandPostBindings {
     /** 玩家自己解绑（潜行右键）：清掉记录 */
     public static void unbind(ServerPlayer player) {
         forget(player);
+    }
+
+    /** 登录时推一次：客户端刚进来什么都不知道（重登、换存档都靠这一条） */
+    @SubscribeEvent
+    public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            send(player);
+        }
+    }
+
+    /** 把他现在绑的那台告诉客户端（终端物品的提示要显示，见 {@code S2CPostBindingPacket}） */
+    public static void send(ServerPlayer player) {
+        GlobalPos current = current(player);
+        ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                current == null ? S2CPostBindingPacket.none()
+                        : new S2CPostBindingPacket(current.dimension().location().toString(),
+                                current.pos()));
     }
 
     private static void remember(ServerPlayer player, GlobalPos post) {

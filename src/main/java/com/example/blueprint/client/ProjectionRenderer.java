@@ -342,6 +342,8 @@ public class ProjectionRenderer {
         CommandPostProjections.clear();
         // 名册是"这个存档里我的女仆"，换个存档就不作数了，一并清掉
         MaidRoster.clear();
+        // "我绑的那一台"同理：那是这个存档里的一台
+        ClientPostBinding.clear();
     }
 
     /**

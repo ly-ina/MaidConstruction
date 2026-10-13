@@ -2,6 +2,7 @@ package com.example.blueprint.item;
 
 import com.example.blueprint.block.CommandPostBlockEntity;
 import com.example.blueprint.client.BlueprintScreenOpener;
+import com.example.blueprint.client.ClientPostBinding;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.network.packet.C2SBindCommandPostPacket;
 import net.minecraft.core.BlockPos;
@@ -84,5 +85,8 @@ public class BlueprintTerminalItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
         tooltip.add(Component.translatable("tooltip.maidconstruction.terminal"));
+        // 绑的是哪一台、在哪：走远之后最想知道的就是这个。绑定状态在服务端（玩家持久数据），
+        // 客户端这份是服务端推过来的，见 S2CPostBindingPacket / ClientPostBinding
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> tooltip.add(ClientPostBinding.describe()));
     }
 }
