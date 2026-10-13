@@ -234,6 +234,8 @@
   "gui.maidconstruction.post.unassigned": "%s no longer works here",
   "gui.maidconstruction.post.close": "Close",
   "gui.maidconstruction.post.missing": "This command post is gone",
+  "message.maidconstruction.post.switched": "Now bound to this command post (%s) - you can only bind one",
+  "message.maidconstruction.post.auto_unbound": "The command post you had bound is now unbound",
   "gui.maidconstruction.library.title": "Blueprint Library",
   "gui.maidconstruction.home.title": "Blueprint Terminal",
   "gui.maidconstruction.home.post": "Command post",

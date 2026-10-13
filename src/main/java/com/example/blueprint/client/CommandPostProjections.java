@@ -49,8 +49,19 @@ public final class CommandPostProjections {
         BlockPos key = pos.immutable();
         if (owner == null && projection == null) {
             POSTS.remove(key);
-        } else {
-            POSTS.put(key, new Post(owner, projection));
+            return;
+        }
+        POSTS.put(key, new Post(owner, projection));
+        // 一个玩家**同时只绑一台**（服务端那条规矩，见 CommandPostBindings）。所以某台刚变成"是他的"，
+        // 别处那些"owner 还写着是他"的都是**过期的话**——多半是换绑时那台在未加载区块里、没来得及清。
+        // 在这儿顺手划掉：不然从终端进名册/图纸库时，"最近一台属于我的"可能挑中那台旧的，
+        // 指派就落到没有投影的那一台上去了——看着正是"指派了没反应"。
+        if (owner != null) {
+            for (Map.Entry<BlockPos, Post> entry : POSTS.entrySet()) {
+                if (!entry.getKey().equals(key) && owner.equals(entry.getValue().owner())) {
+                    POSTS.put(entry.getKey(), new Post(null, entry.getValue().projection()));
+                }
+            }
         }
     }
 

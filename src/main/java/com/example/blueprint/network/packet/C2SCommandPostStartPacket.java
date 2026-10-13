@@ -1,6 +1,7 @@
 package com.example.blueprint.network.packet;
 
 import com.example.blueprint.block.CommandPostBlockEntity;
+import com.example.blueprint.server.CommandPostBindings;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -60,7 +61,8 @@ public class C2SCommandPostStartPacket {
             if (player.distanceToSqr(msg.pos.getCenter()) > MAX_DISTANCE_SQR) {
                 return;
             }
-            if (!post.isBoundTo(player.getUUID())) {
+            // 只有"他现在绑的那一台"能下令开工：换绑之后旧那台的 owner 已经过期
+            if (!CommandPostBindings.canUse(player, player.serverLevel(), post)) {
                 player.displayClientMessage(
                         Component.translatable("message.maidconstruction.post.not_yours"), true);
                 return;

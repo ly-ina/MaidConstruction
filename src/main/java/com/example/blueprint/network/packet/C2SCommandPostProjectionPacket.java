@@ -2,6 +2,7 @@ package com.example.blueprint.network.packet;
 
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.block.CommandPostBlockEntity;
+import com.example.blueprint.server.CommandPostBindings;
 import com.example.blueprint.schematic.Schematic;
 import com.example.blueprint.schematic.SchematicStorage;
 import net.minecraft.core.BlockPos;
@@ -102,8 +103,10 @@ public class C2SCommandPostProjectionPacket {
                 return;
             }
             BlockEntity be = level.getBlockEntity(msg.pos);
-            // 只有**绑定玩家**能放与取消：投影对所有人可见，动它得是主人（DEVELOPER §12）
-            if (!(be instanceof CommandPostBlockEntity post) || !post.isBoundTo(player.getUUID())) {
+            // 只有**绑定玩家**能放与取消：投影对所有人可见，动它得是主人（DEVELOPER §12）。
+            // 而"主人"指的是他**现在**绑的那一台——绑了第二台，旧那台就不算他的了
+            if (!(be instanceof CommandPostBlockEntity post)
+                    || !CommandPostBindings.canUse(player, player.serverLevel(), post)) {
                 return;
             }
 

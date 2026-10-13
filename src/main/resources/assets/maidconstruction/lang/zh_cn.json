@@ -214,6 +214,8 @@
   "gui.maidconstruction.project.keys": "←→ 旋转 · ↑↓ 翻面 · R 清空位置 · E 定下 · Q 取消",
   "gui.maidconstruction.project.need_anchor": "先右键点一个位置",
   "message.maidconstruction.post.bound": "已绑定这台指挥台（%s）",
+  "message.maidconstruction.post.switched": "已改为绑定这台指挥台（%s）——一个玩家只能绑一台",
+  "message.maidconstruction.post.auto_unbound": "原来绑的那台已自动解绑",
   "message.maidconstruction.post.unbound": "已解绑这台指挥台",
   "message.maidconstruction.post.already_yours": "这台已经是你的了",
   "message.maidconstruction.post.taken": "这台是 %s 的，得先让它解绑",

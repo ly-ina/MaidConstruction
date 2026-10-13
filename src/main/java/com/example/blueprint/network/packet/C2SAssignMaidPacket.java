@@ -2,6 +2,7 @@ package com.example.blueprint.network.packet;
 
 import com.example.blueprint.BlueprintMod;
 import com.example.blueprint.block.CommandPostBlockEntity;
+import com.example.blueprint.server.CommandPostBindings;
 import com.example.blueprint.server.MaidOwnership;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -60,7 +61,10 @@ public class C2SAssignMaidPacket {
             }
             ServerLevel level = player.serverLevel();
             BlockEntity be = level.getBlockEntity(msg.pos);
-            if (!(be instanceof CommandPostBlockEntity post) || !post.isBoundTo(player.getUUID())) {
+            // 能动的只有"他现在绑的那一台"：绑了第二台之后，旧那台就算 owner 还写着他的名字
+            // 也不算数了（见 CommandPostBindings）——不然指派会落到没有投影的那一台上
+            if (!(be instanceof CommandPostBlockEntity post)
+                    || !CommandPostBindings.canUse(player, player.serverLevel(), post)) {
                 return;
             }
 

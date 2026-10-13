@@ -1,7 +1,9 @@
 package com.example.blueprint.network.packet;
 
 import com.example.blueprint.block.CommandPostBlockEntity;
+import com.example.blueprint.server.CommandPostBindings;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -60,9 +62,12 @@ public class C2SBindCommandPostPacket {
                 return;
             }
 
+            GlobalPos here = GlobalPos.of(level.dimension(), msg.pos);
+
             if (msg.unbind) {
                 if (post.isBoundTo(player.getUUID())) {
                     post.unbind();
+                    CommandPostBindings.unbind(player);
                     player.sendSystemMessage(Component.translatable("message.maidconstruction.post.unbound"));
                 } else {
                     player.sendSystemMessage(Component.translatable("message.maidconstruction.post.not_yours"));
@@ -70,15 +75,32 @@ public class C2SBindCommandPostPacket {
                 return;
             }
 
-            if (post.getOwner() == null) {
-                post.bind(player.getUUID(), player.getGameProfile().getName());
-                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.bound",
-                        player.getGameProfile().getName()));
-            } else if (post.isBoundTo(player.getUUID())) {
-                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.already_yours"));
-            } else {
+            // 别人绑着的：不动。至于"自己的 owner 已经过期"那种，这一句不拦，下面按重新绑定走
+            if (post.getOwner() != null && !post.isBoundTo(player.getUUID())) {
                 player.sendSystemMessage(Component.translatable("message.maidconstruction.post.taken",
                         post.getOwnerName()));
+                return;
+            }
+            // 已经是我现在绑的那一台：不必重绑，说一声就行
+            if (post.isBoundTo(player.getUUID()) && CommandPostBindings.isCurrent(player, here)) {
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.already_yours"));
+                return;
+            }
+
+            // 到这儿只有两种：这台还没主人，或者它那个 owner 是**过期的话**（换绑时它没加载、
+            // 没来得及清）。两种都按"绑定这一台"处理——顺带把原来那台解绑，这就是"只能绑一台"。
+            GlobalPos previous = CommandPostBindings.bind(player, here);
+            if (!post.isBoundTo(player.getUUID())) {
+                post.bind(player.getUUID(), player.getGameProfile().getName());
+            }
+            if (previous == null) {
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.bound",
+                        player.getGameProfile().getName()));
+            } else {
+                // 换绑把话说明白，免得他以为原来那台还挂着
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.switched",
+                        player.getGameProfile().getName()));
+                player.sendSystemMessage(Component.translatable("message.maidconstruction.post.auto_unbound"));
             }
         });
         context.setPacketHandled(true);
