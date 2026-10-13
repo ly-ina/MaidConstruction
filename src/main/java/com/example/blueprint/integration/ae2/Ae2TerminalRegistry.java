@@ -118,12 +118,12 @@ public final class Ae2TerminalRegistry {
      * 为什么要专门有这么一个方法：玩家的整合包里真出现过"同一个注册器里两件物品在、
      * 第三件不在"的情况（第三方改写注册表，或者注册阶段被谁动了手脚——那一项在启动时
      * 还好好地在，之后就查不到了）。这种时候调用方只要有一句 {@code .get()}，
-     * 换来的就是一句 {@code NullPointerException: Registry Object not present: blueprint:xxx}
+     * 换来的就是一句 {@code NullPointerException: Registry Object not present: maidconstruction:xxx}
      * ——<b>打开创造栏客户端直接崩</b>，而且报错落在我们头上。
      * <p>
      * 所以下结论之前先问一句"在不在"：不在就跳过，只留一行日志。
      *
-     * @return 缺掉的名字（形如 {@code blueprint:xxx}）；空列表表示全都正常
+     * @return 缺掉的名字（形如 {@code maidconstruction:xxx}）；空列表表示全都正常
      */
     public static List<String> notRegistered() {
         List<String> missing = new ArrayList<>();

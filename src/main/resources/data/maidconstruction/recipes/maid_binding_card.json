@@ -1,0 +1,30 @@
+{
+  "type": "forge:conditional",
+  "recipes": [
+    {
+      "conditions": [
+        {
+          "type": "forge:mod_loaded",
+          "modid": "ae2"
+        }
+      ],
+      "recipe": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": [
+          {
+            "item": "ae2:advanced_card"
+          },
+          {
+            "item": "ae2:wireless_booster"
+          },
+          {
+            "item": "maidconstruction:binding_book"
+          }
+        ],
+        "result": {
+          "item": "maidconstruction:maid_binding_card"
+        }
+      }
+    }
+  ]
+}

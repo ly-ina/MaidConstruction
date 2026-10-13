@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "maidconstruction:block/maid_terminal"
+    }
+  }
+}

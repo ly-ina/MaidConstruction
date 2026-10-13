@@ -1,0 +1,6 @@
+{
+  "parent": "item/generated",
+  "textures": {
+    "layer0": "maidconstruction:item/wireless_maid_terminal"
+  }
+}

@@ -5,6 +5,28 @@
 > 为了能一眼读完，这里只保留**最近三个版本**的详细条目；更早的版本各压成一句摘要。
 > 需要旧版完整说明时翻 git 历史：`git log -p CHANGELOG.md`（那个文件一直在仓库里）。
 
+## [1.8.4] - 未发布
+
+**破坏性更新：模组 id 从 `blueprint` 改成 `maidconstruction`。** 原因见下——它和 Team Abnormals 的
+库模组 **Blueprint**（`blueprint`，1.20.1 的 7.x）撞了 modid，而 Forge 不许两个同名的 mod 一起加载，
+表现就是"装了两台，只起来一台"。库模组动不了，所以让的一直是我们。
+
+### 变更
+
+- 模组的命名空间整体改名：`gradle.properties` 的 `mod_id` → `maidconstruction`；
+  资源目录 `assets/blueprint`、`data/blueprint` → `assets/maidconstruction`、`data/maidconstruction`；
+  物品、方块、配方、标签、进度里的 `blueprint:xxx` 全部换成 `maidconstruction:xxx`。
+- **升级请新开世界**：命名空间变了，旧世界里的本模组物品与方块会变成"未知物品"（它们按老 id 存在存档里）。
+- 有意**没跟着改**的：`blueprints/` 游戏目录与 `.blueprint` 文件后缀（你的蓝图文件照旧）、
+  语言键 `gui.blueprint.*`、`/blueprint` 这条命令名、"说明书发过没有"那个玩家数据键。
+- 包通道名随 modid 一起变了（`maidconstruction:main`），所以新旧版本之间本来就不可混连，
+  与协议号那道检查的方向一致。
+
+### 文档
+
+- DEVELOPER §7.21：modid 别用别人用掉的名字——选名前先搜一遍，撞了改哪几处、哪四样别改、
+  以及"命名空间一改就要说新开世界"这条代价。
+
 ## [1.8.3] - 2026-10-08
 
 **暂时推荐使用这个版本。** 这一版把"指挥女仆"这条线补齐了：说明书能点目录、终端能撤销投影、

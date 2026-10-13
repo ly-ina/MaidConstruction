@@ -460,9 +460,9 @@ public class MyRotation implements BlockEntityRotation {
 
 在 `registry/ModItems.java` 里加 `DeferredRegister` 条目，然后：
 
-- 模型放 `assets/blueprint/models/item/<name>.json`
-- 中英文案都要加（`assets/blueprint/lang/zh_cn.json` 和 `en_us.json`）
-- 配方放 `data/blueprint/recipes/<name>.json`
+- 模型放 `assets/maidconstruction/models/item/<name>.json`
+- 中英文案都要加（`assets/maidconstruction/lang/zh_cn.json` 和 `en_us.json`）
+- 配方放 `data/maidconstruction/recipes/<name>.json`
 - 给创造模式用的物品，加进 `ModCreativeTabs` 的 `displayItems` 回调（模组独占一栏，不要塞原版标签页）
 - **涉及软依赖模组物品的配方必须用 `forge:conditional` 包住**，否则没装那个模组的整合包会加载失败
 
@@ -825,7 +825,36 @@ owner.sendSystemMessage(component);              // 聊天栏：同上
 规矩：**凡是"把数据装进物品"的动作，容器就在他背包里，不要在手上找。**要"拿出来用"的
 （交给女仆、放到指挥台），顺手换到手上；只是查看的，就地写进去就行。
 
-## 8. 排查手册
+### 7.21 modid 别用别人已经用掉的名字
+
+`blueprint` 曾经是我们的 modid，直到装 1.20.1 的 **Team Abnormals Blueprint**（一个库模组，7.x）
+时撞了车——Forge 不允许两个 modid 相同，结果是**两台里只能加载一台**。**该让的一直是后来者**：
+那种库模组有一堆模组依赖，动不了；我们改一个字符串就完事。→ 现在叫 `maidconstruction`。
+
+选 modid 时先在 CurseForge / Modrinth 上搜一遍那个词：**越通用的词越危险**（`blueprint`、
+`framework`、`library`……）。真撞了要改的是这几处（1.8.3 → `maidconstruction` 就是这么改的）：
+
+- `gradle.properties` 的 `mod_id`（`mods.toml` 里的 `${mod_id}` 跟着变，`build.gradle` 的
+  `mods { "${mod_id}" { ... } }` 与 `enabledGameTestNamespaces` 也用它）；
+- `BlueprintMod.MOD_ID`（注册表项、包通道 `newSimpleChannel(new ResourceLocation(MOD_ID, ...))`
+  都由它拼出来）；
+- 资源目录 `assets/<id>`、`data/<id>`（`git mv`），以及里面所有 `"<id>:xxx"` 引用：模型与方块状态、
+  配方、掉落表、进度、标签——**替换要大小写敏感**，否则会打中 `"Blueprint: %s"` 这类文案。
+
+**别跟着改的四样**（它们不是命名空间的一部分，改了反而伤玩家或纯属白费）：
+
+- `blueprints/` 游戏目录与 `.blueprint` 文件后缀——那是**玩家的文件**；
+- 语言键 `gui.blueprint.*`——译文键只是字符串，不走命名空间（撞了顶多某行字不对，不值当全量改）；
+- 玩家持久数据里的键（`ManualGiveaway.GIVEN_TAG`）——改了等于给每个人重发一次东西；
+- Java 包名与类名（`com.example.blueprint`）——只是路径，对加载没有影响。
+
+命令名 `/blueprint` 也留着了：玩家键入的词不是命名空间，Brigadier 同名的根节点会**合并**而不是崩，
+而改它伤的是肌肉记忆。
+
+**代价要提前说清**：命名空间一变，**旧世界里的物品与方块会变成"未知物品"**。这类改动必须配一句
+"升级请新开世界"，而且要挑版本发（见 CHANGELOG 1.8.4）。
+
+
 
 ### 8.1 女仆不干活
 

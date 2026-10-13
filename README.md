@@ -200,8 +200,8 @@ Minecraft Forge 1.20.1 模组。参考机械动力的蓝图，做一张可以反
   - **判据是"这一格当下硬不硬"，不看方块名字**：模组把基岩换成它能挖的那种、或者改了硬度，
     她立刻就能拆；反过来说，"方块本身不可破坏、只是某把模组工具能破"这种情况她**不会**去用那件工具，
     于是留着不动——**主人自己敲掉**那一块，下一轮重扫她就照蓝图补上
-  - 想让这类方块也归她拆：把方块加进标签 **`blueprint:maid_clearable`**（默认是空的）。
-    数据包里加一个 `data/blueprint/tags/blocks/maid_clearable.json` 就行：
+  - 想让这类方块也归她拆：把方块加进标签 **`maidconstruction:maid_clearable`**（默认是空的）。
+    数据包里加一个 `data/maidconstruction/tags/blocks/maid_clearable.json` 就行：
 
     ```json
     {

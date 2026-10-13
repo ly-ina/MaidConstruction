@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "maidconstruction:block/maid_terminal",
+    "particle": "maidconstruction:block/maid_terminal"
+  }
+}

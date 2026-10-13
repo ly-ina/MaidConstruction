@@ -19,7 +19,7 @@ public final class ModRecipeSerializers {
             DeferredRegister.create(ForgeRegistries.RECIPE_SERIALIZERS, BlueprintMod.MOD_ID);
 
     /**
-     * 说明书：一本书 + 一张纸。JSON 里就一句 {@code {"type": "blueprint:guide_book"}}，
+     * 说明书：一本书 + 一张纸。JSON 里就一句 {@code {"type": "maidconstruction:guide_book"}}，
      * 判据全在这个类里。
      */
     public static final RegistryObject<RecipeSerializer<?>> GUIDE_BOOK =

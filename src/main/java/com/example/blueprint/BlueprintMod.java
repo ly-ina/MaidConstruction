@@ -18,7 +18,12 @@ import org.slf4j.Logger;
 
 @Mod(BlueprintMod.MOD_ID)
 public class BlueprintMod {
-    public static final String MOD_ID = "blueprint";
+    /**
+     * 模组 id。**别再用 blueprint**：那是 Team Abnormals 的库模组（`blueprint`，1.20.1 的 7.x），
+     * 一堆模组靠它跑，撞了 modid 的结果是两台里只能加载一台（Forge 直接拒绝）。
+     * 该让的一直是后来者——见 DEVELOPER §7.21。
+     */
+    public static final String MOD_ID = "maidconstruction";
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public BlueprintMod() {

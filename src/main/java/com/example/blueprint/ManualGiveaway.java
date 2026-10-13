@@ -23,7 +23,13 @@ import net.minecraftforge.fml.common.Mod;
 @Mod.EventBusSubscriber(modid = BlueprintMod.MOD_ID)
 public final class ManualGiveaway {
 
-    /** 发过没有。带命名空间前缀，免得和别人的存档数据撞键 */
+    /**
+     * 发过没有。带命名空间前缀，免得和别人的存档数据撞键。
+     * <p>
+     * <b>改 modid 时没跟着改</b>（1.8.3 → maidconstruction）：这不是注册表里的名字，只是玩家
+     * 持久数据里的一个键，而改了它的后果是"每个进过服务器的人都再收一次说明书"。
+     * 这种键要的就是**一辈子不变**——名字看着旧一点，比重复发一次东西好。
+     */
     private static final String GIVEN_TAG = "blueprint:manual_given";
 
     @SubscribeEvent

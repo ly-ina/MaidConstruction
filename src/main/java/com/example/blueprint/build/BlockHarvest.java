@@ -33,7 +33,7 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class BlockHarvest {
 
     /**
-     * "这块她可以拆"的白名单标签：{@code blueprint:maid_clearable}。
+     * "这块她可以拆"的白名单标签：{@code maidconstruction:maid_clearable}。
      * <p>
      * 默认是空的（模组自己带了一份空标签，数据包往上一加就生效）。它只解决一种情况：
      * <b>方块本身不可破坏，但某个模组的工具能破它</b>。她永远只带自己那套家伙、
