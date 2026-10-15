@@ -87,6 +87,8 @@ public class BlueprintEditScreen extends Screen {
     private float yaw = 35.0F;
     private float pitch = 22.0F;
     private boolean dragging;
+    /** 正在拖分层那条：拖它的时候别再顺手转视角（两件事都在同一块预览上） */
+    private boolean draggingLayer;
     private double lastMouseX;
     private double lastMouseY;
 
@@ -414,6 +416,8 @@ public class BlueprintEditScreen extends Screen {
             if (button == 1) {
                 this.layers.toggleSlice();
             } else {
+                // 按下去先跳一次，之后交给 mouseDragged 接管（少了那个标志就只能点、不能拖）
+                this.draggingLayer = true;
                 this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
             }
             return true;
@@ -463,6 +467,10 @@ public class BlueprintEditScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.draggingLayer) {
+            this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+            return true;
+        }
         if (this.dragging) {
             this.yaw += (float) (mouseX - this.lastMouseX) * 1.5F;
             this.pitch = Math.max(-90.0F, Math.min(90.0F, this.pitch + (float) (mouseY - this.lastMouseY) * 1.5F));
@@ -476,6 +484,7 @@ public class BlueprintEditScreen extends Screen {
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         this.dragging = false;
+        this.draggingLayer = false;
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
