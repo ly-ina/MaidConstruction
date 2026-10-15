@@ -319,6 +319,8 @@
   "gui.maidconstruction.edit.overwrite": "Overwrite original",
   "gui.maidconstruction.edit.overwrite_confirm": "Press again to overwrite \"%s\"",
   "gui.maidconstruction.edit.overwritten": "Overwritten: %s",
+  "gui.maidconstruction.edit.help.pick": "Left-click a block: select it (outlined)",
+  "gui.maidconstruction.edit.help.kind": "Shift + left-click: select every block of that kind",
   "gui.maidconstruction.edit.help.pan": "WASD: pan the view",
   "gui.maidconstruction.edit.nothing_picked": "Click a block - Shift-click for the whole kind",
   "gui.maidconstruction.edit.picked_kind": "Selected %s blocks of that kind",

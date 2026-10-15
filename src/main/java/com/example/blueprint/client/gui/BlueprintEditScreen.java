@@ -362,7 +362,11 @@ public class BlueprintEditScreen extends Screen {
         graphics.pose().pushPose();
         graphics.pose().translate(0.0D, 0.0D, 400.0D);
         if (overHelp) {
-            List<Component> help = new ArrayList<>(BlueprintLayerView.helpLines());
+            // 先讲"怎么选"（编辑页的主操作），再讲浏览那几样——顺序就是上手顺序
+            List<Component> help = new ArrayList<>();
+            help.add(Component.translatable("gui.maidconstruction.edit.help.pick"));
+            help.add(Component.translatable("gui.maidconstruction.edit.help.kind"));
+            help.addAll(BlueprintLayerView.helpLines());
             help.add(Component.translatable("gui.maidconstruction.edit.help.pan"));
             SchematicPreview.drawHintBox(graphics, this.font, help, mouseX, mouseY, this.width, this.height);
         } else if (hovered != null) {
