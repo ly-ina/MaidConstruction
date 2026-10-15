@@ -23,7 +23,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.model.data.ModelData;
+import org.joml.Vector3f;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -140,6 +142,53 @@ public final class SchematicPreview {
         }
 
         pose.popPose();
+    }
+
+    /**
+     * 指针底下是哪一块：把每个方块的中心按 {@link #draw} 那套变换投到屏幕上，取离指针最近的那块
+     * （都在阈值内时取**最靠前**的，也就是画在最上层的那块）。
+     * <p>
+     * 为什么用投影而不是真投一条射线：界面上这幅 3D 只是"看上去像"三维，其实是二维绘制
+     * （变换全在 {@link #draw} 里那几行）——把中心点按同一套参数投过去，得到的就是玩家眼睛看到的
+     * 那一块，而且不会出现"看到的和选中的对不上"。
+     */
+    @Nullable
+    public static Schematic.BlockEntry pick(Schematic schematic, List<Schematic.BlockEntry> entries,
+                                            int cx, int cy, int width, float yaw, float pitch,
+                                            double mouseX, double mouseY) {
+        Vec3i size = schematic.getSize();
+        float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));
+        if (maxDim <= 0.0F) {
+            return null;
+        }
+        float scale = (width - 8) / (maxDim * 1.7F);
+
+        PoseStack pose = new PoseStack();
+        pose.translate(cx, cy, 200.0D);
+        pose.scale(scale, -scale, scale);
+        pose.mulPose(Axis.XP.rotationDegrees(pitch));
+        pose.mulPose(Axis.YP.rotationDegrees(yaw));
+        pose.translate(-size.getX() / 2.0D, -size.getY() / 2.0D, -size.getZ() / 2.0D);
+
+        // 阈值跟着缩放走：图放得越大，方块在屏幕上越大，能容忍的偏差也该越大
+        double limit = Math.max(6.0D, scale * 1.2D);
+        Schematic.BlockEntry best = null;
+        double bestDepth = Double.NEGATIVE_INFINITY;
+        Vector3f point = new Vector3f();
+        for (Schematic.BlockEntry entry : entries) {
+            // 方块占的是 [x, x+1]，中心就是 +0.5：与 draw 里"先 translate 到 x 再画"等价
+            point.set(entry.pos().getX() + 0.5F, entry.pos().getY() + 0.5F, entry.pos().getZ() + 0.5F);
+            pose.last().pose().transformPosition(point);
+            if (Math.abs(point.x - mouseX) > limit || Math.abs(point.y - mouseY) > limit) {
+                continue;
+            }
+            // 都在指针底下时取最靠前的：z 越大离眼睛越近（draw 里把 z 推到 200 就是这个道理）
+            if (point.z > bestDepth) {
+                bestDepth = point.z;
+                best = entry;
+            }
+        }
+        return best;
     }
 
     /** 拿得到一个四边形就算画得出，一个都没有就是画不出（线缆那类要靠方块实体喂数据） */

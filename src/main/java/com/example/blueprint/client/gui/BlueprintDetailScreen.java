@@ -184,7 +184,7 @@ public class BlueprintDetailScreen extends Screen {
             graphics.drawCenteredString(this.font, Component.translatable("gui.maidconstruction.detail.broken"),
                     left + WINDOW_WIDTH / 2, top + WINDOW_HEIGHT / 2, COLOR_WARN);
         } else {
-            drawPreview(graphics, left, top);
+            drawPreview(graphics, left, top, mouseX, mouseY);
             drawList(graphics);
         }
 
@@ -209,7 +209,7 @@ public class BlueprintDetailScreen extends Screen {
                 left + WINDOW_WIDTH - 8 - this.font.width(detail), top + 7, COLOR_LABEL, false);
     }
 
-    private void drawPreview(GuiGraphics graphics, int left, int top) {
+    private void drawPreview(GuiGraphics graphics, int left, int top, int mouseX, int mouseY) {
         int x = left + 6;
         int y = top + HEADER_HEIGHT + 4;
         int height = WINDOW_HEIGHT - HEADER_HEIGHT - 26;
@@ -223,6 +223,15 @@ public class BlueprintDetailScreen extends Screen {
         // 分层那两行写在预览框左上角：那里通常空着，一眼能看到现在是第几层、怎么换
         graphics.drawString(this.font, this.layers.stateText(), x + 3, y + 3, 0xDDDDDD, true);
         graphics.drawString(this.font, BlueprintLayerView.keysText(), x + 3, y + 13, 0x888888, true);
+
+        // 悬浮方块名：把方块按画它时那套变换投回屏幕，才认得出鼠标指到了哪一块。
+        // 宽度与上面那次 draw 保持一致（PREVIEW_WIDTH - 6），否则拾取会整体偏移
+        Schematic.BlockEntry hovered = SchematicPreview.pick(this.schematic, shown(),
+                x + PREVIEW_WIDTH / 2, y + height / 2, PREVIEW_WIDTH - 6,
+                this.yaw, this.pitch, mouseX, mouseY);
+        if (hovered != null) {
+            graphics.renderTooltip(this.font, this.layers.describe(hovered), mouseX, mouseY);
+        }
     }
 
     /**

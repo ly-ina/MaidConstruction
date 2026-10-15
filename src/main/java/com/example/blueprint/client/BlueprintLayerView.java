@@ -107,4 +107,15 @@ public final class BlueprintLayerView {
     public static Component keysText() {
         return Component.translatable("gui.maidconstruction.layer.keys");
     }
+
+    /**
+     * 悬浮到某一块时的提示：方块名 + 它在第几层。
+     * <p>
+     * 为什么带层号：分层看着的时候，"这是第几层的那块"比坐标有用得多；顺带也让"这块到底在楼上还是楼下"
+     * 一眼可辨——那正是分层要解决的问题。
+     */
+    public Component describe(Schematic.BlockEntry entry) {
+        return Component.translatable("gui.maidconstruction.preview.block",
+                entry.state().getBlock().getName(), entry.pos().getY() - minY + 1);
+    }
 }

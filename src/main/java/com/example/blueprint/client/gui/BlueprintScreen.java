@@ -4,6 +4,7 @@ import com.example.blueprint.client.BlueprintLayerView;
 import com.example.blueprint.client.BlueprintTransfer;
 import com.example.blueprint.client.CableBusOutline;
 import com.example.blueprint.client.ClientSchematicCache;
+import com.example.blueprint.client.SchematicPreview;
 import com.example.blueprint.item.BlueprintItem;
 import com.example.blueprint.network.ModNetwork;
 import com.example.blueprint.network.packet.C2SClearBlueprintPacket;
@@ -232,7 +233,7 @@ public class BlueprintScreen extends Screen {
         graphics.drawString(this.font, Component.translatable("gui.maidconstruction.file_hint"),
                 this.fileListX, top + 7, COLOR_LABEL, false);
 
-        drawPreview(graphics, left, top);
+        drawPreview(graphics, left, top, mouseX, mouseY);
         drawFileList(graphics);
 
         super.render(graphics, mouseX, mouseY, partialTick);
@@ -289,7 +290,7 @@ public class BlueprintScreen extends Screen {
         }
     }
 
-    private void drawPreview(GuiGraphics graphics, int left, int top) {
+    private void drawPreview(GuiGraphics graphics, int left, int top, int mouseX, int mouseY) {
         Schematic schematic = getPreview();
         int cx = left + PREVIEW_WIDTH / 2;
         int cy = top + HEADER_HEIGHT + (WINDOW_HEIGHT - HEADER_HEIGHT) / 2;
@@ -378,6 +379,15 @@ public class BlueprintScreen extends Screen {
         graphics.drawCenteredString(this.font,
                 Component.literal(size.getX() + "×" + size.getY() + "×" + size.getZ()),
                 cx, top + WINDOW_HEIGHT - 13, 0x999999);
+
+        // 悬浮方块名：界面上那幅 3D 是"画"出来的，鼠标指到哪一块只有把方块投回屏幕上才知道。
+        // 宽度传 PREVIEW_WIDTH - 20 是有意的：pick 内部按 (width - 8) 算缩放，而本面板画预览时
+        // 用的是 (PREVIEW_WIDTH - 28)，两者必须对齐，否则拾取会整体偏移
+        Schematic.BlockEntry hovered = SchematicPreview.pick(schematic, shown,
+                cx, cy, PREVIEW_WIDTH - 20, yaw, pitch, mouseX, mouseY);
+        if (hovered != null) {
+            graphics.renderTooltip(this.font, layers.describe(hovered), mouseX, mouseY);
+        }
     }
 
     /** 预览里给"模型画不出来"的方块画线框用的单位立方体 */

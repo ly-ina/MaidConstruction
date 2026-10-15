@@ -316,6 +316,7 @@
   "gui.maidconstruction.layer.through": "Down to layer %s / %s",
   "gui.maidconstruction.layer.only": "Only layer %s / %s",
   "gui.maidconstruction.layer.keys": "Wheel / arrows: change layer - Shift shows one layer",
+  "gui.maidconstruction.preview.block": "%s (layer %s)",
   "gui.maidconstruction.no_files": "No files found",
   "gui.maidconstruction.rotate": "Rotate 90°",
   "gui.maidconstruction.mirror": "Mirror",
