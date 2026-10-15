@@ -26,7 +26,6 @@ import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
@@ -84,6 +83,8 @@ public class BlueprintDetailScreen extends Screen {
     private float yaw = 35.0F;
     private float pitch = 22.0F;
     private boolean dragging;
+    /** 正在拖分层那条：拖它的时候别再顺手转视角（两件事都在同一块预览上，不分开就会互相打架） */
+    private boolean draggingLayer;
     private double lastMouseX;
     private double lastMouseY;
 
@@ -222,7 +223,9 @@ public class BlueprintDetailScreen extends Screen {
 
         // 分层那两行写在预览框左上角：那里通常空着，一眼能看到现在是第几层、怎么换
         graphics.drawString(this.font, this.layers.stateText(), x + 3, y + 3, 0xDDDDDD, true);
-        graphics.drawString(this.font, BlueprintLayerView.keysText(), x + 3, y + 13, 0x888888, true);
+        graphics.drawString(this.font, BlueprintLayerView.barText(), x + 3, y + 13, 0x888888, true);
+        // 拖动条：底＝第 1 层，顶＝整栋；左键拖/点换层，右键切"只看这层"
+        this.layers.drawBar(graphics, barX(), barTop(), barBottom());
 
         // 悬浮方块名：把方块按画它时那套变换投回屏幕，才认得出鼠标指到了哪一块。
         // 宽度与上面那次 draw 保持一致（PREVIEW_WIDTH - 6），否则拾取会整体偏移
@@ -321,6 +324,16 @@ public class BlueprintDetailScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         int left = (this.width - WINDOW_WIDTH) / 2;
         int top = (this.height - WINDOW_HEIGHT) / 2;
+        // 先接分层条：它贴着预览框右边缘，落在预览里但压在最上面
+        if (BlueprintLayerView.overBar(mouseX, mouseY, barX(), barTop(), barBottom())) {
+            if (button == 1) {
+                this.layers.toggleSlice();
+            } else {
+                this.draggingLayer = true;
+                this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+            }
+            return true;
+        }
         if (mouseX >= left + 6 && mouseX < left + 6 + PREVIEW_WIDTH
                 && mouseY >= top + HEADER_HEIGHT && mouseY < top + WINDOW_HEIGHT) {
             this.dragging = true;
@@ -342,6 +355,10 @@ public class BlueprintDetailScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.draggingLayer) {
+            this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+            return true;
+        }
         if (this.dragging) {
             this.yaw += (float) (mouseX - this.lastMouseX) * 1.5F;
             this.pitch = Math.max(-90.0F, Math.min(90.0F,
@@ -353,7 +370,21 @@ public class BlueprintDetailScreen extends Screen {
         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
-    /** 指针在不在这块预览框里：滚轮换层与它共用一处判据，免得矩形写两遍、错一次都不好查 */
+    // 分层拖动条的三个换算：画与点共用（贴着预览框右边缘，上下各留余量）
+    private int barX() {
+        return (this.width - WINDOW_WIDTH) / 2 + 6 + PREVIEW_WIDTH - 12;
+    }
+
+    private int barTop() {
+        return (this.height - WINDOW_HEIGHT) / 2 + HEADER_HEIGHT + 8;
+    }
+
+    private int barBottom() {
+        return (this.height - WINDOW_HEIGHT) / 2 + HEADER_HEIGHT + 4
+                + (WINDOW_HEIGHT - HEADER_HEIGHT - 26) - 6;
+    }
+
+    /** 指针在不在这块预览框里：转身子的拖动与它共用一处判据，免得矩形写两遍、错一次都不好查 */
     private boolean isOverPreview(double mouseX, double mouseY) {
         int left = (this.width - WINDOW_WIDTH) / 2;
         int top = (this.height - WINDOW_HEIGHT) / 2;
@@ -362,34 +393,17 @@ public class BlueprintDetailScreen extends Screen {
                 && mouseY < top + HEADER_HEIGHT + 4 + (WINDOW_HEIGHT - HEADER_HEIGHT - 26);
     }
 
-    /** 方向键换层：与滚轮同一个动作（这边滚轮让给了材料清单，键位更省事） */
-    @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        int delta = switch (keyCode) {
-            case GLFW.GLFW_KEY_UP, GLFW.GLFW_KEY_PAGE_UP -> 1;
-            case GLFW.GLFW_KEY_DOWN, GLFW.GLFW_KEY_PAGE_DOWN -> -1;
-            default -> 0;
-        };
-        if (delta != 0) {
-            this.layers.step(delta, Screen.hasShiftDown());
-            return true;
-        }
-        return super.keyPressed(keyCode, scanCode, modifiers);
-    }
-
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         this.dragging = false;
+        this.draggingLayer = false;
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        // 预览框上的滚轮＝换层；指针在材料清单那边时才翻页——各管一摊，不用抢
-        if (delta != 0.0D && isOverPreview(mouseX, mouseY)) {
-            this.layers.step(delta > 0.0D ? 1 : -1, Screen.hasShiftDown());
-            return true;
-        }
+        // 滚轮只管材料清单翻页：分层改由右边那条拖动条来（连续拖，比一层层滚快得多）
+
         if (delta == 0.0D || this.rows.size() <= visibleRows()) {
             return super.mouseScrolled(mouseX, mouseY, delta);
         }

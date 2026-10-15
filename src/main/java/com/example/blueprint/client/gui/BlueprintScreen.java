@@ -40,7 +40,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
-import org.lwjgl.glfw.GLFW;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.model.data.ModelData;
@@ -118,8 +117,10 @@ public class BlueprintScreen extends Screen {
     private Schematic previewSchematic;
     private UUID previewId;
     private List<Schematic.BlockEntry> previewEntries = List.of();
-    /** 分层查看：只看某一层 / 看到某一层为止（滚轮或 ↑↓ 换层，Shift 切"只看这层"） */
+    /** 分层查看：只看某一层 / 看到某一层为止，换层拖预览框右边那条 */
     private final BlueprintLayerView layers = new BlueprintLayerView();
+    /** 正在拖分层那条：拖它的时候别再顺手转视角（两件事在同一块预览上，不分开就互相打架） */
+    private boolean draggingLayer;
     private float yaw = 45.0F;
     private float pitch = 30.0F;
     private long lastRequestAt = 0;
@@ -376,8 +377,10 @@ public class BlueprintScreen extends Screen {
         // 分层那两行写在预览框左上角：那里通常空着，一眼就能看到现在是第几层、怎么换
         graphics.drawString(this.font, layers.stateText(),
                 left + 4, top + HEADER_HEIGHT + 4, 0xDDDDDD, true);
-        graphics.drawString(this.font, BlueprintLayerView.keysText(),
+        graphics.drawString(this.font, BlueprintLayerView.barText(),
                 left + 4, top + HEADER_HEIGHT + 14, 0x888888, true);
+        // 拖动条：底＝第 1 层，顶＝整栋；左键拖/点换层，右键切"只看这层"
+        layers.drawBar(graphics, barX(), barTop(), barBottom());
 
         graphics.drawCenteredString(this.font,
                 Component.literal(size.getX() + "×" + size.getY() + "×" + size.getZ()),
@@ -500,6 +503,16 @@ public class BlueprintScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // 先接分层条：它贴着预览框右边缘，压在最上面
+        if (BlueprintLayerView.overBar(mouseX, mouseY, barX(), barTop(), barBottom())) {
+            if (button == 1) {
+                layers.toggleSlice();
+            } else {
+                this.draggingLayer = true;
+                layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+            }
+            return true;
+        }
         if (button == 0 && isOverFileList(mouseX, mouseY)) {
             int index = (int) ((mouseY - fileListY + fileScroll) / FILE_ROW_HEIGHT);
             if (index >= 0 && index < files.size()) {
@@ -517,36 +530,23 @@ public class BlueprintScreen extends Screen {
             fileScroll = Mth.clamp(fileScroll - (int) (delta * FILE_ROW_HEIGHT), 0, max);
             return true;
         }
-        // 预览区上的滚轮＝换层（原来这里是空的）。Shift 按住＝"只看这一层"
-        if (isOverPreview(mouseX, mouseY) && delta != 0.0D) {
-            layers.step(delta > 0.0D ? 1 : -1, Screen.hasShiftDown());
-            return true;
-        }
+        // 预览区上的滚轮不换层：分层改由右边那条拖动条来（滚轮留给将来的缩放之类，别抢）
+        
         return super.mouseScrolled(mouseX, mouseY, delta);
     }
 
-    /**
-     * 方向键换层：与滚轮同一个动作。
-     * <p>
-     * 为什么是键位而不是再加两个按钮：右侧那一列已经排满（旋转、镜像、清空、清单、导入导出、
-     * 打开文件夹、关闭），而预览区上方本来就空着——键位不占地方，也正合"在预览里往上往下翻"。
-     */
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        int delta = switch (keyCode) {
-            case GLFW.GLFW_KEY_UP, GLFW.GLFW_KEY_PAGE_UP -> 1;
-            case GLFW.GLFW_KEY_DOWN, GLFW.GLFW_KEY_PAGE_DOWN -> -1;
-            default -> 0;
-        };
-        if (delta != 0) {
-            layers.step(delta, Screen.hasShiftDown());
-            return true;
-        }
-        return super.keyPressed(keyCode, scanCode, modifiers);
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        this.draggingLayer = false;
+        return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.draggingLayer) {
+            layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+            return true;
+        }
         if (button == 0 && isOverPreview(mouseX, mouseY)) {
             yaw += (float) dragX;
             pitch = Mth.clamp(pitch + (float) dragY, -80.0F, 80.0F);
@@ -560,6 +560,19 @@ public class BlueprintScreen extends Screen {
         int top = (this.height - WINDOW_HEIGHT) / 2;
         return mouseX >= left && mouseX < left + PREVIEW_WIDTH
                 && mouseY >= top + HEADER_HEIGHT && mouseY < top + WINDOW_HEIGHT;
+    }
+
+    // 分层拖动条的三个换算：画与点共用，免得"画在这、点在那"。贴着预览框右边缘，上下各留出余量
+    private int barX() {
+        return (this.width - WINDOW_WIDTH) / 2 + PREVIEW_WIDTH - 12;
+    }
+
+    private int barTop() {
+        return (this.height - WINDOW_HEIGHT) / 2 + HEADER_HEIGHT + 12;
+    }
+
+    private int barBottom() {
+        return (this.height - WINDOW_HEIGHT) / 2 + WINDOW_HEIGHT - 22;
     }
 
     // ------------------------------------------------------------------

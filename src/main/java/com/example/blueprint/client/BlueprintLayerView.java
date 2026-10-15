@@ -1,6 +1,7 @@
 package com.example.blueprint.client;
 
 import com.example.blueprint.schematic.Schematic;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -9,7 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 分层查看：只看建筑的某一层，或者看到某一层为止。
+ * 分层查看：只看建筑的某一层，或者看到某一层为止。换层靠预览框右边那条**拖动条**。
  * <p>
  * <b>为什么要有它</b>：一座建筑竖起来之后，外面那圈墙把里面挡得干干净净——材料清单能告诉你用了什么，
  * 却回答不了"这一层是怎么摆的"。把预览按 Y 切开，内部结构才看得见。
@@ -21,11 +22,18 @@ import java.util.List;
  * 图纸详情页、终端缩略图）画的是同一份东西，分层也必须只有一种口径，否则会出现"同一个建筑在面板里
  * 是第 3 层、在终端里是别的"——那种偏差没人会去核对，只会被当成 bug 报上来。
  * <p>
+ * <b>为什么不设键位</b>：早先试过"↑↓ 一层、PgUp/PgDn 十层、Home/End 到两头"，看着周全，实际很难用——
+ * 楼一高，几百层要么滚几百下、要么只能跳两端，中间那段全靠蒙。拖动条是**连续**的：想看哪层直接拖到
+ * 哪个位置，条的长短本身还把"这楼有多高、我现在大概在几分之几"画出来了。
+ * <p>
  * 两种看法各有用：**累积**（显示到第 N 层）看得出结构怎么一层层长上去，从上往下看就是那层的平面；
- * **切片**（只看第 N 层）则完全去掉下面的遮挡。前者是默认，后者按住 Shift 滚轮切过去。
+ * **切片**（只看第 N 层）则完全去掉下面的遮挡。前者是默认，拖动条上右键切到后者。
  */
 @OnlyIn(Dist.CLIENT)
 public final class BlueprintLayerView {
+
+    /** 拖动条的宽度（与两处界面的绘制、命中判定共用，写在一处免得两边差几像素） */
+    public static final int BAR_WIDTH = 6;
 
     /** 第一层对应的 y（按第一块方块推；空图给 0） */
     private int minY;
@@ -56,18 +64,37 @@ public final class BlueprintLayerView {
     }
 
     /**
-     * 滚轮 / 方向键：换一层。
+     * 拖动条拖到/点到某个高度：把 y 换算成层号。
      * <p>
-     * {@code sliceKey}（Shift）按住时切到"只看这一层"：它与当前模式不同就先只切模式、不动层号——
-     * 一次操作只改一件事，玩家才看得清是哪一下起了效。
+     * 条上**底＝第 1 层、顶＝整栋**，与"往上盖"的直觉一致；按住 Shift 拖则是切片模式（只看那一层）。
+     * 换算按比例取整，所以无论楼多高，拖到哪儿就是哪儿——这正是键位做不到的事。
      */
-    public void step(int delta, boolean sliceKey) {
+    public void dragTo(double mouseY, int barTop, int barBottom, boolean sliceKey) {
+        double ratio = barBottom <= barTop ? 1.0D
+                : (barBottom - mouseY) / (double) (barBottom - barTop);
+        ratio = Math.max(0.0D, Math.min(1.0D, ratio));
+        to((int) Math.round(ratio * (layers - 1)) + 1, sliceKey);
+    }
+
+    /** 右键点拖动条：在"看到这层为止"与"只看这一层"之间切 */
+    public void toggleSlice() {
+        slice = !slice;
+        version++;
+    }
+
+    /**
+     * 直接跳到第 N 层（N 会被夹到 1..layers）。
+     * <p>
+     * {@code sliceKey}（Shift）与当前模式不同时，只切模式、不动层号——一次操作只改一件事，
+     * 玩家才看得清是哪一下起了效。
+     */
+    private void to(int layer, boolean sliceKey) {
         if (sliceKey != slice) {
             slice = sliceKey;
             version++;
             return;
         }
-        int next = Math.max(1, Math.min(layers, through + delta));
+        int next = Math.max(1, Math.min(layers, layer));
         if (next != through) {
             through = next;
             version++;
@@ -92,6 +119,28 @@ public final class BlueprintLayerView {
         return cached;
     }
 
+    // ------------------------------------------------------------------
+    // 画那条拖动条 + 命中判定：两处界面共用的口径，别各写一份
+    // ------------------------------------------------------------------
+
+    /** 指针在不在拖动条上（左右各放宽 4 像素：6 像素宽的细条直接点很难点中） */
+    public static boolean overBar(double mouseX, double mouseY, int barX, int barTop, int barBottom) {
+        return mouseX >= barX - 4 && mouseX <= barX + BAR_WIDTH + 4
+                && mouseY >= barTop - 2 && mouseY <= barBottom + 2;
+    }
+
+    /** 画拖动条：槽 + 把手。把手的位置就是当前层，一眼能看出"在整栋的几分之几" */
+    public void drawBar(GuiGraphics graphics, int barX, int barTop, int barBottom) {
+        graphics.fill(barX, barTop, barX + BAR_WIDTH, barBottom, 0x80000000);
+        graphics.renderOutline(barX - 1, barTop - 1, BAR_WIDTH + 2, barBottom - barTop + 2, 0x60FFFFFF);
+
+        double ratio = layers <= 1 ? 1.0D : (through - 1) / (double) (layers - 1);
+        int knobY = (int) Math.round(barBottom - ratio * (barBottom - barTop));
+        // 切片模式下把手换成亮青色：与"整层拆出来看"这件事一眼对上
+        int knobColor = slice ? 0xFF55FFFF : 0xFFFFCC55;
+        graphics.fill(barX - 2, knobY - 2, barX + BAR_WIDTH + 2, knobY + 2, knobColor);
+    }
+
     /** 预览左上角第一行：现在看到的是哪一层 */
     public Component stateText() {
         if (slice) {
@@ -103,9 +152,9 @@ public final class BlueprintLayerView {
         return Component.translatable("gui.maidconstruction.layer.through", through, layers);
     }
 
-    /** 预览左上角第二行：怎么操作 */
-    public static Component keysText() {
-        return Component.translatable("gui.maidconstruction.layer.keys");
+    /** 预览左上角第二行：怎么操作（只剩一条：拖右边那条，右键切切片） */
+    public static Component barText() {
+        return Component.translatable("gui.maidconstruction.layer.bar");
     }
 
     /**
