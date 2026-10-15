@@ -308,6 +308,46 @@ public final class Schematic {
      * （{@code FRONT_BACK} 等于 {@code LEFT_RIGHT} 再转 180°），
      * 再多一个中间态只会让"现在到底是哪种朝向"更难认，界面上的按钮因此是个开关。
      */
+    /**
+     * 把某一格换成别的方块，返回**一份新的结构**（原图不动）。
+     * <p>
+     * {@code wholeKind} = 连"同一种方块"一起换。判据是**方块状态**（{@link BlockState#equals}，含朝向、
+     * 半砖上下那类属性），不是方块本身——不然"同一种方块"会把门的前后两半、楼梯的四种朝向当成好几样，
+     * 想换一整面墙就只会换掉其中几块。
+     * <p>
+     * 传空气进来就是**删掉**那一格（与替换共用一条路）。被换掉/删掉的格子会**丢掉它的方块实体 NBT**——
+     * 原来的箱子配置留在一个石头下面，就是一团谁也读不懂的垃圾数据。
+     */
+    public Schematic withBlock(int x, int y, int z, BlockState replacement, boolean wholeKind) {
+        if (!inBounds(x, y, z)) {
+            return this;
+        }
+        BlockState from = stateAt(x, y, z);
+        List<BlockState> newPalette = new ArrayList<>(palette);
+        int replacementIndex = newPalette.indexOf(replacement);
+        if (replacementIndex < 0) {
+            newPalette.add(replacement);
+            replacementIndex = newPalette.size() - 1;
+        }
+        int[] newBlocks = blocks.clone();
+        Map<Integer, CompoundTag> newBlockEntities = new HashMap<>(blockEntities);
+        int changed = 0;
+        if (wholeKind) {
+            for (int i = 0; i < newBlocks.length; i++) {
+                if (palette.get(newBlocks[i]).equals(from)) {
+                    newBlocks[i] = replacementIndex;
+                    newBlockEntities.remove(i);
+                    changed++;
+                }
+            }
+        } else {
+            newBlocks[index(x, y, z)] = replacementIndex;
+            newBlockEntities.remove(index(x, y, z));
+            changed = 1;
+        }
+        return changed == 0 ? this : new Schematic(size, newPalette, newBlocks, newBlockEntities);
+    }
+
     public Schematic mirror(Mirror mirror) {
         return mirror == Mirror.NONE ? this : transform(Rotation.NONE, mirror);
     }

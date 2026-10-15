@@ -171,6 +171,14 @@ public class BlueprintDetailScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.detail.back"),
                         b -> Minecraft.getInstance().setScreen(new BlueprintLibraryScreen()))
                 .bounds(buttonX, y, BUTTON_WIDTH, 20).build());
+        // 调试入口：改图纸数据（左边照旧浏览、右边换成能搜的物品列表）。
+        // 读不出来的图没有可编辑的数据，那就不给这个按钮
+        if (this.schematic != null) {
+            this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.edit"),
+                            b -> Minecraft.getInstance().setScreen(
+                                    new BlueprintEditScreen(this.entry.name(), this.schematic)))
+                    .bounds(buttonX, y + 22, BUTTON_WIDTH, 20).build());
+        }
     }
 
     @Override
