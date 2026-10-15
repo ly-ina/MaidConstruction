@@ -243,6 +243,8 @@ public class BlueprintEditScreen extends Screen {
             return;
         }
         this.schematic = this.history.pop();
+        // 换了一份结构：过滤缓存必须作废，否则画面还停在旧的那一份上
+        this.layers.invalidate();
         this.picked = List.of();
         this.message = Component.translatable("gui.maidconstruction.edit.undone", this.history.size());
     }
@@ -277,6 +279,8 @@ public class BlueprintEditScreen extends Screen {
                 replacement, this.pickedSameKind);
         if (this.schematic != before) {
             this.history.push(before);
+            // 换了一份结构：过滤缓存必须作废，否则预览与拾取都还拿着改动前的那一份
+            this.layers.invalidate();
         }
         this.picked = List.of();
         this.chosen = null;

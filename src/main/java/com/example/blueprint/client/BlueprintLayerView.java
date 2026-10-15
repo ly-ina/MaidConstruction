@@ -58,6 +58,16 @@ public final class BlueprintLayerView {
         this.version++;
     }
 
+    /**
+     * 手头那份方块清单换了（编辑图纸时每改一次都会换一份新结构）：把过滤缓存作废。
+     * <p>
+     * 不碰"看到第几层"是有意的——玩家刚钻到第 7 层在改东西，一改就跳回整栋，那就没法干活了。
+     * 忘了调它的表现很隐蔽：**画面上一切照旧**（过滤结果还是旧的那一份），看着就像"刚才那下没生效"。
+     */
+    public void invalidate() {
+        this.version++;
+    }
+
     /** 状态变过没有：界面拿它决定要不要重算自己派生出来的那份数据（详情页那份抽稀过的清单） */
     public int version() {
         return version;
