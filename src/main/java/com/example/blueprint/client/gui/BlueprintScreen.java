@@ -305,6 +305,13 @@ public class BlueprintScreen extends Screen {
         // 否则只看一层时那一层会被抽成几个孤块，等于什么都没看见
         List<Schematic.BlockEntry> shown = layers.filter(previewEntries);
         int step = Math.max(1, (int) Math.ceil(shown.size() / (double) MAX_PREVIEW_BLOCKS));
+
+        // 抽稀出**真正要画**的那一份，绘制与悬浮拾取共用同一个清单：巨构上抽稀必触发，
+        // 各算各的就会出现"指到了一块根本没画出来的方块"——拾取的口径必须与眼睛看到的一致
+        List<Schematic.BlockEntry> drawn = new ArrayList<>(Math.min(shown.size(), MAX_PREVIEW_BLOCKS + 1));
+        for (int i = 0; i < shown.size(); i += step) {
+            drawn.add(shown.get(i));
+        }
         float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));
         float scale = (PREVIEW_WIDTH - 28) / (maxDim * 1.7F);
 
@@ -320,12 +327,8 @@ public class BlueprintScreen extends Screen {
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
         BlockRenderDispatcher dispatcher = mc.getBlockRenderer();
 
-        int drawn = 0;
         List<Schematic.BlockEntry> unrenderable = null;
-        for (Schematic.BlockEntry entry : shown) {
-            if (drawn++ % step != 0) {
-                continue;
-            }
+        for (Schematic.BlockEntry entry : drawn) {
             if (canRender(entry.state(), dispatcher)) {
                 pose.pushPose();
                 pose.translate(entry.pos().getX(), entry.pos().getY(), entry.pos().getZ());
@@ -383,7 +386,7 @@ public class BlueprintScreen extends Screen {
         // 悬浮方块名：界面上那幅 3D 是"画"出来的，鼠标指到哪一块只有把方块投回屏幕上才知道。
         // 宽度传 PREVIEW_WIDTH - 20 是有意的：pick 内部按 (width - 8) 算缩放，而本面板画预览时
         // 用的是 (PREVIEW_WIDTH - 28)，两者必须对齐，否则拾取会整体偏移
-        Schematic.BlockEntry hovered = SchematicPreview.pick(schematic, shown,
+        Schematic.BlockEntry hovered = SchematicPreview.pick(schematic, drawn,
                 cx, cy, PREVIEW_WIDTH - 20, yaw, pitch, mouseX, mouseY);
         if (hovered != null) {
             graphics.renderTooltip(this.font, layers.describe(hovered), mouseX, mouseY);
