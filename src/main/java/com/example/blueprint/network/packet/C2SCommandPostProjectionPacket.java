@@ -6,6 +6,7 @@ import com.example.blueprint.server.CommandPostBindings;
 import com.example.blueprint.schematic.Schematic;
 import com.example.blueprint.schematic.SchematicStorage;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -32,12 +33,11 @@ import java.util.function.Supplier;
 public class C2SCommandPostProjectionPacket {
 
     /**
-     * 射程：**按指挥台算**（玩家可能正站在投影落点上，拿落点比距离会白拦一路）。
+     * 这一版**没有射程限制**：只要能取到那台指挥台（＝它的区块加载着）、而且你是它的绑定主人，
+     * 在哪个坐标、哪个维度都行——远距离托管正是这个方块存在的意义。
      * <p>
-     * 64 格，与命令行开工那处同一档。这里原来写的是 {@code 64.0D}——那是 8 格的平方，
-     * 离指挥台稍远一点就会被拒，表现正是"离远了一点就不给投影"。
+     * 目标也不由客户端说了算：见 {@code handle} 里从 {@link CommandPostBindings#current} 取的那一段。
      */
-    private static final double MAX_DISTANCE_SQR = 64.0D * 64.0D;
 
     /** 结构数据一份最多这么大，与导入导出那条路同一个上限 */
     private static final int MAX_FILE_BYTES = 1_000_000;
@@ -103,11 +103,18 @@ public class C2SCommandPostProjectionPacket {
             if (player == null) {
                 return;
             }
-            ServerLevel level = player.serverLevel();
-            if (player.distanceToSqr(msg.pos.getCenter()) > MAX_DISTANCE_SQR) {
+            // 目标取"他现在绑定的那一台"，不是包里的坐标：包里的坐标只能说明他界面上看的是哪台，
+            // 而"能动哪台"本来就由绑定唯一确定（那边是服务端说了算的，见 CommandPostBindings）。
+            // 这么定之后，隔多远、隔几个维度都无所谓——只要那台的区块还加载着。
+            GlobalPos target = CommandPostBindings.current(player);
+            if (target == null) {
                 return;
             }
-            BlockEntity be = level.getBlockEntity(msg.pos);
+            ServerLevel level = player.server.getLevel(target.dimension());
+            if (level == null) {
+                return;
+            }
+            BlockEntity be = level.getBlockEntity(target.pos());
             // 只有**绑定玩家**能放与取消：投影对所有人可见，动它得是主人（DEVELOPER §12）。
             // 而"主人"指的是他**现在**绑的那一台——绑了第二台，旧那台就不算他的了
             if (!(be instanceof CommandPostBlockEntity post)

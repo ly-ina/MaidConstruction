@@ -3,6 +3,7 @@ package com.example.blueprint.network.packet;
 import com.example.blueprint.block.CommandPostBlockEntity;
 import com.example.blueprint.server.CommandPostBindings;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -26,8 +27,10 @@ import java.util.function.Supplier;
  */
 public class C2SCommandPostStartPacket {
 
-    /** 与放置投影同一档射程（64 格）：够站在工地边上按，又拦得住远处的误触 */
-    private static final double MAX_DISTANCE_SQR = 64.0D * 64.0D;
+    /**
+     * 这一版**没有射程限制**：目标由"他现在绑定的那一台"决定（见 {@code handle}），
+     * 隔多远、隔几个维度都能下令——只要那台的区块加载着。
+     */
 
     private final BlockPos pos;
     /** true = 下令开工；false = 让她们停下（口令收回，投影与指派都留着） */
@@ -54,11 +57,13 @@ public class C2SCommandPostStartPacket {
             if (player == null) {
                 return;
             }
-            ServerLevel level = player.serverLevel();
-            if (!(level.getBlockEntity(msg.pos) instanceof CommandPostBlockEntity post)) {
+            // 与放投影同一套：目标是"他现在绑定的那一台"，不是包里的坐标（这样跨维度下令也成立）
+            GlobalPos target = CommandPostBindings.current(player);
+            if (target == null) {
                 return;
             }
-            if (player.distanceToSqr(msg.pos.getCenter()) > MAX_DISTANCE_SQR) {
+            ServerLevel level = player.server.getLevel(target.dimension());
+            if (level == null || !(level.getBlockEntity(target.pos()) instanceof CommandPostBlockEntity post)) {
                 return;
             }
             // 只有"他现在绑的那一台"能下令开工：换绑之后旧那台的 owner 已经过期

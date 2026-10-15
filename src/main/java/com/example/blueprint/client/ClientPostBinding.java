@@ -2,7 +2,11 @@ package com.example.blueprint.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -33,6 +37,21 @@ public final class ClientPostBinding {
     public static void accept(@Nullable String dimension, @Nullable BlockPos pos) {
         ClientPostBinding.dimension = dimension;
         ClientPostBinding.pos = pos == null ? null : pos.immutable();
+    }
+
+    /**
+     * 他绑的那台在哪（可能远在别处，甚至别的维度）；没绑返回 null。
+     * <p>
+     * 为什么界面要用它：附近没有我的指挥台时（走远了、或者人在别的维度），
+     * 终端上的「投影」仍然该投到**我绑的那台**上——服务端就是按绑定认目标的。
+     */
+    @Nullable
+    public static GlobalPos current() {
+        if (pos == null || dimension == null) {
+            return null;
+        }
+        ResourceLocation id = ResourceLocation.tryParse(dimension);
+        return id == null ? null : GlobalPos.of(ResourceKey.create(Registries.DIMENSION, id), pos);
     }
 
     /** 退出世界时清掉：那是"这个存档里那台"，换个存档就不作数了 */

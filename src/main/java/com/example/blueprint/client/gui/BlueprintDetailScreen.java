@@ -5,6 +5,7 @@ import com.example.blueprint.client.BlueprintLibrary;
 import com.example.blueprint.client.BlueprintRecordSession;
 import com.example.blueprint.client.BlueprintLayerView;
 import com.example.blueprint.client.BlueprintTransfer;
+import com.example.blueprint.client.ClientPostBinding;
 import com.example.blueprint.client.CommandPostProjections;
 import com.example.blueprint.client.SchematicPreview;
 import com.example.blueprint.item.BlueprintItem;
@@ -18,6 +19,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
@@ -493,6 +495,14 @@ public class BlueprintDetailScreen extends Screen {
         BlockPos target = this.targetPost != null
                 ? this.targetPost
                 : CommandPostProjections.nearestMine(player.blockPosition(), player.getUUID());
+        // 附近没有（走远了、人在别的维度、那台还没同步过来）就退回"我绑的那一台"：
+        // 服务端本来就是按绑定认目标的，客户端这一步只是为了别在能成的时候先自己拦下
+        if (target == null) {
+            GlobalPos bound = ClientPostBinding.current();
+            if (bound != null) {
+                target = bound.pos();
+            }
+        }
         if (target == null) {
             setStatus(Component.translatable("gui.maidconstruction.detail.no_post"), COLOR_WARN);
             return;
