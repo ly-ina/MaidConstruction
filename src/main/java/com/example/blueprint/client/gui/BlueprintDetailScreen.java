@@ -225,9 +225,15 @@ public class BlueprintDetailScreen extends Screen {
                 x + PREVIEW_WIDTH / 2, y + height / 2, PREVIEW_WIDTH - 6,
                 this.yaw, this.pitch, Rotation.NONE, Mirror.NONE, this.zoom);
 
-        // 分层那两行写在预览框左上角：那里通常空着，一眼能看到现在是第几层、怎么换
-        graphics.drawString(this.font, this.layers.stateText(), x + 3, y + 3, 0xDDDDDD, true);
-        graphics.drawString(this.font, BlueprintLayerView.barText(), x + 3, y + 13, 0x888888, true);
+        // 左上角：状态一行 + 小问号（说明收进问号里，悬浮才展开，免得横跨预览框）
+        int helpX = x + 3;
+        int helpY = y + 3;
+        boolean overHelp = mouseX >= helpX - 1 && mouseX < helpX + 11
+                && mouseY >= helpY - 1 && mouseY < helpY + 11;
+        graphics.fill(helpX, helpY, helpX + 10, helpY + 10, overHelp ? 0xFF3A3A55 : 0xA0202030);
+        graphics.renderOutline(helpX, helpY, 10, 10, 0x80808080);
+        graphics.drawString(this.font, "?", helpX + 2, helpY + 1, 0xFFFFFF, false);
+        graphics.drawString(this.font, this.layers.stateText(), x + 17, y + 5, 0xDDDDDD, true);
         // 拖动条：底＝第 1 层，顶＝整栋；左键拖/点换层，右键切"只看这层"
         this.layers.drawBar(graphics, barX(), barTop(), barBottom());
 
@@ -235,13 +241,16 @@ public class BlueprintDetailScreen extends Screen {
         Schematic.BlockEntry hovered = SchematicPreview.pick(this.schematic, shown(),
                 x + PREVIEW_WIDTH / 2, y + height / 2, scale,
                 this.yaw, this.pitch, mouseX, mouseY);
-        if (hovered != null) {
-            // 往前挪到 z=400 再画：预览那幅 3D 画在 z=200，不往前挪就会被方块压在底下——看着就是一团黑
-            graphics.pose().pushPose();
-            graphics.pose().translate(0.0D, 0.0D, 400.0D);
-            graphics.renderTooltip(this.font, this.layers.describe(hovered), mouseX, mouseY);
-            graphics.pose().popPose();
+        graphics.pose().pushPose();
+        graphics.pose().translate(0.0D, 0.0D, 400.0D);
+        if (overHelp) {
+            SchematicPreview.drawHintBox(graphics, this.font, BlueprintLayerView.helpLines(),
+                    mouseX, mouseY, this.width, this.height);
+        } else if (hovered != null) {
+            SchematicPreview.drawHintBox(graphics, this.font, List.of(this.layers.describe(hovered)),
+                    mouseX, mouseY, this.width, this.height);
         }
+        graphics.pose().popPose();
     }
 
     /**

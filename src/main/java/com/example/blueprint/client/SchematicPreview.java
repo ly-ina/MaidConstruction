@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LightTexture;
@@ -14,6 +15,7 @@ import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
 import net.minecraft.core.Vec3i;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.Mirror;
@@ -149,6 +151,29 @@ public final class SchematicPreview {
      * 单拎出来是因为**画图与拾取必须用同一个数**：两处各算一遍的话，迟早一处改了、另一处没跟上，
      * 表现就是"越放大偏得越多"。界面自己的缩放倍数不在这里乘，由调用方乘完再一起用。
      */
+    /**
+     * 预览里的小提示框：**自己画，不用原版 {@code renderTooltip}**。
+     * <p>
+     * 原版那套在这层深度里画出来只有底框、字是空的（预览是带变换画在 z=200 的，提示得挪到它前面才看得见，
+     * 而挪过去之后原版 tooltip 的字就画不出来了）。自己画就是几个 fill + drawString，颜色与深度都在手里。
+     * <p>
+     * 位置跟着鼠标，但会把框拉回屏幕内——贴边时提示被切掉一半，等于没提示。
+     */
+    public static void drawHintBox(GuiGraphics graphics, Font font, List<Component> lines,
+                                   int mouseX, int mouseY, int screenWidth, int screenHeight) {
+        int width = 0;
+        for (Component line : lines) {
+            width = Math.max(width, font.width(line));
+        }
+        int x = Math.min(mouseX + 8, screenWidth - width - 8);
+        int y = Math.min(mouseY + 8, screenHeight - lines.size() * 10 - 8);
+        graphics.fill(x - 3, y - 3, x + width + 3, y + lines.size() * 10 + 1, 0xE0100010);
+        graphics.renderOutline(x - 4, y - 4, width + 8, lines.size() * 10 + 6, 0x805000FF);
+        for (int i = 0; i < lines.size(); i++) {
+            graphics.drawString(font, lines.get(i), x, y + i * 10, 0xFFFFFF, true);
+        }
+    }
+
     public static float scaleFor(Schematic schematic, int width) {
         Vec3i size = schematic.getSize();
         float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));

@@ -233,7 +233,9 @@ public class BlueprintScreen extends Screen {
         graphics.drawString(this.font, this.title, left + 6, top + 7, COLOR_TEXT, false);
         graphics.drawString(this.font, Component.translatable("gui.maidconstruction.name_label"),
                 left + 48, top + 7, COLOR_LABEL, false);
-        graphics.drawString(this.font, Component.translatable("gui.maidconstruction.file_hint"),
+        // 这一格只留 FILE_WIDTH：目录名一长就会顶到右边按钮栏上（原来那串全路径就是这么溢出去的）
+        graphics.drawString(this.font, this.font.plainSubstrByWidth(
+                        Component.translatable("gui.maidconstruction.file_hint").getString(), FILE_WIDTH - 4),
                 this.fileListX, top + 7, COLOR_LABEL, false);
 
         drawPreview(graphics, left, top, mouseX, mouseY);
@@ -376,11 +378,16 @@ public class BlueprintScreen extends Screen {
         buffers.endBatch();
         pose.popPose();
 
-        // 分层那两行写在预览框左上角：那里通常空着，一眼就能看到现在是第几层、怎么换
+        // 左上角：状态一行 + 一个小问号。说明收进问号里——常驻那几行会横跨预览框、压到右边的按钮上
+        int helpX = left + 4;
+        int helpY = top + HEADER_HEIGHT + 3;
+        boolean overHelp = mouseX >= helpX - 1 && mouseX < helpX + 11
+                && mouseY >= helpY - 1 && mouseY < helpY + 11;
+        graphics.fill(helpX, helpY, helpX + 10, helpY + 10, overHelp ? 0xFF3A3A55 : 0xA0202030);
+        graphics.renderOutline(helpX, helpY, 10, 10, 0x80808080);
+        graphics.drawString(this.font, "?", helpX + 2, helpY + 1, 0xFFFFFF, false);
         graphics.drawString(this.font, layers.stateText(),
-                left + 4, top + HEADER_HEIGHT + 4, 0xDDDDDD, true);
-        graphics.drawString(this.font, BlueprintLayerView.barText(),
-                left + 4, top + HEADER_HEIGHT + 14, 0x888888, true);
+                left + 18, top + HEADER_HEIGHT + 5, 0xDDDDDD, true);
         // 拖动条：底＝第 1 层，顶＝整栋；左键拖/点换层，右键切"只看这层"
         layers.drawBar(graphics, barX(), barTop(), barBottom());
 
@@ -391,13 +398,17 @@ public class BlueprintScreen extends Screen {
         // 悬浮方块名：用画图时同一个缩放（scale）去投，指哪算哪
         Schematic.BlockEntry hovered = SchematicPreview.pick(schematic, drawn,
                 cx, cy, scale, yaw, pitch, mouseX, mouseY);
-        if (hovered != null) {
-            // 往前挪到 z=400 再画：预览那幅 3D 画在 z=200，不往前挪就会被方块压在底下——看着就是一团黑
-            pose.pushPose();
-            pose.translate(0.0D, 0.0D, 400.0D);
-            graphics.renderTooltip(this.font, layers.describe(hovered), mouseX, mouseY);
-            pose.popPose();
+        // 提示自己画（见 drawHintBox 的说明），并往前挪到 z=400：预览画在 z=200，不往前就会被方块压住
+        pose.pushPose();
+        pose.translate(0.0D, 0.0D, 400.0D);
+        if (overHelp) {
+            SchematicPreview.drawHintBox(graphics, this.font, BlueprintLayerView.helpLines(),
+                    mouseX, mouseY, this.width, this.height);
+        } else if (hovered != null) {
+            SchematicPreview.drawHintBox(graphics, this.font, List.of(layers.describe(hovered)),
+                    mouseX, mouseY, this.width, this.height);
         }
+        pose.popPose();
     }
 
     /** 预览里给"模型画不出来"的方块画线框用的单位立方体 */

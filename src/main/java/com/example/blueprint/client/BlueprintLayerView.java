@@ -152,9 +152,17 @@ public final class BlueprintLayerView {
         return Component.translatable("gui.maidconstruction.layer.through", through, layers);
     }
 
-    /** 预览左上角第二行：怎么操作（只剩一条：拖右边那条，右键切切片） */
-    public static Component barText() {
-        return Component.translatable("gui.maidconstruction.layer.bar");
+    /**
+     * 预览左上角那个问号里写的东西（鼠标悬浮才展开）。
+     * <p>
+     * 为什么收进问号：这几行常驻会横跨预览框、压到右边的按钮上（中文尤其长），而且它是"看过一次就记住"
+     * 的东西——常驻只是占地方。
+     */
+    public static List<Component> helpLines() {
+        return List.of(
+                Component.translatable("gui.maidconstruction.help.layers"),
+                Component.translatable("gui.maidconstruction.help.slice"),
+                Component.translatable("gui.maidconstruction.help.zoom"));
     }
 
     /**
