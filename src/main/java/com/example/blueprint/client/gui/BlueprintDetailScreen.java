@@ -3,6 +3,7 @@ package com.example.blueprint.client.gui;
 import com.example.blueprint.build.BuildSession;
 import com.example.blueprint.client.BlueprintLibrary;
 import com.example.blueprint.client.BlueprintRecordSession;
+import com.example.blueprint.client.BlueprintLayerView;
 import com.example.blueprint.client.BlueprintTransfer;
 import com.example.blueprint.client.CommandPostProjections;
 import com.example.blueprint.client.SchematicPreview;
@@ -25,6 +26,7 @@ import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
@@ -68,8 +70,13 @@ public class BlueprintDetailScreen extends Screen {
     private final BlockPos targetPost;
     @Nullable
     private final Schematic schematic;
-    /** 抽稀过的方块清单：预览每帧都要用，别在绘制里重算 */
-    private final List<Schematic.BlockEntry> preview;
+    /** 全部方块（不抽稀）：分层要"先按层筛、再抽稀"，所以这份得留着 */
+    private final List<Schematic.BlockEntry> allEntries;
+    /** 分层查看：只看某一层 / 看到某一层为止（滚轮或 ↑↓ 换层，Shift 切"只看这层"） */
+    private final BlueprintLayerView layers = new BlueprintLayerView();
+    /** 当前实际要画的那一份，见 {@link #shown()} */
+    private List<Schematic.BlockEntry> shown = List.of();
+    private int shownVersion = -1;
     private final List<Row> rows = new ArrayList<>();
     /** 没有对应物品的方块数（水、火这类），单独提一句，免得玩家以为漏算了 */
     private int plainBlocks;
@@ -99,8 +106,9 @@ public class BlueprintDetailScreen extends Screen {
         this.entry = entry;
         this.targetPost = targetPost;
         this.schematic = entry.schematic();
-        this.preview = this.schematic == null
-                ? List.of() : SchematicPreview.sample(this.schematic, SchematicPreview.MAX_BLOCKS);
+        this.allEntries = this.schematic == null ? List.of() : this.schematic.entries();
+        // 层数与起点按这张图重算，"看到第几层"回到整栋
+        this.layers.reset(this.schematic, this.allEntries);
         if (this.schematic != null) {
             buildRows(this.schematic);
         }
@@ -208,9 +216,30 @@ public class BlueprintDetailScreen extends Screen {
         graphics.fill(x, y, x + PREVIEW_WIDTH, y + height, 0x60000000);
         graphics.renderOutline(x, y, PREVIEW_WIDTH, height, COLOR_DIVIDER);
 
-        SchematicPreview.draw(graphics, this.schematic, this.preview,
+        SchematicPreview.draw(graphics, this.schematic, shown(),
                 x + PREVIEW_WIDTH / 2, y + height / 2, PREVIEW_WIDTH - 6,
                 this.yaw, this.pitch, Rotation.NONE, Mirror.NONE);
+
+        // 分层那两行写在预览框左上角：那里通常空着，一眼能看到现在是第几层、怎么换
+        graphics.drawString(this.font, this.layers.stateText(), x + 3, y + 3, 0xDDDDDD, true);
+        graphics.drawString(this.font, BlueprintLayerView.keysText(), x + 3, y + 13, 0x888888, true);
+    }
+
+    /**
+     * 现在该画哪一份：整栋就是预先抽稀好的，分层时**先按层筛、再抽稀**。
+     * <p>
+     * 顺序不能反——一层本来就没剩几块，先抽稀再筛等于把那几块也丢了，看着就像"这层是空的"。
+     * 结果按状态版本缓存：换层才算一次（上万条的图，放进每帧都跑的绘制里是白烧 CPU）。
+     */
+    private List<Schematic.BlockEntry> shown() {
+        if (this.shownVersion == this.layers.version()) {
+            return this.shown;
+        }
+        List<Schematic.BlockEntry> kept = this.layers.filter(this.allEntries);
+        this.shown = kept.size() > SchematicPreview.MAX_BLOCKS
+                ? SchematicPreview.sample(kept, SchematicPreview.MAX_BLOCKS) : kept;
+        this.shownVersion = this.layers.version();
+        return this.shown;
     }
 
     private void drawList(GuiGraphics graphics) {
@@ -315,6 +344,30 @@ public class BlueprintDetailScreen extends Screen {
         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
+    /** 指针在不在这块预览框里：滚轮换层与它共用一处判据，免得矩形写两遍、错一次都不好查 */
+    private boolean isOverPreview(double mouseX, double mouseY) {
+        int left = (this.width - WINDOW_WIDTH) / 2;
+        int top = (this.height - WINDOW_HEIGHT) / 2;
+        return mouseX >= left + 6 && mouseX < left + 6 + PREVIEW_WIDTH
+                && mouseY >= top + HEADER_HEIGHT + 4
+                && mouseY < top + HEADER_HEIGHT + 4 + (WINDOW_HEIGHT - HEADER_HEIGHT - 26);
+    }
+
+    /** 方向键换层：与滚轮同一个动作（这边滚轮让给了材料清单，键位更省事） */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        int delta = switch (keyCode) {
+            case GLFW.GLFW_KEY_UP, GLFW.GLFW_KEY_PAGE_UP -> 1;
+            case GLFW.GLFW_KEY_DOWN, GLFW.GLFW_KEY_PAGE_DOWN -> -1;
+            default -> 0;
+        };
+        if (delta != 0) {
+            this.layers.step(delta, Screen.hasShiftDown());
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         this.dragging = false;
@@ -323,6 +376,11 @@ public class BlueprintDetailScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        // 预览框上的滚轮＝换层；指针在材料清单那边时才翻页——各管一摊，不用抢
+        if (delta != 0.0D && isOverPreview(mouseX, mouseY)) {
+            this.layers.step(delta > 0.0D ? 1 : -1, Screen.hasShiftDown());
+            return true;
+        }
         if (delta == 0.0D || this.rows.size() <= visibleRows()) {
             return super.mouseScrolled(mouseX, mouseY, delta);
         }

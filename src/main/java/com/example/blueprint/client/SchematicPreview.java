@@ -54,7 +54,14 @@ public final class SchematicPreview {
      * 等于每帧白遍历一遍（蓝图面板当年就是这么被吃掉的）。
      */
     public static List<Schematic.BlockEntry> sample(Schematic schematic, int maxBlocks) {
-        List<Schematic.BlockEntry> all = schematic.entries();
+        return sample(schematic.entries(), maxBlocks);
+    }
+
+    /**
+     * 同一套抽稀，但吃的是**已经筛过的**清单——分层查看要用它：先按层筛掉不看的，再抽稀，
+     * 顺序反过来的话，某一层本来就没剩几块，再抽一次就成了几个孤零零的方块，等于没看。
+     */
+    public static List<Schematic.BlockEntry> sample(List<Schematic.BlockEntry> all, int maxBlocks) {
         if (all.size() <= maxBlocks) {
             return all;
         }

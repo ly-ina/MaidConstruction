@@ -1,5 +1,6 @@
 package com.example.blueprint.client.gui;
 
+import com.example.blueprint.client.BlueprintLayerView;
 import com.example.blueprint.client.BlueprintTransfer;
 import com.example.blueprint.client.CableBusOutline;
 import com.example.blueprint.client.ClientSchematicCache;
@@ -38,6 +39,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import org.lwjgl.glfw.GLFW;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.model.data.ModelData;
@@ -115,6 +117,8 @@ public class BlueprintScreen extends Screen {
     private Schematic previewSchematic;
     private UUID previewId;
     private List<Schematic.BlockEntry> previewEntries = List.of();
+    /** 分层查看：只看某一层 / 看到某一层为止（滚轮或 ↑↓ 换层，Shift 切"只看这层"） */
+    private final BlueprintLayerView layers = new BlueprintLayerView();
     private float yaw = 45.0F;
     private float pitch = 30.0F;
     private long lastRequestAt = 0;
@@ -296,7 +300,10 @@ public class BlueprintScreen extends Screen {
         }
 
         Vec3i size = schematic.getSize();
-        int step = Math.max(1, (int) Math.ceil(schematic.countBlocks() / (double) MAX_PREVIEW_BLOCKS));
+        // 分层：先按层筛，再算抽稀步长——步长要按"筛完之后还剩多少块"算，
+        // 否则只看一层时那一层会被抽成几个孤块，等于什么都没看见
+        List<Schematic.BlockEntry> shown = layers.filter(previewEntries);
+        int step = Math.max(1, (int) Math.ceil(shown.size() / (double) MAX_PREVIEW_BLOCKS));
         float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));
         float scale = (PREVIEW_WIDTH - 28) / (maxDim * 1.7F);
 
@@ -314,7 +321,7 @@ public class BlueprintScreen extends Screen {
 
         int drawn = 0;
         List<Schematic.BlockEntry> unrenderable = null;
-        for (Schematic.BlockEntry entry : previewEntries) {
+        for (Schematic.BlockEntry entry : shown) {
             if (drawn++ % step != 0) {
                 continue;
             }
@@ -361,6 +368,12 @@ public class BlueprintScreen extends Screen {
 
         buffers.endBatch();
         pose.popPose();
+
+        // 分层那两行写在预览框左上角：那里通常空着，一眼就能看到现在是第几层、怎么换
+        graphics.drawString(this.font, layers.stateText(),
+                left + 4, top + HEADER_HEIGHT + 4, 0xDDDDDD, true);
+        graphics.drawString(this.font, BlueprintLayerView.keysText(),
+                left + 4, top + HEADER_HEIGHT + 14, 0x888888, true);
 
         graphics.drawCenteredString(this.font,
                 Component.literal(size.getX() + "×" + size.getY() + "×" + size.getZ()),
@@ -425,6 +438,8 @@ public class BlueprintScreen extends Screen {
             previewSchematic = schematic;
             previewId = id;
             previewEntries = schematic.entries();
+            // 换了图，层数与起点跟着重算，看到第几层回到整栋
+            layers.reset(schematic, previewEntries);
         }
         return schematic;
     }
@@ -489,7 +504,32 @@ public class BlueprintScreen extends Screen {
             fileScroll = Mth.clamp(fileScroll - (int) (delta * FILE_ROW_HEIGHT), 0, max);
             return true;
         }
+        // 预览区上的滚轮＝换层（原来这里是空的）。Shift 按住＝"只看这一层"
+        if (isOverPreview(mouseX, mouseY) && delta != 0.0D) {
+            layers.step(delta > 0.0D ? 1 : -1, Screen.hasShiftDown());
+            return true;
+        }
         return super.mouseScrolled(mouseX, mouseY, delta);
+    }
+
+    /**
+     * 方向键换层：与滚轮同一个动作。
+     * <p>
+     * 为什么是键位而不是再加两个按钮：右侧那一列已经排满（旋转、镜像、清空、清单、导入导出、
+     * 打开文件夹、关闭），而预览区上方本来就空着——键位不占地方，也正合"在预览里往上往下翻"。
+     */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        int delta = switch (keyCode) {
+            case GLFW.GLFW_KEY_UP, GLFW.GLFW_KEY_PAGE_UP -> 1;
+            case GLFW.GLFW_KEY_DOWN, GLFW.GLFW_KEY_PAGE_DOWN -> -1;
+            default -> 0;
+        };
+        if (delta != 0) {
+            layers.step(delta, Screen.hasShiftDown());
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     @Override
