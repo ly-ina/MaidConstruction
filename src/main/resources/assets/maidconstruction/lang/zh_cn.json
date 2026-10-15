@@ -319,6 +319,7 @@
   "gui.maidconstruction.edit.overwrite": "覆盖原图",
   "gui.maidconstruction.edit.overwrite_confirm": "再按一次＝覆盖「%s」",
   "gui.maidconstruction.edit.overwritten": "已覆盖：%s",
+  "gui.maidconstruction.edit.help.pan": "WASD：平移视角",
   "gui.maidconstruction.edit.nothing_picked": "左键点方块选中 · Shift 左键选同类",
   "gui.maidconstruction.edit.picked_kind": "已选同类 %s 格",
   "gui.maidconstruction.edit.picked_one": "已选 %s",

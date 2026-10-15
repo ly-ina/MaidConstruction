@@ -1,5 +1,6 @@
 package com.example.blueprint.client.gui;
 
+import com.example.blueprint.client.BlueprintLayerView;
 import com.example.blueprint.client.BlueprintLibrary;
 import com.example.blueprint.client.BlueprintTransfer;
 import com.example.blueprint.client.SchematicPreview;
@@ -21,6 +22,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.registries.ForgeRegistries;
+import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
@@ -28,7 +30,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 图纸编辑（调试用）：左边照旧是那份蓝图的三维浏览，右边是一份能搜的物品列表。
@@ -86,6 +90,16 @@ public class BlueprintEditScreen extends Screen {
     private double lastMouseX;
     private double lastMouseY;
 
+    /** 分层：与详情页同一套（右边缘拖条换层、右键切片），编辑时也要能钻进去看 */
+    private final BlueprintLayerView layers = new BlueprintLayerView();
+    /** 滚轮缩放：与绘制、拾取共用一个倍数 */
+    private float zoom = 1.0F;
+    /** WASD 平移：按屏幕像素挪预览中心（不是挪结构本身，数据一格都没动） */
+    private float panX;
+    private float panY;
+    /** 按住的键：平移放在 tick 里推进——按键事件只在按下那一下来一次，给不了"按住"的时机 */
+    private final Set<Integer> pressed = new HashSet<>();
+
     private int listX;
     private int listY;
     private int listWidth;
@@ -97,6 +111,7 @@ public class BlueprintEditScreen extends Screen {
         super(Component.translatable("gui.maidconstruction.edit"));
         this.sourceName = sourceName;
         this.schematic = schematic;
+        this.layers.reset(schematic, schematic.entries());
         List<Item> items = new ArrayList<>();
         for (Item item : ForgeRegistries.ITEMS.getValues()) {
             // 只收能放成方块的：替换需要一个方块状态，纯物品（煤炭、木棍）在这里没有意义
@@ -310,27 +325,47 @@ public class BlueprintEditScreen extends Screen {
         graphics.fill(x, y, x + PREVIEW_WIDTH, y + height, 0x60000000);
         graphics.renderOutline(x, y, PREVIEW_WIDTH, height, 0x60FFFFFF);
 
-        List<Schematic.BlockEntry> entries = this.schematic.entries();
-        float scale = SchematicPreview.scaleFor(this.schematic, PREVIEW_WIDTH - 6);
-        SchematicPreview.draw(graphics, this.schematic, entries,
-                x + PREVIEW_WIDTH / 2, y + height / 2, PREVIEW_WIDTH - 6,
-                this.yaw, this.pitch, Rotation.NONE, Mirror.NONE, 1.0F);
+        List<Schematic.BlockEntry> entries = shownEntries();
+        float scale = previewScale();
+        int cx = centerX();
+        int cy = centerY();
+        SchematicPreview.draw(graphics, this.schematic, entries, cx, cy, PREVIEW_WIDTH - 6,
+                this.yaw, this.pitch, Rotation.NONE, Mirror.NONE, this.zoom);
         // 描边：同一套变换，所以框严丝合缝贴在方块上（Shift 点选的同类会一次描一大片）
-        SchematicPreview.drawHighlights(graphics, this.schematic, this.picked,
-                x + PREVIEW_WIDTH / 2, y + height / 2, scale, this.yaw, this.pitch);
-        if (mouseX >= x && mouseX < x + PREVIEW_WIDTH && mouseY >= y && mouseY < y + height) {
-            Schematic.BlockEntry hovered = SchematicPreview.pick(this.schematic, entries,
-                    x + PREVIEW_WIDTH / 2, y + height / 2, scale, this.yaw, this.pitch, mouseX, mouseY);
-            if (hovered != null) {
-                graphics.pose().pushPose();
-                graphics.pose().translate(0.0D, 0.0D, 400.0D);
-                SchematicPreview.drawHintBox(graphics, this.font,
-                        List.of(hovered.state().getBlock().getName(),
-                                Component.literal(hovered.pos().toShortString())),
-                        mouseX, mouseY, this.width, this.height);
-                graphics.pose().popPose();
-            }
+        SchematicPreview.drawHighlights(graphics, this.schematic, this.picked, cx, cy, scale,
+                this.yaw, this.pitch);
+
+        // 左上角：状态 + 小问号（说明收进问号里，悬浮才展开，免得横跨预览框）
+        int helpX = x + 3;
+        int helpY = y + 3;
+        boolean overHelp = mouseX >= helpX - 1 && mouseX < helpX + 11
+                && mouseY >= helpY - 1 && mouseY < helpY + 11;
+        graphics.fill(helpX, helpY, helpX + 10, helpY + 10, overHelp ? 0xFF3A3A55 : 0xA0202030);
+        graphics.renderOutline(helpX, helpY, 10, 10, 0x80808080);
+        graphics.drawString(this.font, "?", helpX + 2, helpY + 1, 0xFFFFFF, false);
+        graphics.drawString(this.font, this.layers.stateText(), x + 17, y + 5, 0xDDDDDD, true);
+        // 拖动条：底＝第 1 层、顶＝整栋；左键拖或点换层，右键（预览任意处也行）切"只看这层"
+        this.layers.drawBar(graphics, barX(), barTop(), barBottom());
+
+        boolean overPreview = mouseX >= x && mouseX < x + PREVIEW_WIDTH
+                && mouseY >= y && mouseY < y + height;
+        Schematic.BlockEntry hovered = overPreview
+                ? SchematicPreview.pick(this.schematic, entries, cx, cy, scale,
+                        this.yaw, this.pitch, mouseX, mouseY)
+                : null;
+        graphics.pose().pushPose();
+        graphics.pose().translate(0.0D, 0.0D, 400.0D);
+        if (overHelp) {
+            List<Component> help = new ArrayList<>(BlueprintLayerView.helpLines());
+            help.add(Component.translatable("gui.maidconstruction.edit.help.pan"));
+            SchematicPreview.drawHintBox(graphics, this.font, help, mouseX, mouseY, this.width, this.height);
+        } else if (hovered != null) {
+            SchematicPreview.drawHintBox(graphics, this.font,
+                    List.of(hovered.state().getBlock().getName(),
+                            Component.literal(hovered.pos().toShortString())),
+                    mouseX, mouseY, this.width, this.height);
         }
+        graphics.pose().popPose();
     }
 
     private void drawItems(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -370,11 +405,24 @@ public class BlueprintEditScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // 先接分层条：它贴着预览框右边缘、压在最上面（拖动条本身不该顺手把选中也改了）
+        if (BlueprintLayerView.overBar(mouseX, mouseY, barX(), barTop(), barBottom())) {
+            if (button == 1) {
+                this.layers.toggleSlice();
+            } else {
+                this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+            }
+            return true;
+        }
+        // 右键点预览任意处＝切"看到这层为止 / 只看这一层"
+        if (button == 1 && isOverPreview(mouseX, mouseY)) {
+            this.layers.toggleSlice();
+            return true;
+        }
         if (button == 0 && isOverPreview(mouseX, mouseY)) {
             // 按下去就选中：预览里"点一下"和"拖着转"是同一个动作，拖的时候顺手换选中也无妨
             Schematic.BlockEntry hovered = SchematicPreview.pick(this.schematic,
-                    this.schematic.entries(), previewCenterX(), previewCenterY(),
-                    SchematicPreview.scaleFor(this.schematic, PREVIEW_WIDTH - 6),
+                    shownEntries(), centerX(), centerY(), previewScale(),
                     this.yaw, this.pitch, mouseX, mouseY);
             if (hovered != null) {
                 // Shift 点＝选中"同一种方块"的全部（含朝向、半砖上下那类属性一起看），普通点＝只选这一格
@@ -429,6 +477,12 @@ public class BlueprintEditScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        // 预览区上的滚轮＝缩放（0.35~4 倍）；指针在物品列表那边时才是翻页
+        if (delta != 0.0D && isOverPreview(mouseX, mouseY)) {
+            double factor = delta > 0.0D ? 1.1D : 1.0D / 1.1D;
+            this.zoom = (float) Math.max(0.35D, Math.min(4.0D, this.zoom * factor));
+            return true;
+        }
         if (isOverItems(mouseX, mouseY) && delta != 0.0D) {
             int rows = Math.max(1, this.listHeight / CELL);
             int maxRow = Math.max(0, (this.shownItems.size() + this.columns - 1) / this.columns - rows);
@@ -456,6 +510,81 @@ public class BlueprintEditScreen extends Screen {
     private int previewCenterY() {
         return (this.height - WINDOW_HEIGHT) / 2 + HEADER_HEIGHT + 4
                 + (WINDOW_HEIGHT - HEADER_HEIGHT - 40) / 2;
+    }
+
+    /** 预览中心的**当前位置**：平移就是把它挪开。绘制、拾取、描边三处都得用它，否则指针就指偏了 */
+    private int centerX() {
+        return previewCenterX() + Math.round(this.panX);
+    }
+
+    private int centerY() {
+        return previewCenterY() + Math.round(this.panY);
+    }
+
+    /** 当前该画/该点的方块：分层筛过的那一份（隐藏起来的层，鼠标也点不到） */
+    private List<Schematic.BlockEntry> shownEntries() {
+        return this.layers.filter(this.schematic.entries());
+    }
+
+    /** 基准缩放 × 界面缩放倍数；绘制与拾取共用 */
+    private float previewScale() {
+        return SchematicPreview.scaleFor(this.schematic, PREVIEW_WIDTH - 6) * this.zoom;
+    }
+
+    // 分层拖动条：与详情页同一套换算（贴着预览框右边缘）
+    private int barX() {
+        return (this.width - WINDOW_WIDTH) / 2 + 6 + PREVIEW_WIDTH - 12;
+    }
+
+    private int barTop() {
+        return (this.height - WINDOW_HEIGHT) / 2 + HEADER_HEIGHT + 8;
+    }
+
+    private int barBottom() {
+        return (this.height - WINDOW_HEIGHT) / 2 + HEADER_HEIGHT + 4
+                + (WINDOW_HEIGHT - HEADER_HEIGHT - 40) - 6;
+    }
+
+    /** WASD 平移：放在 tick 里推进，按住的键不会每帧再发一次事件 */
+    @Override
+    public void tick() {
+        float step = 2.0F;
+        if (this.pressed.contains(GLFW.GLFW_KEY_W)) {
+            this.panY -= step;
+        }
+        if (this.pressed.contains(GLFW.GLFW_KEY_S)) {
+            this.panY += step;
+        }
+        if (this.pressed.contains(GLFW.GLFW_KEY_A)) {
+            this.panX -= step;
+        }
+        if (this.pressed.contains(GLFW.GLFW_KEY_D)) {
+            this.panX += step;
+        }
+    }
+
+    /**
+     * WASD 只在**没在打字**时当平移用。
+     * <p>
+     * 搜索框拿到焦点时，w/a/s/d 是往框里打字的——把它们抢过来平移，玩家就没法搜带这些字母的名字了。
+     */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (this.searchBox != null && this.searchBox.isFocused()) {
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+        if (keyCode == GLFW.GLFW_KEY_W || keyCode == GLFW.GLFW_KEY_A
+                || keyCode == GLFW.GLFW_KEY_S || keyCode == GLFW.GLFW_KEY_D) {
+            this.pressed.add(keyCode);
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        this.pressed.remove(keyCode);
+        return super.keyReleased(keyCode, scanCode, modifiers);
     }
 
     private boolean isOverPreview(double mouseX, double mouseY) {
