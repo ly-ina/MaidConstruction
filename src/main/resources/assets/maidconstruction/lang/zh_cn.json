@@ -315,7 +315,7 @@
   "gui.maidconstruction.layer.whole": "整栋 %s 层",
   "gui.maidconstruction.layer.through": "显示到第 %s / %s 层",
   "gui.maidconstruction.layer.only": "只看第 %s / %s 层",
-  "gui.maidconstruction.layer.bar": "拖右边滑块换层 · 右键＝只看这层",
+  "gui.maidconstruction.layer.bar": "拖右边滑块换层 · 右键预览＝只看这层 · 滚轮缩放",
   "gui.maidconstruction.preview.block": "%s（第 %s 层）",
   "gui.maidconstruction.no_files": "目录里没有文件",
   "gui.maidconstruction.rotate": "旋转 90°",

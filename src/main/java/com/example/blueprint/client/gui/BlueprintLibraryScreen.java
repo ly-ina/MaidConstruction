@@ -197,7 +197,7 @@ public class BlueprintLibraryScreen extends Screen {
                     key -> SchematicPreview.sample(schematic, THUMB_BLOCKS));
             SchematicPreview.draw(graphics, schematic, thumbnail,
                     x + CARD_WIDTH / 2, y + CARD_HEIGHT / 2 - 4, CARD_WIDTH - 6,
-                    THUMB_YAW, THUMB_PITCH, Rotation.NONE, Mirror.NONE);
+                    THUMB_YAW, THUMB_PITCH, Rotation.NONE, Mirror.NONE, 1.0F);
         }
 
         // 名字压在下沿那条暗条上：缩略图可能延伸到整格，先垫一层底色才看得清字

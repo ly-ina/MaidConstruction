@@ -85,6 +85,8 @@ public class BlueprintDetailScreen extends Screen {
     private boolean dragging;
     /** 正在拖分层那条：拖它的时候别再顺手转视角（两件事都在同一块预览上，不分开就会互相打架） */
     private boolean draggingLayer;
+    /** 滚轮缩放：预览的放大倍数（1 = 原样）。画图与拾取都乘它，两边不会错位 */
+    private float zoom = 1.0F;
     private double lastMouseX;
     private double lastMouseY;
 
@@ -217,9 +219,11 @@ public class BlueprintDetailScreen extends Screen {
         graphics.fill(x, y, x + PREVIEW_WIDTH, y + height, 0x60000000);
         graphics.renderOutline(x, y, PREVIEW_WIDTH, height, COLOR_DIVIDER);
 
+        // 画与拾取用同一个缩放：scaleFor 给基准，界面自己的缩放倍数乘上去
+        float scale = SchematicPreview.scaleFor(this.schematic, PREVIEW_WIDTH - 6) * this.zoom;
         SchematicPreview.draw(graphics, this.schematic, shown(),
                 x + PREVIEW_WIDTH / 2, y + height / 2, PREVIEW_WIDTH - 6,
-                this.yaw, this.pitch, Rotation.NONE, Mirror.NONE);
+                this.yaw, this.pitch, Rotation.NONE, Mirror.NONE, this.zoom);
 
         // 分层那两行写在预览框左上角：那里通常空着，一眼能看到现在是第几层、怎么换
         graphics.drawString(this.font, this.layers.stateText(), x + 3, y + 3, 0xDDDDDD, true);
@@ -227,13 +231,16 @@ public class BlueprintDetailScreen extends Screen {
         // 拖动条：底＝第 1 层，顶＝整栋；左键拖/点换层，右键切"只看这层"
         this.layers.drawBar(graphics, barX(), barTop(), barBottom());
 
-        // 悬浮方块名：把方块按画它时那套变换投回屏幕，才认得出鼠标指到了哪一块。
-        // 宽度与上面那次 draw 保持一致（PREVIEW_WIDTH - 6），否则拾取会整体偏移
+        // 悬浮方块名：用上面算好的那个 scale 去投，指哪算哪
         Schematic.BlockEntry hovered = SchematicPreview.pick(this.schematic, shown(),
-                x + PREVIEW_WIDTH / 2, y + height / 2, PREVIEW_WIDTH - 6,
+                x + PREVIEW_WIDTH / 2, y + height / 2, scale,
                 this.yaw, this.pitch, mouseX, mouseY);
         if (hovered != null) {
+            // 往前挪到 z=400 再画：预览那幅 3D 画在 z=200，不往前挪就会被方块压在底下——看着就是一团黑
+            graphics.pose().pushPose();
+            graphics.pose().translate(0.0D, 0.0D, 400.0D);
             graphics.renderTooltip(this.font, this.layers.describe(hovered), mouseX, mouseY);
+            graphics.pose().popPose();
         }
     }
 
@@ -334,6 +341,11 @@ public class BlueprintDetailScreen extends Screen {
             }
             return true;
         }
+        // 右键点预览任意处＝切"看到这层为止 / 只看这一层"，不必非得点在条上
+        if (button == 1 && isOverPreview(mouseX, mouseY)) {
+            this.layers.toggleSlice();
+            return true;
+        }
         if (mouseX >= left + 6 && mouseX < left + 6 + PREVIEW_WIDTH
                 && mouseY >= top + HEADER_HEIGHT && mouseY < top + WINDOW_HEIGHT) {
             this.dragging = true;
@@ -402,7 +414,12 @@ public class BlueprintDetailScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        // 滚轮只管材料清单翻页：分层改由右边那条拖动条来（连续拖，比一层层滚快得多）
+        // 预览框上的滚轮＝缩放；指针在材料清单那边时才翻页——各管一摊，不用抢
+        if (delta != 0.0D && isOverPreview(mouseX, mouseY)) {
+            double factor = delta > 0.0D ? 1.1D : 1.0D / 1.1D;
+            this.zoom = (float) Math.max(0.35D, Math.min(4.0D, this.zoom * factor));
+            return true;
+        }
 
         if (delta == 0.0D || this.rows.size() <= visibleRows()) {
             return super.mouseScrolled(mouseX, mouseY, delta);

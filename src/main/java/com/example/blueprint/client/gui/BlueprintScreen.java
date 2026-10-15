@@ -119,6 +119,8 @@ public class BlueprintScreen extends Screen {
     private List<Schematic.BlockEntry> previewEntries = List.of();
     /** 分层查看：只看某一层 / 看到某一层为止，换层拖预览框右边那条 */
     private final BlueprintLayerView layers = new BlueprintLayerView();
+    /** 滚轮缩放：预览的放大倍数（1 = 原样）。画图与拾取都乘它，两边不会错位 */
+    private float zoom = 1.0F;
     /** 正在拖分层那条：拖它的时候别再顺手转视角（两件事在同一块预览上，不分开就互相打架） */
     private boolean draggingLayer;
     private float yaw = 45.0F;
@@ -313,8 +315,8 @@ public class BlueprintScreen extends Screen {
         for (int i = 0; i < shown.size(); i += step) {
             drawn.add(shown.get(i));
         }
-        float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));
-        float scale = (PREVIEW_WIDTH - 28) / (maxDim * 1.7F);
+        // 缩放统一由渲染器那份换算给（拾取用的是同一个数），再乘上界面自己的缩放倍数
+        float scale = SchematicPreview.scaleFor(schematic, PREVIEW_WIDTH - 20) * zoom;
 
         PoseStack pose = graphics.pose();
         pose.pushPose();
@@ -386,13 +388,15 @@ public class BlueprintScreen extends Screen {
                 Component.literal(size.getX() + "×" + size.getY() + "×" + size.getZ()),
                 cx, top + WINDOW_HEIGHT - 13, 0x999999);
 
-        // 悬浮方块名：界面上那幅 3D 是"画"出来的，鼠标指到哪一块只有把方块投回屏幕上才知道。
-        // 宽度传 PREVIEW_WIDTH - 20 是有意的：pick 内部按 (width - 8) 算缩放，而本面板画预览时
-        // 用的是 (PREVIEW_WIDTH - 28)，两者必须对齐，否则拾取会整体偏移
+        // 悬浮方块名：用画图时同一个缩放（scale）去投，指哪算哪
         Schematic.BlockEntry hovered = SchematicPreview.pick(schematic, drawn,
-                cx, cy, PREVIEW_WIDTH - 20, yaw, pitch, mouseX, mouseY);
+                cx, cy, scale, yaw, pitch, mouseX, mouseY);
         if (hovered != null) {
+            // 往前挪到 z=400 再画：预览那幅 3D 画在 z=200，不往前挪就会被方块压在底下——看着就是一团黑
+            pose.pushPose();
+            pose.translate(0.0D, 0.0D, 400.0D);
             graphics.renderTooltip(this.font, layers.describe(hovered), mouseX, mouseY);
+            pose.popPose();
         }
     }
 
@@ -513,6 +517,11 @@ public class BlueprintScreen extends Screen {
             }
             return true;
         }
+        // 右键点预览任意处＝切"看到这层为止 / 只看这一层"，不必非得点在条上
+        if (button == 1 && isOverPreview(mouseX, mouseY)) {
+            layers.toggleSlice();
+            return true;
+        }
         if (button == 0 && isOverFileList(mouseX, mouseY)) {
             int index = (int) ((mouseY - fileListY + fileScroll) / FILE_ROW_HEIGHT);
             if (index >= 0 && index < files.size()) {
@@ -530,8 +539,11 @@ public class BlueprintScreen extends Screen {
             fileScroll = Mth.clamp(fileScroll - (int) (delta * FILE_ROW_HEIGHT), 0, max);
             return true;
         }
-        // 预览区上的滚轮不换层：分层改由右边那条拖动条来（滚轮留给将来的缩放之类，别抢）
-        
+        // 预览区上的滚轮＝缩放（换层归右边那条拖动条，别抢）
+        if (isOverPreview(mouseX, mouseY) && delta != 0.0D) {
+            this.zoom = Mth.clamp((float) (this.zoom * (delta > 0.0D ? 1.1D : 1.0D / 1.1D)), 0.35F, 4.0F);
+            return true;
+        }
         return super.mouseScrolled(mouseX, mouseY, delta);
     }
 

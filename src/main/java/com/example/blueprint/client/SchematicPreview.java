@@ -83,13 +83,12 @@ public final class SchematicPreview {
      */
     public static void draw(GuiGraphics graphics, Schematic schematic, List<Schematic.BlockEntry> entries,
                             int cx, int cy, int width, float yaw, float pitch,
-                            Rotation rotation, Mirror mirror) {
+                            Rotation rotation, Mirror mirror, float zoom) {
         Vec3i size = schematic.getSize();
-        float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));
-        if (maxDim <= 0.0F) {
+        if (scaleFor(schematic, width) <= 0.0F) {
             return;
         }
-        float scale = (width - 8) / (maxDim * 1.7F);
+        float scale = scaleFor(schematic, width) * zoom;
 
         Minecraft mc = Minecraft.getInstance();
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
@@ -145,24 +144,34 @@ public final class SchematicPreview {
     }
 
     /**
-     * 指针底下是哪一块：把每个方块的中心按 {@link #draw} 那套变换投到屏幕上，取离指针最近的那块
-     * （都在阈值内时取**最靠前**的，也就是画在最上层的那块）。
+     * 画布宽度换算出的缩放；结构是空的返回 0。
      * <p>
-     * 为什么用投影而不是真投一条射线：界面上这幅 3D 只是"看上去像"三维，其实是二维绘制
-     * （变换全在 {@link #draw} 里那几行）——把中心点按同一套参数投过去，得到的就是玩家眼睛看到的
-     * 那一块，而且不会出现"看到的和选中的对不上"。
+     * 单拎出来是因为**画图与拾取必须用同一个数**：两处各算一遍的话，迟早一处改了、另一处没跟上，
+     * 表现就是"越放大偏得越多"。界面自己的缩放倍数不在这里乘，由调用方乘完再一起用。
+     */
+    public static float scaleFor(Schematic schematic, int width) {
+        Vec3i size = schematic.getSize();
+        float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));
+        return maxDim <= 0.0F ? 0.0F : (width - 8) / (maxDim * 1.7F);
+    }
+
+    /**
+     * 指针底下是哪一块。
+     * <p>
+     * 判据是**把方块的八个角都投回屏幕**，看指针落没落在它投影出来的那个框里——不是"离中心最近"：
+     * 中心判据在斜视时会明显偏，玩家一眼就看得出"指着这块、显示的却是旁边那块"。
+     * 都在框里时取**最靠前**的那块（画在最上面的那块）。
+     * <p>
+     * 缩放由调用方给（就是它画图用的那个值），不在这儿另算：见 {@link #scaleFor}。
      */
     @Nullable
     public static Schematic.BlockEntry pick(Schematic schematic, List<Schematic.BlockEntry> entries,
-                                            int cx, int cy, int width, float yaw, float pitch,
+                                            int cx, int cy, float scale, float yaw, float pitch,
                                             double mouseX, double mouseY) {
-        Vec3i size = schematic.getSize();
-        float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));
-        if (maxDim <= 0.0F) {
+        if (scale <= 0.0F) {
             return null;
         }
-        float scale = (width - 8) / (maxDim * 1.7F);
-
+        Vec3i size = schematic.getSize();
         PoseStack pose = new PoseStack();
         pose.translate(cx, cy, 200.0D);
         pose.scale(scale, -scale, scale);
@@ -170,21 +179,33 @@ public final class SchematicPreview {
         pose.mulPose(Axis.YP.rotationDegrees(yaw));
         pose.translate(-size.getX() / 2.0D, -size.getY() / 2.0D, -size.getZ() / 2.0D);
 
-        // 阈值跟着缩放走：图放得越大，方块在屏幕上越大，能容忍的偏差也该越大
-        double limit = Math.max(6.0D, scale * 1.2D);
         Schematic.BlockEntry best = null;
         double bestDepth = Double.NEGATIVE_INFINITY;
         Vector3f point = new Vector3f();
         for (Schematic.BlockEntry entry : entries) {
-            // 方块占的是 [x, x+1]，中心就是 +0.5：与 draw 里"先 translate 到 x 再画"等价
-            point.set(entry.pos().getX() + 0.5F, entry.pos().getY() + 0.5F, entry.pos().getZ() + 0.5F);
-            pose.last().pose().transformPosition(point);
-            if (Math.abs(point.x - mouseX) > limit || Math.abs(point.y - mouseY) > limit) {
+            double minX = Double.MAX_VALUE;
+            double maxX = -Double.MAX_VALUE;
+            double minY = Double.MAX_VALUE;
+            double maxY = -Double.MAX_VALUE;
+            double depth = Double.NEGATIVE_INFINITY;
+            // 方块占的是 [x, x+1] 这一格：八个角投完取屏幕上的外接框，指针落在框里就算指着它
+            for (int corner = 0; corner < 8; corner++) {
+                point.set(entry.pos().getX() + ((corner & 1) == 0 ? 0.0F : 1.0F),
+                        entry.pos().getY() + ((corner & 2) == 0 ? 0.0F : 1.0F),
+                        entry.pos().getZ() + ((corner & 4) == 0 ? 0.0F : 1.0F));
+                pose.last().pose().transformPosition(point);
+                minX = Math.min(minX, point.x);
+                maxX = Math.max(maxX, point.x);
+                minY = Math.min(minY, point.y);
+                maxY = Math.max(maxY, point.y);
+                depth = Math.max(depth, point.z);
+            }
+            if (mouseX < minX || mouseX > maxX || mouseY < minY || mouseY > maxY) {
                 continue;
             }
             // 都在指针底下时取最靠前的：z 越大离眼睛越近（draw 里把 z 推到 200 就是这个道理）
-            if (point.z > bestDepth) {
-                bestDepth = point.z;
+            if (depth > bestDepth) {
+                bestDepth = depth;
                 best = entry;
             }
         }

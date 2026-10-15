@@ -315,7 +315,7 @@
   "gui.maidconstruction.layer.whole": "Whole build - %s layers",
   "gui.maidconstruction.layer.through": "Down to layer %s / %s",
   "gui.maidconstruction.layer.only": "Only layer %s / %s",
-  "gui.maidconstruction.layer.bar": "Drag the bar to pick a layer - right-click for one layer",
+  "gui.maidconstruction.layer.bar": "Drag the bar for layers - right-click: single layer - wheel: zoom",
   "gui.maidconstruction.preview.block": "%s (layer %s)",
   "gui.maidconstruction.no_files": "No files found",
   "gui.maidconstruction.rotate": "Rotate 90°",
