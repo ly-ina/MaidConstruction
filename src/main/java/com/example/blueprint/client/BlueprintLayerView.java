@@ -76,14 +76,17 @@ public final class BlueprintLayerView {
     /**
      * 拖动条拖到/点到某个高度：把 y 换算成层号。
      * <p>
-     * 条上**底＝第 1 层、顶＝整栋**，与"往上盖"的直觉一致；按住 Shift 拖则是切片模式（只看那一层）。
-     * 换算按比例取整，所以无论楼多高，拖到哪儿就是哪儿——这正是键位做不到的事。
+     * 条上**底＝第 1 层、顶＝整栋**，与"往上盖"的直觉一致。换算按比例取整，所以无论楼多高，
+     * 拖到哪儿就是哪儿——这正是键位做不到的事。
+     * <p>
+     * <b>只动层号，不动模式</b>：模式（显示到某层为止 / 只看某一层）是右键切的，切完就该一直记着。
+     * 拖动时顺手按 Shift 去改模式，会让"右键设的东西"每拖一次就被推翻一次。
      */
-    public void dragTo(double mouseY, int barTop, int barBottom, boolean sliceKey) {
+    public void dragTo(double mouseY, int barTop, int barBottom) {
         double ratio = barBottom <= barTop ? 1.0D
                 : (barBottom - mouseY) / (double) (barBottom - barTop);
         ratio = Math.max(0.0D, Math.min(1.0D, ratio));
-        to((int) Math.round(ratio * (layers - 1)) + 1, sliceKey);
+        to((int) Math.round(ratio * (layers - 1)) + 1);
     }
 
     /** 右键点拖动条：在"看到这层为止"与"只看这一层"之间切 */
@@ -92,18 +95,8 @@ public final class BlueprintLayerView {
         version++;
     }
 
-    /**
-     * 直接跳到第 N 层（N 会被夹到 1..layers）。
-     * <p>
-     * {@code sliceKey}（Shift）与当前模式不同时，只切模式、不动层号——一次操作只改一件事，
-     * 玩家才看得清是哪一下起了效。
-     */
-    private void to(int layer, boolean sliceKey) {
-        if (sliceKey != slice) {
-            slice = sliceKey;
-            version++;
-            return;
-        }
+    /** 直接跳到第 N 层（N 会被夹到 1..layers）。**只动层号**——模式归右键管，见 {@link #dragTo} */
+    private void to(int layer) {
         int next = Math.max(1, Math.min(layers, layer));
         if (next != through) {
             through = next;

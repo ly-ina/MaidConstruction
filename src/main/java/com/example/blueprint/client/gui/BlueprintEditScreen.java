@@ -422,7 +422,7 @@ public class BlueprintEditScreen extends Screen {
             } else {
                 // 按下去先跳一次，之后交给 mouseDragged 接管（少了那个标志就只能点、不能拖）
                 this.draggingLayer = true;
-                this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+                this.layers.dragTo(mouseY, barTop(), barBottom());
             }
             return true;
         }
@@ -472,7 +472,7 @@ public class BlueprintEditScreen extends Screen {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (this.draggingLayer) {
-            this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+            this.layers.dragTo(mouseY, barTop(), barBottom());
             return true;
         }
         if (this.dragging) {

@@ -356,7 +356,7 @@ public class BlueprintDetailScreen extends Screen {
                 this.layers.toggleSlice();
             } else {
                 this.draggingLayer = true;
-                this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+                this.layers.dragTo(mouseY, barTop(), barBottom());
             }
             return true;
         }
@@ -387,7 +387,7 @@ public class BlueprintDetailScreen extends Screen {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (this.draggingLayer) {
-            this.layers.dragTo(mouseY, barTop(), barBottom(), Screen.hasShiftDown());
+            this.layers.dragTo(mouseY, barTop(), barBottom());
             return true;
         }
         if (this.dragging) {
