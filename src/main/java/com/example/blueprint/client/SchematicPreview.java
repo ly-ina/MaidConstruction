@@ -14,6 +14,7 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.core.Vec3i;
@@ -98,12 +99,7 @@ public final class SchematicPreview {
 
         PoseStack pose = graphics.pose();
         pose.pushPose();
-        // z 推到 200：界面上的绘制是二维的，不推到相机前面会被别的元素挡住
-        pose.translate(cx, cy, 200.0D);
-        pose.scale(scale, -scale, scale);
-        pose.mulPose(Axis.XP.rotationDegrees(pitch));
-        pose.mulPose(Axis.YP.rotationDegrees(yaw));
-        pose.translate(-size.getX() / 2.0D, -size.getY() / 2.0D, -size.getZ() / 2.0D);
+        applyPreviewTransform(pose, schematic, scale, cx, cy, yaw, pitch);
 
         List<Schematic.BlockEntry> unrenderable = null;
         for (Schematic.BlockEntry entry : entries) {
@@ -174,6 +170,50 @@ public final class SchematicPreview {
         }
     }
 
+    /**
+     * 预览那套变换：**画、拾取、描边三处共用**。
+     * <p>
+     * 单拎出来是有原因的：这三件事必须落在同一个像素坐标系里。谁要是自己抄一份、又只改了其中一处，
+     * 表现就是"看着在这儿、点着在那儿、框还画偏了"——而那种偏差很难一眼看出是哪一处先改的。
+     */
+    private static void applyPreviewTransform(PoseStack pose, Schematic schematic, float scale,
+                                              int cx, int cy, float yaw, float pitch) {
+        Vec3i size = schematic.getSize();
+        // z 推到 200：界面上的绘制是二维的，不推到相机前面会被别的元素挡住
+        pose.translate(cx, cy, 200.0D);
+        pose.scale(scale, -scale, scale);
+        pose.mulPose(Axis.XP.rotationDegrees(pitch));
+        pose.mulPose(Axis.YP.rotationDegrees(yaw));
+        pose.translate(-size.getX() / 2.0D, -size.getY() / 2.0D, -size.getZ() / 2.0D);
+    }
+
+    /**
+     * 给选中的方块描一圈高亮框（编辑图纸时用）。
+     * <p>
+     * 走的是与画方块同一套变换，所以框严丝合缝贴在方块表面上；框比方块**略大一圈**
+     * （inflate 0.004），否则它与方块表面重合，深度上会被自己盖住、看着一闪一闪。
+     */
+    public static void drawHighlights(GuiGraphics graphics, Schematic schematic, List<BlockPos> positions,
+                                      int cx, int cy, float scale, float yaw, float pitch) {
+        if (positions.isEmpty() || scale <= 0.0F) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+        PoseStack pose = graphics.pose();
+        pose.pushPose();
+        applyPreviewTransform(pose, schematic, scale, cx, cy, yaw, pitch);
+        VertexConsumer lines = buffers.getBuffer(RenderType.LINES);
+        for (BlockPos pos : positions) {
+            pose.pushPose();
+            pose.translate(pos.getX(), pos.getY(), pos.getZ());
+            LevelRenderer.renderLineBox(pose, lines, UNIT_CUBE.inflate(0.004D), 1.0F, 0.85F, 0.2F, 1.0F);
+            pose.popPose();
+        }
+        buffers.endBatch(RenderType.LINES);
+        pose.popPose();
+    }
+
     public static float scaleFor(Schematic schematic, int width) {
         Vec3i size = schematic.getSize();
         float maxDim = Math.max(size.getX(), Math.max(size.getY(), size.getZ()));
@@ -196,13 +236,8 @@ public final class SchematicPreview {
         if (scale <= 0.0F) {
             return null;
         }
-        Vec3i size = schematic.getSize();
         PoseStack pose = new PoseStack();
-        pose.translate(cx, cy, 200.0D);
-        pose.scale(scale, -scale, scale);
-        pose.mulPose(Axis.XP.rotationDegrees(pitch));
-        pose.mulPose(Axis.YP.rotationDegrees(yaw));
-        pose.translate(-size.getX() / 2.0D, -size.getY() / 2.0D, -size.getZ() / 2.0D);
+        applyPreviewTransform(pose, schematic, scale, cx, cy, yaw, pitch);
 
         Schematic.BlockEntry best = null;
         double bestDepth = Double.NEGATIVE_INFINITY;

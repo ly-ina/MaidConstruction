@@ -24,8 +24,10 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.List;
 
 /**
@@ -63,16 +65,20 @@ public class BlueprintEditScreen extends Screen {
 
     @Nullable
     private EditBox searchBox;
-    @Nullable
-    private BlockPos picked;
+    /** 选中的格子：左键点一格就是一个；按住 Shift 点是"同一种方块"的全部（都描边高亮） */
+    private List<BlockPos> picked = List.of();
+    /** 这次选的是不是"同类"——替换/删除按它决定动一格还是动一类 */
+    private boolean pickedSameKind;
     /** 右边点中的那个"要换成的物品" */
     @Nullable
     private Item chosen;
     /** 按了「替换成…」，等右边点一个物品 */
     private boolean replaceArmed;
-    /** 删除要按两次，与「删除文件」同一条规矩 */
+    /** 删除与覆盖原图都要按两次，与「删除文件」同一条规矩 */
     private boolean deleteArmed;
-    private boolean wholeKind = true;
+    private boolean overwriteArmed;
+    /** 撤回栈：结构不可变，压进去的就是"改动前的那一份"，只是多一个引用，不占额外内存 */
+    private final Deque<Schematic> history = new ArrayDeque<>();
 
     private float yaw = 35.0F;
     private float pitch = 22.0F;
@@ -125,28 +131,24 @@ public class BlueprintEditScreen extends Screen {
 
         int buttonX = left + WINDOW_WIDTH - BUTTON_WIDTH - 6;
         int y = top + HEADER_HEIGHT + 6;
-        this.addRenderableWidget(Button.builder(kindLabel(), b -> {
-            this.wholeKind = !this.wholeKind;
-            b.setMessage(kindLabel());
-        }).bounds(buttonX, y, BUTTON_WIDTH, 20).build());
-        y += 22;
         // 「替换成…」：按下去之后到右边点一个方块。也可以在右边先点好、再按这个——两个顺序都行
         this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.edit.replace"),
                 b -> armReplace()).bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.edit.delete"),
-                b -> onDelete(b)).bounds(buttonX, y, BUTTON_WIDTH, 20).build());
+                b -> onDelete()).bounds(buttonX, y, BUTTON_WIDTH, 20).build());
+        y += 22;
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.edit.undo"),
+                b -> onUndo()).bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.edit.save"),
                 b -> onSave()).bounds(buttonX, y, BUTTON_WIDTH, 20).build());
         y += 22;
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.edit.overwrite"),
+                b -> onOverwrite()).bounds(buttonX, y, BUTTON_WIDTH, 20).build());
+        y += 22;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.maidconstruction.detail.back"),
                 b -> this.onClose()).bounds(buttonX, y, BUTTON_WIDTH, 20).build());
-    }
-
-    private Component kindLabel() {
-        return Component.translatable(this.wholeKind
-                ? "gui.maidconstruction.edit.kind" : "gui.maidconstruction.edit.single");
     }
 
     private List<Item> filter(String text) {
@@ -164,8 +166,24 @@ public class BlueprintEditScreen extends Screen {
         return matched;
     }
 
+    /** "×1 / ×K"：这一次改的是一格还是一类，写在状态行里说清楚 */
+    private String kindSuffix() {
+        return this.pickedSameKind ? " ×K" : " ×1";
+    }
+
+    /** 图上所有"与这一块同状态"的格子；Shift 点选同类时就高亮这一批 */
+    private List<BlockPos> sameKindPositions(BlockState state) {
+        List<BlockPos> result = new ArrayList<>();
+        for (Schematic.BlockEntry entry : this.schematic.entries()) {
+            if (entry.state().equals(state)) {
+                result.add(entry.pos());
+            }
+        }
+        return result;
+    }
+
     private void armReplace() {
-        if (this.picked == null) {
+        if (this.picked.isEmpty()) {
             this.message = Component.translatable("gui.maidconstruction.edit.need_pick");
             return;
         }
@@ -179,38 +197,74 @@ public class BlueprintEditScreen extends Screen {
 
     private void applyReplace() {
         Block block = Block.byItem(this.chosen);
-        // 先把坐标记下来：apply 会清掉选中，之后再读它就是要空指针
-        BlockPos at = this.picked;
-        this.schematic = apply(block.defaultBlockState());
+        this.message = Component.literal(this.picked.get(0).toShortString())
+                .append(" → ").append(block.getName()).append(kindSuffix());
+        apply(block.defaultBlockState());
         this.replaceArmed = false;
-        this.message = Component.literal(at.toShortString()).append(" → ").append(block.getName());
     }
 
-    private void onDelete(Button button) {
-        if (this.picked == null) {
+    private void onDelete() {
+        if (this.picked.isEmpty()) {
             this.message = Component.translatable("gui.maidconstruction.edit.need_pick");
             return;
         }
         if (!this.deleteArmed) {
             this.deleteArmed = true;
-            button.setMessage(Component.translatable("gui.maidconstruction.edit.delete_confirm"));
+            this.message = Component.translatable("gui.maidconstruction.edit.delete_confirm");
             return;
         }
-        BlockPos at = this.picked;
-        this.schematic = apply(Blocks.AIR.defaultBlockState());
+        this.message = Component.literal(this.picked.get(0).toShortString())
+                .append(" → ").append(Blocks.AIR.getName()).append(kindSuffix());
+        apply(Blocks.AIR.defaultBlockState());
         this.deleteArmed = false;
-        button.setMessage(Component.translatable("gui.maidconstruction.edit.delete"));
-        this.message = Component.literal(at.toShortString()).append(" → ")
-                .append(Blocks.AIR.getName());
     }
 
-    /** 把当前选中的格子按当前粒度改掉；改完顺手清掉选中与待替换状态，免得下一次误改 */
-    private Schematic apply(BlockState replacement) {
-        Schematic changed = this.schematic.withBlock(this.picked.getX(), this.picked.getY(),
-                this.picked.getZ(), replacement, this.wholeKind);
-        this.picked = null;
+    private void onUndo() {
+        this.deleteArmed = false;
+        this.overwriteArmed = false;
+        this.replaceArmed = false;
+        if (this.history.isEmpty()) {
+            this.message = Component.translatable("gui.maidconstruction.edit.undo_empty");
+            return;
+        }
+        this.schematic = this.history.pop();
+        this.picked = List.of();
+        this.message = Component.translatable("gui.maidconstruction.edit.undone", this.history.size());
+    }
+
+    /** 覆盖原图：危险动作，按两次。覆盖的是**你自己那份文件**，所以提示里带上名字 */
+    private void onOverwrite() {
+        if (!this.overwriteArmed) {
+            this.overwriteArmed = true;
+            this.message = Component.translatable("gui.maidconstruction.edit.overwrite_confirm", this.sourceName);
+            return;
+        }
+        this.overwriteArmed = false;
+        try {
+            BlueprintTransfer.writeToFile(this.sourceName, BlueprintTransfer.encode(this.schematic));
+            BlueprintLibrary.refresh();
+            this.message = Component.translatable("gui.maidconstruction.edit.overwritten", this.sourceName);
+        } catch (IOException e) {
+            this.message = Component.literal(String.valueOf(e.getMessage()));
+        }
+    }
+
+    /**
+     * 把选中的那（几）格换掉，并把"改动前的那一份"压进撤回栈。
+     * <p>
+     * 只调一次 {@link Schematic#withBlock} 就够了：Shift 选的"同类"与它的 {@code wholeKind} 是同一条判据
+     * （同一方块状态），自己遍历反而容易把"改一格"误伤成"改一类"。
+     */
+    private void apply(BlockState replacement) {
+        Schematic before = this.schematic;
+        BlockPos at = this.picked.get(0);
+        this.schematic = this.schematic.withBlock(at.getX(), at.getY(), at.getZ(),
+                replacement, this.pickedSameKind);
+        if (this.schematic != before) {
+            this.history.push(before);
+        }
+        this.picked = List.of();
         this.chosen = null;
-        return changed;
     }
 
     /** 另存为新图纸：原图一份不动（名字后缀 -edit，落盘前后都在状态行里说清） */
@@ -234,9 +288,12 @@ public class BlueprintEditScreen extends Screen {
         graphics.renderOutline(left, top, WINDOW_WIDTH, WINDOW_HEIGHT, 0xFF808080);
         graphics.drawString(this.font, this.getTitle(), left + 6, top + 7, 0xFFFFFF, false);
         // 状态行：改一格还是改一类、选中了哪一格、有没有在等右边点方块
-        Component state = Component.literal((this.wholeKind ? "×K " : "×1 "))
-                .append(this.picked == null ? Component.literal("-")
-                        : Component.literal(this.picked.toShortString()));
+        Component state = this.picked.isEmpty()
+                ? Component.translatable("gui.maidconstruction.edit.nothing_picked")
+                : (this.pickedSameKind
+                        ? Component.translatable("gui.maidconstruction.edit.picked_kind", this.picked.size())
+                        : Component.translatable("gui.maidconstruction.edit.picked_one",
+                                this.picked.get(0).toShortString()));
         graphics.drawString(this.font, state, left + WINDOW_WIDTH / 2, top + 7, 0xFFCC55, false);
 
         drawPreview(graphics, left, top, mouseX, mouseY);
@@ -258,6 +315,9 @@ public class BlueprintEditScreen extends Screen {
         SchematicPreview.draw(graphics, this.schematic, entries,
                 x + PREVIEW_WIDTH / 2, y + height / 2, PREVIEW_WIDTH - 6,
                 this.yaw, this.pitch, Rotation.NONE, Mirror.NONE, 1.0F);
+        // 描边：同一套变换，所以框严丝合缝贴在方块上（Shift 点选的同类会一次描一大片）
+        SchematicPreview.drawHighlights(graphics, this.schematic, this.picked,
+                x + PREVIEW_WIDTH / 2, y + height / 2, scale, this.yaw, this.pitch);
         if (mouseX >= x && mouseX < x + PREVIEW_WIDTH && mouseY >= y && mouseY < y + height) {
             Schematic.BlockEntry hovered = SchematicPreview.pick(this.schematic, entries,
                     x + PREVIEW_WIDTH / 2, y + height / 2, scale, this.yaw, this.pitch, mouseX, mouseY);
@@ -317,7 +377,10 @@ public class BlueprintEditScreen extends Screen {
                     SchematicPreview.scaleFor(this.schematic, PREVIEW_WIDTH - 6),
                     this.yaw, this.pitch, mouseX, mouseY);
             if (hovered != null) {
-                this.picked = hovered.pos();
+                // Shift 点＝选中"同一种方块"的全部（含朝向、半砖上下那类属性一起看），普通点＝只选这一格
+                boolean sameKind = Screen.hasShiftDown();
+                this.picked = sameKind ? sameKindPositions(hovered.state()) : List.of(hovered.pos());
+                this.pickedSameKind = sameKind;
                 this.deleteArmed = false;
                 if (this.replaceArmed && this.chosen != null) {
                     applyReplace();
