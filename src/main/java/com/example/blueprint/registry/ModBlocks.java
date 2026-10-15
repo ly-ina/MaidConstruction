@@ -34,7 +34,11 @@ public final class ModBlocks {
             () -> new CommandPostBlock(BlockBehaviour.Properties.of()
                     .mapColor(MapColor.WOOD)
                     .strength(2.0F, 6.0F)
-                    .sound(SoundType.WOOD)));
+                    .sound(SoundType.WOOD)
+                    // 模型不是整块（台子 + 斜台面 + 屏，还探出 0.3 像素）：**必须声明不遮挡**，
+                    // 否则它一旦贴着别的方块，邻居那侧的遮挡判据就会把面剔掉/剔错，
+                    // 表现正是"贴着方块就透视"
+                    .noOcclusion()));
 
     public static final RegistryObject<BlockEntityType<CommandPostBlockEntity>> COMMAND_POST_BE =
             BLOCK_ENTITIES.register("command_post",

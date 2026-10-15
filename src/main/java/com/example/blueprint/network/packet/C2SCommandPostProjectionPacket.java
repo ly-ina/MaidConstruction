@@ -31,8 +31,13 @@ import java.util.function.Supplier;
  */
 public class C2SCommandPostProjectionPacket {
 
-    /** 与服务端自己再确认一次的射程对齐：按**指挥台**算，玩家可能站在投影位置上 */
-    private static final double MAX_DISTANCE_SQR = 64.0D;
+    /**
+     * 射程：**按指挥台算**（玩家可能正站在投影落点上，拿落点比距离会白拦一路）。
+     * <p>
+     * 64 格，与命令行开工那处同一档。这里原来写的是 {@code 64.0D}——那是 8 格的平方，
+     * 离指挥台稍远一点就会被拒，表现正是"离远了一点就不给投影"。
+     */
+    private static final double MAX_DISTANCE_SQR = 64.0D * 64.0D;
 
     /** 结构数据一份最多这么大，与导入导出那条路同一个上限 */
     private static final int MAX_FILE_BYTES = 1_000_000;
