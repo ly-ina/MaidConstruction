@@ -100,3 +100,32 @@ jobs:
           files: build/libs/*.jar
           body_path: release_notes.md
           draft: false
+
+      # 顺手发一份到 CurseForge：以后打标签就是"GitHub Release + CurseForge"双发，同版本同 jar。
+      # 需要仓库 Secrets：CF_API_KEY（CF 头像 → API Tokens 新建）与 CF_PROJECT_ID（项目 Settings 里的数字 ID）。
+      # 发布说明直接复用上面抽好的 release_notes.md，两边正文不会各说各的。
+      - name: Resolve jar and version
+        id: jar
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          FILE=$(ls build/libs/*.jar | grep -v -- '-sources' | head -n1)
+          echo "path=$FILE" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to CurseForge
+        if: startsWith(github.ref, 'refs/tags/v')
+        # 失败不拦整个发布：GH Release 已经出来了，CF 那边手动补传一次即可；
+        # 但日志里会留下这一段的红叉，别当没发生
+        continue-on-error: true
+        uses: itsmeow/curseforge-upload@v3
+        with:
+          token: ${{ secrets.CF_API_KEY }}
+          project_id: ${{ secrets.CF_PROJECT_ID }}
+          game_endpoint: minecraft
+          release_type: release
+          display_name: "${{ steps.jar.outputs.version }} (Forge 1.20.1)"
+          changelog: release_notes.md
+          changelog_type: markdown
+          # CF 的 gameVersions 是同一个数组：游戏版本与加载器一起给（少给加载器会被拒）
+          game_versions: "1.20.1,Forge"
+          file_path: ${{ steps.jar.outputs.path }}
