@@ -42,6 +42,10 @@ public class ManualScreen extends Screen {
     private static final int COLOR_DIM = 0x808080;
     private static final int COLOR_PICKED = 0x55FF55;
     private static final int COLOR_ROW = 0x30FFFFFF;
+    /** 本章标题（【…】）：金色 + 一条短线，正文里唯一"像标题"的东西 */
+    private static final int COLOR_HEADING = 0xFFD966;
+    /** 注意（※ …）：偏橙，与步骤拉开 */
+    private static final int COLOR_NOTE = 0xFFAA55;
 
     /** 目录：一行一章 */
     private final List<Entry> entries = new ArrayList<>();
@@ -169,13 +173,26 @@ public class ManualScreen extends Screen {
 
     private void drawBody(GuiGraphics graphics, int left, int top) {
         int x = left + TOC_WIDTH + 14;
-        int y = top + HEADER + 2;
+        int width = WINDOW_WIDTH - TOC_WIDTH - 24;
+        int y = top + HEADER + 4;
         int end = Math.min(this.bodyLines.size(), this.scroll + visibleLines());
         for (int i = this.scroll; i < end; i++) {
             String line = this.bodyLines.get(i);
-            // 标题那一行（【…】）加粗一点也认不出，用颜色区分就够了
-            graphics.drawString(this.font, line, x, y, line.startsWith("【") ? COLOR_PICKED : COLOR_TEXT,
-                    false);
+            // 三级层次只靠颜色与缩进——原版字体放大只会糊，这已经是最有效的一层：
+            //   【…】本章标题（金色 + 下面一条短线）
+            //   ※ …  注意事项（偏橙，缩进）
+            //   · …  操作步骤（正常色，缩进）
+            if (line.startsWith("【")) {
+                graphics.drawString(this.font, line, x, y, COLOR_HEADING, false);
+                int rule = Math.min(width, this.font.width(line));
+                graphics.fill(x, y + LINE_HEIGHT - 3, x + rule, y + LINE_HEIGHT - 2, 0xFF5A4A18);
+            } else if (line.startsWith("※")) {
+                graphics.drawString(this.font, line, x + 4, y, COLOR_NOTE, false);
+            } else if (line.startsWith("·")) {
+                graphics.drawString(this.font, line, x + 4, y, COLOR_TEXT, false);
+            } else {
+                graphics.drawString(this.font, line, x, y, COLOR_TEXT, false);
+            }
             y += LINE_HEIGHT;
         }
         // 还有下文时，右下角写一句，免得玩家以为就这么多
