@@ -25,13 +25,14 @@
 
 | 项 | 值 |
 |---|---|
-| 模组 ID | `blueprint` |
+| 模组 ID | `maidconstruction`（2.0.0 起；原来叫 `blueprint`，改名原因见 [§7.21](#721-modid-别用别人已经用掉的名字)） |
 | 显示名 | 女仆建筑 |
+| 当前版本 | `2.1.0`（`gradle.properties` 的 `mod_version`） |
 | jar 产物 | `MaidConstruction-<version>.jar`（由 `mod_name` 去空格得到） |
 | MC / Forge | 1.20.1 / 47.1.3 |
 | 映射 | `official` |
 | 软依赖 | 车万女仆 `1.5.2-forge+mc1.20.1`、AE2 `15.4.10` |
-| 源码包 | `com.example.blueprint`，共 45 个类 |
+| 源码包 | `com.example.blueprint`（**包名保留旧词**，它只是路径、与 modid 无关；2.1.0 时共 125 个 Java 文件） |
 
 ### 它做什么
 
@@ -45,10 +46,11 @@
 ## 2. 快速上手
 
 ```bash
-# 构建（首次会反编译 MC，约需数分钟）
+# 构建（首次会反编译 MC，约需数分钟）。Windows 上先让 JAVA_HOME 指向 JDK 17：
+#   set JAVA_HOME=E:\java\jdk-17.0.14.7-hotspot
 ./gradlew build
 
-# 启动客户端（需要把 TLM 放进 runtime 才能测女仆功能）
+# 启动客户端（TLM 已在 runtime 里，女仆功能开箱可测；AE2 见下）
 ./gradlew runClient
 
 # 启动服务端
@@ -79,81 +81,132 @@ runtimeOnly fg.deobf("maven.modrinth:ae2:${ae2_version}")
 
 ```
 com.example.blueprint
-├── BlueprintMod            主类：物品注册、AE2 条件注册、网络注册
+├── BlueprintMod            主类：物品/方块注册、配置、AE2 条件注册、网络注册
+├── BlueprintConfig         配置项（config/maidconstruction-common.toml，一律走静态读取方法）
+├── BlueprintCommand        /maidconstruction list | where | stop
+├── Advancements            进度（advancement）发放：判据全是 impossible，只能由代码给
+├── ManualGiveaway          首次进服发一本说明书（"发过没有"记在玩家持久数据里）
+├── block/
+│   ├── CommandPostBlock
+│   └── CommandPostBlockEntity  ★ 指挥台：投影 / 指派 / 口令 / 完工，状态随 BE 同步
 ├── build/                  ★ 建造核心，与具体模组解耦
 │   ├── BuildSession        一次建造的增量状态机
 │   ├── ItemProvider        材料来源接口 + 注册实现
 │   ├── ItemSource          女仆背包视角的材料接口
+│   ├── BlockContainerProvider  普通容器的 ItemProvider
 │   ├── BlockMaterials      ← 扩展点：方块需要什么材料
 │   ├── BlockMaterialResolver
 │   ├── BlockEntityRotation ← 扩展点：旋转方块实体 NBT
-│   └── BlockEntityRotationResolver
+│   ├── BlockEntityRotationResolver
+│   ├── BlockHarvest        "她挖不挖得动这一块"（判断能不能替换现有方块）
+│   ├── Salvage             被顶掉的方块按战利品表回收，不无声销毁
+│   ├── StandSpotSearch     站位搜索（离结构边界留 STAND_MARGIN）
+│   └── StepOutPolicy       "先让开再动手"的纯逻辑（有单测）
 ├── schematic/
 │   ├── Schematic           结构数据（palette + 索引数组）
 │   └── SchematicStorage    存档内的结构库（SavedData）
 ├── item/
-│   ├── BlueprintItem       蓝图：选点、锚定、旋转、工具提示
+│   ├── BlueprintItem       蓝图：选点、锚定、旋转/翻面、取到手上、工具提示
+│   ├── BlueprintTerminalItem   蓝图终端：图纸库入口
 │   ├── BindingBookItem     绑定书：指定远程取料点
-│   └── BindingBookEvents   让绑定书抢到方块右键（兜底）
-├── client/                 ★ 全部标 @OnlyIn(CLIENT)
-│   ├── ProjectionRenderer  世界内的 3D 投影
-│   ├── CableBusOutline     AE2 线缆的示意轮廓
-│   ├── BoundBlockHighlighter  绑定书目标高亮（可穿透方块）
+│   ├── BindingBookEvents   让绑定书抢到方块右键（兜底）
+│   ├── ManualItem          《女仆建筑说明书》（右键开自己的界面）
+│   ├── GuideBookRecipe     成书配方的自定义序列化（产物带 NBT，见 §6.5）
+│   └── ModRecipeSerializers
+├── client/                 ★ 客户端包（多数标 @OnlyIn(CLIENT)；ClientSchematicCache 刻意不标，见 §7.9）
+│   ├── ProjectionRenderer  世界内的 3D 投影（定位中 / 手持 / 指挥台托管 / 附近女仆，见 §12）
+│   ├── SchematicPreview    预览用的那套 3D 绘制 + 拾取（详情页 / 缩略图 / 编辑页共用，见 §7.22）
+│   ├── BlueprintLayerView  分层查看：按 Y 过滤 + 拖动条
+│   ├── BlueprintRecordSession  录制/定位态（不给任何能力，见 §7.19）
+│   ├── CableBusOutline     AE2 线缆的示意轮廓（按注册名认，不引用 AE2 类型）
+│   ├── BoundBlockHighlighter   绑定书目标高亮（可穿透方块）
+│   ├── BlockedSpotHighlighter  她动不了的格子
+│   ├── BuildProgressHud / MaidBuildProgress   进度条与它的数据源（按工地合并）
+│   ├── BlueprintLibrary    图纸库：扫目录、重扫、按文件属性判变化
 │   ├── ClientSchematicCache   结构缓存（LRU 24）
 │   ├── ClientBlueprintBinder  收到数据后当场绑定到手持物品
 │   ├── BlueprintTransfer   导入导出的文件读写
-│   ├── BlueprintScreenOpener   打开面板 + 结构数据到达的通知出口
-│   └── gui/
-│       ├── BlueprintScreen     蓝图面板
-│       └── BlueprintMaterialsScreen 建筑清单（按材料汇总）
+│   ├── BlueprintScreenOpener / ManualScreenOpener / MaidStudyScreenOpener
+│   ├── CommandPostProjections / ClientPostBinding   指挥台的客户端镜像
+│   ├── MaidRoster          女仆名册（含指派状态）
+│   ├── MaidClientBridge    TLM 客户端渲染桥（没装 TLM 不许加载）
+│   └── gui/                10 个界面
+│       ├── BlueprintScreen         蓝图面板
+│       ├── BlueprintMaterialsScreen 建筑清单（按材料汇总）
+│       ├── BlueprintLibraryScreen / BlueprintDetailScreen / BlueprintEditScreen
+│       ├── BlueprintHomeScreen     蓝图终端主页（"工地现在怎么样"）
+│       ├── CommandPostScreen       指挥台
+│       ├── MaidRosterScreen        女仆名册（3D 立绘）
+│       ├── MaidStudyScreen         学习池
+│       └── ManualScreen            说明书
 ├── network/
-│   ├── ModNetwork          频道 + 11 个包的注册
-│   └── packet/             10 个 C2S + 1 个 S2C
+│   ├── ModNetwork          频道 + 22 个包的注册（协议 15）
+│   └── packet/             17 个 C2S + 5 个 S2C
 ├── registry/
-│   ├── ModItems            物品注册：blueprint、binding_book
+│   ├── ModItems            物品注册：blueprint、binding_book、blueprint_terminal、command_post、manual
+│   ├── ModBlocks           指挥台的方块与方块实体
 │   └── ModCreativeTabs     模组专属创造物品栏（注册名为 main）
+├── server/
+│   ├── CommandPostBindings    "玩家 → 他现在绑的那一台"（玩家持久数据）
+│   ├── CommandPostAssignments "女仆 → 她在为哪台干活"（索引，随 BE load 重建）
+│   ├── MaidOwnership          "主人 → 他的女仆"（UUID + 名字 + 维度）
+│   └── RecordModeCleanup      登录时收尾 1.8.x 留下的录制态数据
 └── integration/
     ├── maid/               TLM 联动
     │   ├── MaidExtension        @LittleMaidExtension 入口
     │   ├── BlueprintBuildTask   女仆的"蓝图施工"工作模式
     │   ├── MaidStudyTask        "学习模式"：跟在主人身边记录演示
     │   ├── MaidIndustryTask     "工业模式"：照学习池里的单开工（见 §7.16）
+    │   ├── MaidStudyPool / StudyRecipeCapture / CraftingGrid
+    │   ├── MaidStudyInteractHandler  蹲下 + 木棍打开学习池（§7.12）
     │   ├── MaidSpeech           她开口的格式统一在「名字：……」
-    │   ├── MaidBuildTickHandler 服务端 tick 驱动器
+    │   ├── MaidBuildTickHandler / MaidCraftTickHandler / MaidStudyTickHandler
     │   ├── BlueprintBuildController ★ 施工状态机（最大文件）
+    │   ├── MaidCraftOrder       学习池的订单队列（嵌套用"插队 + 来路"，见 §7.13）
     │   ├── MaidItemSource       女仆背包的 ItemSource
-    │   └── BindingBookBauble    空饰品，仅为让饰品栏接受绑定书
-    └── ae2/                ★ AE2 联动，整包不得在 AE2 缺位时被触碰
-        ├── Ae2Compat            安全入口（不引用 AE2 类型）
-        ├── Ae2ItemProvider      ME 网络取料/还料
-        ├── Ae2MaterialResolver  线缆材料从部件 NBT 反推
-        ├── Ae2BlockEntityRotation 线缆部件朝向
-        ├── Ae2TerminalRegistry  女仆终端 / 创造女仆接口的方块、物品、BE
-        ├── MaidTerminalBlock
-        ├── MaidTerminalBlockEntity
-        ├── InfiniteItemStorage            ★ 取之不尽的 ME 存储
-        ├── CreativeMaidInterfaceBlock     ★ 创造女仆接口（见 §7.10）
-        ├── CreativeMaidInterfaceBlockEntity
-        ├── Ae2StorageTransfer            ME 存储搬运动作（方块来源与无线来源共用）
-        ├── WirelessMaidLink              无线终端的绑定/解析/距离/取电
-        ├── WirelessMaidTerminalItem      ★ 无线女仆终端（见 §7.11）
-        └── Ae2WirelessProvider           女仆用的无线取料源
+    │   ├── MaidBlueprint        女仆手上那张图（自家蓝图 / 机械动力蓝图统一问法）
+    │   ├── MaidCompat / MaidOwnershipTracker
+    │   └── BindingBookBauble / MaidWirelessBauble  空饰品，仅为让饰品栏接受它们
+    ├── ae2/                ★ AE2 联动，整包不得在 AE2 缺位时被触碰
+    │   ├── Ae2Compat            安全入口（不引用 AE2 类型）
+    │   ├── Ae2ItemProvider      ME 网络取料/还料
+    │   ├── Ae2MaterialResolver  线缆材料从部件 NBT 反推
+    │   ├── Ae2BlockEntityRotation 线缆部件朝向
+    │   ├── Ae2CraftingCapture   AE2 合成终端的配方捕获（§7.12）
+    │   ├── Ae2TerminalRegistry  女仆终端 / 创造女仆接口的方块、物品、BE
+    │   ├── MaidTerminalBlock / MaidTerminalBlockEntity
+    │   ├── TerminalChunkLoader  临时加载无线访问点所在区块（Forge 票据）
+    │   ├── InfiniteItemStorage            ★ 取之不尽的 ME 存储
+    │   ├── CreativeMaidInterfaceBlock     ★ 创造女仆接口（见 §7.10）
+    │   ├── CreativeMaidInterfaceBlockEntity
+    │   ├── Ae2StorageTransfer            ME 存储搬运动作（方块来源与无线来源共用）
+    │   ├── WirelessMaidLink              无线终端的绑定/解析/距离/取电
+    │   ├── WirelessMaidTerminalItem      ★ 无线女仆终端（见 §7.11）
+    │   └── Ae2WirelessProvider           女仆用的无线取料源
+    └── create/
+        └── CreateSchematic   读机械动力蓝图（只读、一个字节都不写，见 §11）
 ```
 
 ### 依赖方向（重要）
 
 ```
         integration.maid ──┐
-                          ├──→ build / schematic / item   （核心）
-        integration.ae2 ───┘
+        integration.ae2  ──┼──→ build / schematic / item   （核心）
+        integration.create ┘
 
-        client ──────────────→ build / schematic / item
+        client ──────────────→ build / schematic / item（+ MaidCompat 这类不引用模组类型的门面）
+        server ──────────────→ 核心（只维护索引与持久数据，不碰渲染）
 ```
 
 **核心包（`build` / `schematic` / `item`）绝不 import 任何模组类型**。反向依赖靠两种机制实现：
 
 - **注册链**：核心定义接口（`BlockMaterials`、`BlockEntityRotation`），集成包实现并注册。
-- **安全入口**：`Ae2Compat` 本身不引用 AE2 类型，由它在中转时判断模组是否存在。
+- **安全入口**：`Ae2Compat` / `MaidCompat` 本身不引用对方类型，由它们在中转时判断模组是否存在。
+
+**允许的另一向引用只有一种写法**：`item` / `block` / `network` 里会 import `client.*ScreenOpener`
+与 `client.CommandPostProjections` 这类客户端状态类，但**引用只出现在 `DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> ...)` 的 lambda 里**——
+类加载是懒的，服务端永远走不到那一句（见 §7.15）。把它们写成字段类型、静态初始化、或方法里的直接调用，
+都会在专用服务端上变成 `NoClassDefFoundError`。
 
 违反这条会导致**没装对应模组的玩家无法启动游戏**。
 
@@ -181,22 +234,30 @@ blockEntities: Map<Integer, CompoundTag>   位置下标 → 方块实体 NBT（�
 | 方法 | 说明 |
 |---|---|
 | `capture(Level, BlockPos a, BlockPos b)` | 扫描世界生成结构 |
-| `rotate(Rotation)` | 返回旋转后的**新实例**（`NONE` 返回自身） |
+| `rotate(Rotation)` / `mirror(Mirror)` | 返回变换后的**新实例**（`NONE` 返回自身） |
 | `transformState(BlockState, Rotation, Mirror)` | 私有，见 §7.3 |
-| `rotateDirection(Direction, Rotation)` | **公开的**方向旋转工具，多处共用 |
-| `stateAt / blockEntityAt / inBounds / entries` | 访问 |
-| `write / read` | NBT 序列化 |
+| `rotateDirection(Direction, Rotation)` / `mirrorDirection(Direction, Mirror)` | **公开的**方向工具，多处共用 |
+| `withBlock(x, y, z, state, wholeKind)` | 图纸编辑用：改一格 / 改一类，返回新实例 |
+| `stateAt / blockEntityAt / inBounds / entries / countBlocks` | 访问 |
+| `encode / decode` | 字节（文件与网络共用）；`write / read` 是 NBT 层 |
+| `stripContainerItems(CompoundTag)` | 剔掉方块实体里的物品库存，**放置时**调，见下 |
 
-**两个刻意的选择**：
+**三个刻意的选择**：
 
 - **不用 `NbtUtils` 读写方块状态**。1.20.1 的 `NbtUtils.readBlockState` 需要 `HolderGetter<Block>`，而蓝图读写常发生在拿不到世界 registry 的场合。自己实现格式反而可控。
 - **`entries()` 会为每个方块新建 `BlockPos` 和 `BlockEntry`**。大结构下别在渲染循环里调它 —— `ProjectionRenderer.rebuild` 就是为此改用下标遍历 + 复用 `MutableBlockPos`。
+- **录制照实录、放置时才剔库存**（`capture` 一个键都不删，`BuildSession.step` 调 `stripContainerItems`）。
+  录的时候剔掉，材料判定就没法知道"这台机器要什么"（AE2 线缆要的是贴在面上的部件）；
+  放的时候不剔，一台装好样板的供应器放下就多出一套样板——那是凭空复制。
+  剔的判据是"已知键名 + 物品栈形状兜底"，并且要往 `ForgeCaps` 这类子标签里钻。
 
 ### 4.2 `SchematicStorage` —— 存档内的结构库
 
 - 类型：`SavedData`，存在**主世界**（所以跨维度的蓝图也能解析）。
-- 存档名：`blueprint_schematics`。
+- 存档名：`maidconstruction_schematics`（`MOD_ID + "_schematics"`，2.0.0 跟着改名）。
 - 映射：`Map<UUID, Schematic>`。
+- 另有一份 `completed: Set<String>`：**机械动力蓝图的完工标记**。那张图我们只读不改，
+  完工只能按"图的内容 + 锚点"的指纹记在自己这儿（见 `MaidBlueprint`）。
 - **蓝图物品只存 UUID**，结构本体不入物品 NBT —— 否则一本蓝图会撑爆物品栏同步。
 
 ```java
@@ -204,6 +265,7 @@ static SchematicStorage get(ServerLevel level)   // 从主世界取/建
 UUID put(Schematic schematic)                    // 存入并标脏，返回新 UUID
 @Nullable Schematic get(UUID id)
 boolean remove(UUID id)
+boolean isCompleted(String signature) / void setCompleted(String signature, boolean value)
 ```
 
 **注意**：`BlueprintItem.clearSchematic` **不删**存档里的结构。因为蓝图物品可以被复制（创造模式、`/give`），其他副本可能仍指向同一份数据，贸然删除会让它们失效。
@@ -217,7 +279,8 @@ boolean remove(UUID id)
 | `Name` | String | 蓝图名（也是导出文件名） |
 | `Pos1` | int[3] | 已选的第一个角点 |
 | `Anchor` | int[3] | 投影锚定位置 |
-| `Rotation` | int | 朝向的 `ordinal` |
+| `Rotation` | int | 旋转的 `ordinal` |
+| `Mirror` | int | 翻面的 `ordinal`（2.1.0 起；缺省按 `NONE` 读） |
 | `Completed` | boolean | 是否已建完 |
 | `MaidBuild` | boolean | 是否允许女仆施工（默认允许） |
 
@@ -225,17 +288,28 @@ boolean remove(UUID id)
 
 ### 4.4 `BuildSession` —— 增量建造状态机
 
-内部状态：`order`（待放置列表）、`cursor`、`deferred`（支撑未就位的推迟列表）、`pass`、`finished`。
+内部状态：`order`（待放置列表）、`cursor`、`deferred`（支撑未就位的推迟列表）、`pass`、`finished`、
+`total` / `built`（进度条的分母与分子）。
 
-**四个方法**：
+**关键方法**：
 
 | 方法 | 用途 |
 |---|---|
 | `static plan(Schematic)` | 排序：`y` → 支撑优先级 → `z` → `x` |
 | `static bill(Schematic)` | **整座结构**从零建起需要哪些材料 |
 | `remainingBill(level, origin)` | **从现在这个进度**还差哪些材料（跳过已建成的方块） |
-| `step(level, origin, source, maxBlocks)` | 实际放置，返回 `StepResult` |
+| `step(level, origin, source, maxBlocks, salvage, selfBox)` | 实际放置，返回 `StepResult` |
 | `peekNextTarget(level, origin)` | 下一个目标坐标（女仆据此决定走位） |
+| `total()` / `done()` | 进度条的分母与分子（`done` 是**数世界**数出来的，不是拿游标倒算） |
+| `static clearAt(level, pos, salvage)` | 清掉一格并把原有方块交给 `Salvage` 回收 |
+
+`step` 的后两个参数：`salvage` 是被顶掉方块的去处（`null` 就照旧凭空消失，只有"没人来收"的场合才这么传）；
+`selfBox` 是施工者自己的碰撞箱，落在她身上的格子这一趟跳过并记进 `selfBlocked`。
+
+**进度为什么数世界**：一趟结束时会 `order = deferred`（清单换成"这一趟没放成的那些"），
+拿"游标之后还剩多少"倒算出来的已建数会忽高忽低，玩家看到的就是进度条来来回回。
+分母 `total` 在会话开始时定死，分子是会话建立时**点一遍工地**得到的（所以会话会被定期重建，好让它跟着工地刷新）。
+会话重建时靠构造里的 `fastForward` 把游标推到第一块没到位的方块上，否则进度会先掉回 0 再涨回来。
 
 **摆放顺序**：先放能独立存在的完整方块（`canOcclude()` 为真），再放半砖、火把这类依附物。第一轮放不下的进入 `deferred`，最多重试 `MAX_PASS = 3` 轮。
 
@@ -285,14 +359,19 @@ BlueprintScreenOpener.schematicArrived(id) → 正开着的界面当场刷新
 
 ```
 ProjectionRenderer.onRenderLevel（AFTER_PARTICLES 阶段）
-    ├─ BlueprintItem.findHeld(player)    手持蓝图才画
-    ├─ 没录制但选了 Pos1 → 画选区线框
-    ├─ ClientSchematicCache.get(id, rotation)
+    ├─ 手持蓝图但只选了 Pos1（还没有结构）→ 画选区线框，到此为止
+    ├─ projectionSource() 四个来源取第一个可用的：
+    │      正在摆的投影（定位态）> 自己手持 > 最近一台指挥台托管 > 附近女仆手持
+    ├─ ClientSchematicCache.get(id, rotation, mirror)
     │      本地缺失 → 发 C2SRequestSchematicPacket（2 秒节流）
-    ├─ origin = 锚点 或 视线所指位置
+    ├─ origin = 锚点 或 视线所指位置（没定过锚点的图）
     ├─ rebuild()   重算待渲染列表 PENDING（400ms 间隔 / id 变 / origin 变 / 结构实例变）
     └─ 逐块渲染半透明幽灵方块
 ```
+
+指挥台托管与女仆手持那两条都**取最近的一处**——同时叠两张半透明的图，谁也看不清。
+"附近女仆"那一段整段关在 `MaidClientBridge` 后面：没装 TLM 时 `projectionSource` 自己的字节码里
+不许出现 `EntityMaid`（§3、§7.2）。
 
 **面剔除**：邻居在结构内部且 `canOcclude()` 为真时跳过该面，避免半透明叠加和大量无用绘制。
 
@@ -310,11 +389,11 @@ MaidBuildTickHandler（LevelTickEvent.END，ServerLevel）
 BlueprintBuildController 状态机：
     MOVE_TO_SPOT   走到站位（离结构边界至少 STAND_MARGIN=2 格，即中间空出一格；
                    先从她脚下往外找，找不到退到结构外圈那一圈）
-    BUILD          调 session.step(...)
-                      ├─ placed > 0    → 挥手 + 音效，等 PLACE_COOLDOWN
+    BUILD          调 session.step(...)，速度按好感度算（见 §7.6）
+                      ├─ placed > 0    → 挥手 + 音效
                       ├─ finished      → 收工，走还料流程
                       └─ 都没发生       → 认为缺料，转 FETCH
-    FETCH          找来源 → 走过去 → 取料 → 回 BUILD
+    FETCH          找来源 → 走过去 → 取料 → 回 BUILD（歇 FETCH_COOLDOWN = 1 tick）
 ```
 
 **为什么绕开 TLM 的 Brain 调度**：`BlueprintBuildTask.createBrainTasks()` 刻意返回 `List.of()`。施工由服务端 tick 主动驱动，行为可控（出错能提示玩家），且不要求主人在附近。区块卸载即自动停止。
@@ -338,11 +417,12 @@ BlueprintBuildController 状态机：
 
 ### 5.5 渲染兜底：画不出模型的方块
 
-`ProjectionRenderer` 和 `BlueprintScreen` 渲染方块时传的是 `ModelData.EMPTY`（投影那个位置还没有方块实体）。
+`ProjectionRenderer` 与界面里的预览（`SchematicPreview`，以及蓝图面板自己那段 `drawPreview`）渲染方块时
+传的是 `ModelData.EMPTY`（那些位置还没有方块实体）。
 
 **多数方块无所谓，但 AE2 的 ME 线缆不是**：`CableBusBakedModel.getQuads()` 第一件事就是 `ModelData.get(...)` 取渲染状态，取不到直接 `Collections.emptyList()` —— **一个面都画不出来**。
 
-所以两处都做了兜底：记录画不出任何面的方块，循环结束后统一补轮廓。
+所以这几处都做了兜底：记录画不出任何面的方块，循环结束后统一补轮廓。
 
 - 普通方块：整格线框
 - AE2 线缆：交给 `CableBusOutline`，画"芯 + 连接臂 + 部件标记"，按部件类型上色
@@ -366,7 +446,9 @@ public class MyProvider implements ItemProvider {
     @Override public BlockPos interactPos() { ... }        // 女仆走到哪
     @Override public boolean hasAny(Map<Item,Integer> bill) { ... }   // 便宜地判断有没有
     @Override public int transferInto(IItemHandler dst, Map<Item,Integer> bill, int maxKinds) { ... }
+    @Override public boolean requiresTravel() { ... }      // 可选：无线来源返回 false（不许她跑过去）
     @Override public int acceptInto(IItemHandler src, Map<Item,Integer> filter) { ... }  // 可选（还料）
+    @Override public int deposit(ItemStack stack) { ... }  // 可选（收下拆出来的杂物，不认清单）
 }
 ```
 
@@ -411,38 +493,38 @@ public class MyMaterialResolver implements BlockMaterials {
 
 **返回值语义**：`null` = 不认领；空列表 = 认领但不需要材料；非空 = 需要这些物品（**可以重复**，表示同种物品要多份）。
 
-### 6.3 让某个方块在旋转时朝向正确
+### 6.3 让某个方块在旋转/翻面时朝向正确
 
 **适用场景**：方块把自己或子部件的朝向存在方块实体 NBT 里。
 
-**背景**：`Schematic.rotate` 转 `BlockState` 是通用的（见 §7.3），但 **NBT 是无 schema 的任意树**，引擎不知道哪个字段是朝向。
+**背景**：`Schematic.rotate` / `Schematic.mirror` 转 `BlockState` 是通用的（见 §7.3），但 **NBT 是无 schema 的任意树**，引擎不知道哪个字段是朝向。
 
 **步骤**：
 
-1. 实现 `BlockEntityRotation`：
+1. 实现 `BlockEntityRotation`（旋转与翻面一次收齐，顺序是**先翻面、后旋转**）：
 
 ```java
 public class MyRotation implements BlockEntityRotation {
     @Override
     @Nullable
-    public CompoundTag rotate(BlockState state, CompoundTag tag, Rotation rotation) {
+    public CompoundTag transform(BlockState state, CompoundTag tag, Rotation rotation, Mirror mirror) {
         if (!(state.getBlock() instanceof MyBlock)) {
             return null;
         }
         CompoundTag result = tag.copy();       // 不要就地改传入的
-        // 用 Schematic.rotateDirection(...) 得到新方向，搬运对应的键/字段
+        // 用 Schematic.mirrorDirection(...) 再 rotateDirection(...)，搬运对应的键/字段
         return result;
     }
 }
 ```
 
-2. 在模组初始化时注册。
+2. 在模组初始化时注册（参考 `Ae2Compat.registerBlockEntityRotation()`）。
 
 **三个必须注意的点**：
 
-- **不要就地修改传入的 `tag`** —— 同一个结构可能被反复旋转。
+- **不要就地修改传入的 `tag`** —— 同一个结构可能被反复变换。
 - **不要边搬边查**。如果要把 `north` 的内容搬到 `east`，必须先把"搬运计划"整个算出来，再分两批执行（先全摘除、再全写入）。否则刚搬过去的键会被后面的迭代当成源再处理一遍，**结果多转一格**。
-- 用 `Schematic.rotateDirection(dir, rotation)`，它已经处理了 `UP`/`DOWN`（`Direction.getClockWise()` 对它们会抛异常）。
+- 用 `Schematic.mirrorDirection` / `rotateDirection`：`rotateDirection` 已经处理了 `UP`/`DOWN`（`Direction.getClockWise()` 对它们会抛异常），两者的**先后必须与坐标一致**（先镜像再旋转）。
 
 ### 6.4 加一个网络包
 
@@ -539,12 +621,23 @@ now - lastScan > RESCAN_INTERVAL_MS      // 定时刷新
 | `ARRIVE_DY` | 2.5 | 到站的垂直容差 |
 | `STAND_MARGIN` | 2 | 站位离结构边界至少几格（2 = 中间空出一格，见 `StandSpotSearch.clearOf`） |
 | `LEAVE_SPOT_DISTANCE_SQR` | 64 | 超过就重新走回站位 |
+| `CONTAINER_DISTANCE_SQR` | 9 | 走到容器 3 格内就开箱取料 |
 | `ABORT_DISTANCE_SQR` | 256 | 超过就不去了，就地取料 |
-| `PLACE_COOLDOWN` / `FETCH_COOLDOWN` | 4 / 20 | 放块、取料的间隔 tick |
+| `MOVE_PATIENCE_TICKS` / `MOVE_TIMEOUT` | 60 / 120 | 走位判定：连续 60 tick **没靠近**就算卡住（不是"花了多久"）；每段路另设 120 tick 总超时 |
+| `STEP_ASIDE_RETRY` / `MAX_ESCAPE_TRIES` | 200 / 3 | 请她让开的重试间隔，以及最多换几个落脚点 |
+| `BASE_PLACES_PER_SECOND` | 5 | 放置速度基准（原来的 `PLACE_COOLDOWN = 4`） |
+| `FAVORABILITY_PER_EXTRA_PLACE` | 5 | 好感度每多 5 点，每秒多放 1 块 |
+| `MAX_PLACES_PER_TICK` | 20 | 放置上限（400 块/秒），只是防呆线 |
+| `FETCH_COOLDOWN` | 1 | 搬完料回到站位后歇几 tick 再动手（原来 20，放置提速后同比例压到 1） |
 | `NO_SOURCE_COOLDOWN` | 100 | 找不到材料后的冷却 |
 | `RETURN_TIMEOUT` | 600 | 还料流程的超时兜底 |
+| `PROGRESS_INTERVAL` | 10 | 施工进度推送间隔（约半秒） |
 | `MESSAGE_COOLDOWN_MS` | 30000 | 同一类提示的最小间隔 |
 | `MAX_REPORTED_MATERIALS` | 5 | 缺料提示最多列几种 |
+
+**放置速度不要再写成"冷却几 tick"**：冷却只能是整数 tick，速度会被锁死在 20/1、20/2、20/3 这几档上，
+"好感度每 5 点加一块"根本落不下去。现在是**攒份额**（`takePlaceBudget`）：每秒 N 块折成本 tick 的份额，
+攒够一块才放，7 块/秒、13 块/秒都准。
 
 ### 7.7 提示信息的几个约定
 
@@ -884,6 +977,10 @@ owner.sendSystemMessage(component);              // 聊天栏：同上
 > 所以先查作息：`Activity.WORK.equals(maid.getScheduleDetail())` ——
 > 不在工作时间她整段都不动，单子排队等着是**预期行为**，不是坏了。
 
+> **「指挥台指派了她却不动」**：放投影、指派女仆都只是**准备**，还要在界面上点过
+> 「开始建造」（`CommandPostBlockEntity.started`，见 §12）。另外她得是**你的**女仆、
+> 而且任务是「蓝图建造」——指派本身会自动切，但你事后手动改过模式就不归这条例管了。
+
 ### 8.2 女仆取不到材料
 
 日志里搜 `女仆 ... 没取到材料`，后面会带上是"容器里有"还是"容器里没有"，以及背包空余格数。
@@ -940,8 +1037,12 @@ javap -p -c -cp xxx.jar <全限定类名>
 ### 7.22 分层查看：过滤放在"拿到方块清单之后、渲染之前"
 
 蓝图预览要能一层层看（`client/BlueprintLayerView`）。它**只做一件事：按 Y 过滤方块清单**，筛完的清单
-交给 `SchematicPreview`——三处预览（蓝图面板、图纸详情页、终端缩略图）画的是同一份东西，分层口径
-也必须只有一处，否则会出现"同一个建筑在面板里是第 3 层、在终端里是别的"。
+交给 `SchematicPreview`——三处预览（蓝图面板、图纸详情页、终端缩略图）共用同一套分层口径与同一套
+`scaleFor` / `pick`，否则会出现"同一个建筑在面板里是第 3 层、在终端里是别的"。
+
+**注意绘制循环目前有两份**：图纸详情页、终端缩略图走 `SchematicPreview.draw`，蓝图面板还留着自己那段
+`BlueprintScreen.drawPreview`（分层、抽稀、兜底各写了一遍）。改预览的**绘制**口径要两处一起改；
+只改分层过滤（`BlueprintLayerView`）则是一处。
 
 两条容易踩的，都是**顺序**问题：
 
@@ -950,16 +1051,17 @@ javap -p -c -cp xxx.jar <全限定类名>
 - **抽稀步长按"筛完之后"的数量算。** 蓝图面板原来用的是整座建筑的 `countBlocks()`，分层之后必须换成筛完的
   条数，否则只看一层时会被抽成几个孤块。
 
-还有一条界面上的：**别把控件摆进预览框**。预览那幅 3D 是在 `super.render` 之后画的，会压在控件上面。
-所以分层不设滑块/按钮，改成**键位与滚轮**（预览框上的滚轮、`↑`/`↓`/`PgUp`/`PgDn`，按住 `Shift` 切
-"只看这层"），当前状态写成预览框左上角的两行字。详情页那边滚轮原本归材料清单，现在按指针位置分开管
-（`isOverPreview`）——两处各判一次矩形，别让一个滚轮同时干两件事。
+还有一条界面上的：**别把控件摆进预览框**。预览那幅 3D 是在 `super.render` 之后画的，会压在控件上面，
+所以分层的操作全做在**预览框自己的边缘与鼠标**上，目前状态写成预览框左上角的一行字 + 一个问号
+（悬浮才展开说明）。详情页那边滚轮原本归材料清单，现在按指针位置分开管（`isOverPreview`）——
+两处各判一次矩形，别让一个滚轮同时干两件事。
 
-换层那条**用拖动条，不用键位**（`BlueprintLayerView.drawBar` / `overBar`）：底＝第 1 层、顶＝整栋，
-左键拖或点即换层，右键切"只看这一层"。键位版本（`↑↓` 一层、`PgUp`/`PgDn` 十层、`Home`/`End` 到两头）
-试过，楼一高就难用——要么滚几百下、要么只能跳两端，中间那段全靠蒙；拖动是连续的，而且条的长短本身
-就把"这楼多高、现在在几分之几"画了出来。另外拖条与"拖动转视角"共用同一块预览：**按下时先判拖条**
-（`draggingLayer`），否则一拖就把视角也转了。
+换层那条**用拖动条，不用键位**（`BlueprintLayerView.drawBar` / `overBar`）：预览框右边缘一条竖向滑块，
+底＝第 1 层、顶＝整栋，左键拖或点即换层，右键切"只看这一层"（把手变青色）。键位版本
+（`↑↓` 一层、`PgUp`/`PgDn` 十层、`Home`/`End` 到两头）试过，楼一高就难用——要么滚几百下、
+要么只能跳两端，中间那段全靠蒙；拖动是连续的，而且条的长短本身就把"这楼多高、现在在几分之几"
+画了出来。另外拖条与"拖动转视角"共用同一块预览：**按下时先判拖条**（`draggingLayer`），
+否则一拖就把视角也转了。
 
 ## 9. 构建与发布
 
@@ -1004,8 +1106,11 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 1. 构建，失败时把日志末尾 150 行写进 job summary 并上传 `build/reports/`。
 2. 从 `CHANGELOG.md` 用 `awk` 抽当前版本段落作为 Release 说明（**所以 CHANGELOG 的标题格式不能错**）。
 3. `softprops/action-gh-release` 发布，附上 `build/libs/*.jar`。
+4. 顺手把同一个 jar 传到 **CurseForge**（`itsmeow/curseforge-upload`，说明复用第 2 步的 `release_notes.md`）。
+   需要仓库 Secrets：`CF_API_KEY` 与 `CF_PROJECT_ID`；这一步是 `continue-on-error`，CF 挂了不拦 GitHub 发布，
+   但日志里会留红叉，需要手动补传一次。
 
-`workflow_dispatch` 手动触发时只构建、不发版。
+`workflow_dispatch` 手动触发时只构建、不发版（第 3、4 步都挂在 `refs/tags/v` 上）。
 
 两个容易踩的点：
 
@@ -1082,8 +1187,8 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
   产物：`src/main/resources/logo.png`（256，给 `mods.toml` 的 `logoFile`，游戏内模组列表显示它）、
   `docs/logo-512.png`（发布页上传用）。换图：覆盖 `docs/logo-source.jpg` 再跑一次脚本。
 - **游戏内截图 3~5 张**：蓝图面板/录制、投影 + 女仆施工、进度条三行、学习池界面、说明书翻页。
-- 物品/方块贴图：4 张**保留**，由 `python tools/make_textures.py` 从原版/AE2 底图改色生成
-  （换配色只改脚本里那几张 ramp 表）。
+- 物品/方块贴图：14 张（`item/` 5 张、`block/` 9 张，其中指挥台是 7 张分面图），由
+  `python tools/make_textures.py` 从原版/AE2 底图改色生成（换配色只改脚本里那几张 ramp 表）。
 
 ### 界面缺陷（待确认归属）
 
@@ -1165,8 +1270,12 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 
 ### 图纸格式：现在认什么、缺哪几家
 
-**能读的**：自家 `.maidbp`（gzip NBT：`size` / `palette` / `blocks` / `block_entities`）；
-机械动力的蓝图（`CreateSchematic`，只读）。**导出的**只有自家格式。
+**图纸库只认自家格式**：`.maidbp`（gzip NBT：`size` / `palette` / `blocks` / `block_entities`），
+外加两个老后缀 `.blueprint.nbt` / `.blueprint`（只读，导出统一新后缀）。
+
+**机械动力的蓝图不进图纸库**：它由 `CreateSchematic` 单独读，只在**女仆手上拿着**时才参与施工——
+那张图我们一个字节都不写，完工标记记在 `SchematicStorage` 里（见 §4.2、`MaidBlueprint`）。
+**导出的**只有自家格式。
 
 | 生态 | 格式 | 里面装什么 | 接入成本 |
 |---|---|---|---|
@@ -1181,9 +1290,9 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 （最省事、受众最广）。三者共用同一层 palette ↔ 方块状态转换——先把这层抽出来，
 之后每加一家就只是换个外壳。
 
-## 12. 蓝图指挥台：托管投影与远程下单（进行中）
+## 12. 蓝图指挥台：托管投影与远程下单（已实现）
 
-设计已定，正在实现。要点：
+下面这四条实现顺序里的每一步都能单独跑起来，**都已完成**（主体在 1.8.0，2.1.0 补的是不分距离/维度）。要点：
 
 - **两件东西、一条绑定链**：**蓝图终端（物品）**是钥匙兼图纸库入口，**指挥台（方块）**放在世界里干活。
   拿终端右键指挥台即完成绑定，**绑定是玩家私有的**（每台指挥台记住它属于谁），
@@ -1215,13 +1324,14 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 - **投影的可见性**：托管投影对所有人显示（全息本来就是给人看的，队友也能围观），
   但**只有绑定玩家**能暂停、取消、改指派。
 - **投影由终端托管**：不再是"手持才显示"，放下去就在，**除非在终端里取消**。
-  这是客户端投影的第三个来源（现有两个：自己手持、附近女仆手持），见
+  它是客户端投影的四个来源之一（正在摆的投影 &gt; 自己手持 &gt; 指挥台托管 &gt; 附近女仆手持），见
   `ProjectionRenderer.projectionSource`。
 - **一次性下单**：选图 → 右键方块定面（与锚点定位同一套）→ 选女仆（**可多选**）→
-  把结构 id、锚点、朝向与材料清单**一次性**交给她，之后她照单自己干，不再回调终端。
-- **停下只有两条路**：手动改她的工作模式（原有机制），或者在终端里**暂停 / 取消**。
-  暂停 = 保住进度停下；取消 = 撤单，投影随之消失。不做"超时自动撤单"——
-  全息投影挂着不碍事，撤单必须是人点的。
+  结构 id、锚点、朝向**一次性**落在指挥台上，之后她照单自己干，不再回调终端。
+  材料清单**不随单传递**：她拿结构和工地的现状现算（与"手上拿着蓝图"那条走的是同一套取料逻辑）。
+- **停下只有两条路**：手动改她的工作模式（原有机制），或者在终端里**收回口令 / 取消投影**。
+  收回口令 = 保住进度停下（再点一次「开始建造」就接着干）；取消投影 = 撤单，投影随之消失。
+  不做"超时自动撤单"——全息投影挂着不碍事，撤单必须是人点的。
 - **多女仆**：同一张图可以分给多只，靠放置幂等凑并行；界面必须把进度**合并**显示
   （三只各报各的百分比对主人没有意义）。
 - **停工的边界**：终端被拆 = 撤单并让她们停下，别留一个谁也管不着的工地。
@@ -1252,8 +1362,8 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
    - **客户端那张投影表**（`CommandPostProjections`）**不靠新包**：登记挂在方块实体的 `load` 上
      ——区块加载带的整份 NBT 与状态变更的更新包都会经过它；`setRemoved` 时划掉。
      于是"走远了方块实体被卸掉、投影自己就没了"是白来的，也不必维护"该发给谁"。
-   - **渲染**把"来源"抽成了 `ProjectionSource`（id / 名字 / 朝向 / 锚点），三个来源按
-     **自己手持 &gt; 指挥台托管 &gt; 附近女仆** 取第一个可用的；结构本体仍按需点播（同一个 id 那套）。
+   - **渲染**把"来源"抽成了 `ProjectionSource`（id / 名字 / 朝向 / 翻面 / 锚点），按
+     **正在摆的投影 &gt; 自己手持 &gt; 指挥台托管 &gt; 附近女仆** 取第一个可用的；结构本体仍按需点播（同一个 id 那套）。
 3. ~~指派施工：给 `BlueprintBuildController` 加"外部指派"来源~~ **已完成**：
    - `server/CommandPostAssignments`：女仆 → 指挥台（带维度）的**索引**。真相在指挥台的方块实体里
      （它记着指派了哪些女仆），索引随方块实体 `load` 重建、`setRemoved` 划掉——不另存一份，
@@ -1263,7 +1373,7 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
      建会话、算 `siteId`、站位那段与蓝图那条**共用**（抽成了 `afterSessionBuilt`）——
      同一个工地走两条路进来，客户端的进度条认得出是同一处。
    - 完工记在**指挥台**上（新增 `completed` 字段与存档）；**取消投影 = 撤单**，挂在上面的女仆一并撤下。
-4. ~~女仆列表~~ **已完成**（下单、进度合并、暂停还差）：
+4. ~~女仆列表~~ **已完成**（下单、进度合并、暂停都已落地）：
    - `server/MaidOwnership`：**主人 → 他的女仆**（UUID + 名字 + 维度）。**进游戏时扫一遍**
      （`MaidOwnershipTracker`，注册在 `MaidExtension` 里——那段只在女仆模组存在时执行，
      否则类里的 `EntityMaid` 会让没装女仆的客户端 NoClassDefFoundError，见 §7.10）。
@@ -1287,9 +1397,12 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
    - **开工要有一道口令**（`CommandPostBlockEntity.started`，默认 false）：放投影、指派女仆都只是
      **准备**，准备不该等于开工——玩家常常要先把她叫齐、把料备好，而"女仆自己就开踢"这种设计
      一旦遇上"我先放个投影看看位置对不对"，代价就是她当场跑去搬方块。控制器那道闸门就在
-     `BlueprintBuildController.ensureAssignedSession` 里（没口令 = `IDLE`），界面上的「开始建造」
-     走 `C2SCommandPostStartPacket`（校验与放投影同一套：射程 + 绑定它的那个玩家）。换投影、
-     撤投影都会把口令收回（`placeProjection`/`clearProjection` 里置 false），因为那是新工地了。
+     `BlueprintBuildController.ensureAssignedSession` 里（没口令 = `IDLE`），界面上的「开始建造 / 停下」
+    走 `C2SCommandPostStartPacket`（校验与放投影同一套：不看距离与维度，只认"那台的区块加载着 +
+    他是绑定它的那个玩家"）。换投影、撤投影都会把口令收回
+    （`placeProjection`/`clearProjection` 里置 false），因为那是新工地了。
+     `CommandPostBlockEntity.paused` 这个字段**目前没有写入点**：暂停实际就是"收回口令"，
+     状态判定里留着它是为将来做真正的暂停（要另加一个包）——别以为它已经在用。
    - **状态只有两个，而且由服务端算**：`S2CMaidListPacket.Status` 是 空闲 / 待命 / 正在建——
      判据就是上面那道闸门那一组（有投影 + 有口令 + 没暂停没完工 = 正在建）。**不能让客户端自己
      照方块实体猜**：名册里可能有别处的指挥台，那台的方块实体客户端根本没同步。界面那一侧
