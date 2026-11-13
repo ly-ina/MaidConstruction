@@ -77,139 +77,32 @@ runtimeOnly fg.deobf("maven.modrinth:ae2:${ae2_version}")
 
 ## 3. 架构总览
 
-### 包划分
+### 3.1 包划分
+
+`com.example.blueprint` 下按"谁认识谁"分层：
 
 ```
-com.example.blueprint
-├── BlueprintMod            主类：物品/方块注册、配置、AE2 条件注册、网络注册
-├── BlueprintConfig         配置项（config/maidconstruction-common.toml，一律走静态读取方法）
-├── BlueprintCommand        /maidconstruction list | where | stop
-├── Advancements            进度（advancement）发放：判据全是 impossible，只能由代码给
-├── block/
-│   ├── CommandPostBlock
-│   └── CommandPostBlockEntity  ★ 指挥台：投影 / 指派 / 口令 / 完工，状态随 BE 同步
-├── build/                  ★ 建造核心，与具体模组解耦
-│   ├── BuildSession        一次建造的增量状态机
-│   ├── ItemProvider        材料来源接口 + 注册实现
-│   ├── ItemSource          女仆背包视角的材料接口
-│   ├── BlockContainerProvider  普通容器的 ItemProvider
-│   ├── BlockMaterials      ← 扩展点：方块需要什么材料
-│   ├── BlockMaterialResolver
-│   ├── BlockEntityRotation ← 扩展点：旋转方块实体 NBT
-│   ├── BlockEntityRotationResolver
-│   ├── BlockHarvest        "她挖不挖得动这一块"（判断能不能替换现有方块）
-│   ├── Salvage             被顶掉的方块按战利品表回收，不无声销毁
-│   ├── StandSpotSearch     站位搜索（离结构边界留 STAND_MARGIN）
-│   └── StepOutPolicy       "先让开再动手"的纯逻辑（有单测）
-├── schematic/
-│   ├── Schematic           结构数据（palette + 索引数组）
-│   └── SchematicStorage    存档内的结构库（SavedData）
-├── item/
-│   ├── BlueprintItem       蓝图：选点、锚定、旋转/翻面、取到手上、工具提示
-│   ├── BlueprintTerminalItem   蓝图终端：图纸库入口
-│   ├── BindingBookItem     绑定书：指定远程取料点
-│   ├── BindingBookEvents   让绑定书抢到方块右键（兜底）
-│   ├── ManualItem          《女仆建筑说明书》（右键开自己的界面）
-│   ├── GuideBookRecipe     成书配方的自定义序列化（产物带 NBT，见 §6.5）
-│   └── ModRecipeSerializers
-├── client/                 ★ 客户端包（多数标 @OnlyIn(CLIENT)；ClientSchematicCache 刻意不标，见 §7.9）
-│   ├── ProjectionRenderer  世界内的 3D 投影（定位中 / 手持 / 指挥台托管 / 附近女仆，见 §12）
-│   ├── SchematicPreview    预览用的那套 3D 绘制 + 拾取（详情页 / 缩略图 / 编辑页共用，见 §7.22）
-│   ├── BlueprintLayerView  分层查看：按 Y 过滤 + 拖动条
-│   ├── BlueprintRecordSession  录制/定位态（不给任何能力，见 §7.19）
-│   ├── CableBusOutline     AE2 线缆的示意轮廓（按注册名认，不引用 AE2 类型）
-│   ├── BoundBlockHighlighter   绑定书目标高亮（可穿透方块）
-│   ├── BlockedSpotHighlighter  她动不了的格子
-│   ├── BuildProgressHud / MaidBuildProgress   进度条与它的数据源（按工地合并）
-│   ├── BlueprintLibrary    图纸库：扫目录、重扫、按文件属性判变化
-│   ├── ClientSchematicCache   结构缓存（LRU 24）
-│   ├── ClientBlueprintBinder  收到数据后当场绑定到手持物品
-│   ├── BlueprintTransfer   导入导出的文件读写
-│   ├── BlueprintScreenOpener / ManualScreenOpener / MaidStudyScreenOpener
-│   ├── CommandPostProjections / ClientPostBinding   指挥台的客户端镜像
-│   ├── MaidRoster          女仆名册（含指派状态）
-│   ├── MaidClientBridge    TLM 客户端渲染桥（没装 TLM 不许加载）
-│   └── gui/                10 个界面
-│       ├── BlueprintScreen         蓝图面板
-│       ├── BlueprintMaterialsScreen 建筑清单（按材料汇总）
-│       ├── BlueprintLibraryScreen / BlueprintDetailScreen / BlueprintEditScreen
-│       ├── BlueprintHomeScreen     蓝图终端主页（"工地现在怎么样"）
-│       ├── CommandPostScreen       指挥台
-│       ├── MaidRosterScreen        女仆名册（3D 立绘）
-│       ├── MaidStudyScreen         学习池
-│       └── ManualScreen            说明书
-├── network/
-│   ├── ModNetwork          频道 + 22 个包的注册（协议 15）
-│   └── packet/             17 个 C2S + 5 个 S2C
-├── registry/
-│   ├── ModItems            物品注册：blueprint、binding_book、blueprint_terminal、command_post、manual
-│   ├── ModBlocks           指挥台的方块与方块实体
-│   └── ModCreativeTabs     模组专属创造物品栏（注册名为 main）
-├── server/
-│   ├── CommandPostBindings    "玩家 → 他现在绑的那一台"（玩家持久数据）
-│   ├── CommandPostAssignments "女仆 → 她在为哪台干活"（索引，随 BE load 重建）
-│   ├── MaidOwnership          "主人 → 他的女仆"（UUID + 名字 + 维度）
-│   └── RecordModeCleanup      登录时收尾 1.8.x 留下的录制态数据
-└── integration/
-    ├── maid/               TLM 联动
-    │   ├── MaidExtension        @LittleMaidExtension 入口
-    │   ├── BlueprintBuildTask   女仆的"蓝图施工"工作模式
-    │   ├── MaidStudyTask        "学习模式"：跟在主人身边记录演示
-    │   ├── MaidIndustryTask     "工业模式"：照学习池里的单开工（见 §7.16）
-    │   ├── MaidStudyPool / StudyRecipeCapture / CraftingGrid
-    │   ├── MaidStudyInteractHandler  蹲下 + 木棍打开学习池（§7.12）
-    │   ├── MaidSpeech           她开口的格式统一在「名字：……」
-    │   ├── MaidBuildTickHandler / MaidCraftTickHandler / MaidStudyTickHandler
-    │   ├── BlueprintBuildController ★ 施工状态机（最大文件）
-    │   ├── MaidCraftOrder       学习池的订单队列（嵌套用"插队 + 来路"，见 §7.13）
-    │   ├── MaidItemSource       女仆背包的 ItemSource
-    │   ├── MaidBlueprint        女仆手上那张图（自家蓝图 / 机械动力蓝图统一问法）
-    │   ├── MaidCompat / MaidOwnershipTracker
-    │   └── BindingBookBauble / MaidWirelessBauble  空饰品，仅为让饰品栏接受它们
-    ├── ae2/                ★ AE2 联动，整包不得在 AE2 缺位时被触碰
-    │   ├── Ae2Compat            安全入口（不引用 AE2 类型）
-    │   ├── Ae2ItemProvider      ME 网络取料/还料
-    │   ├── Ae2MaterialResolver  线缆材料从部件 NBT 反推
-    │   ├── Ae2BlockEntityRotation 线缆部件朝向
-    │   ├── Ae2CraftingCapture   AE2 合成终端的配方捕获（§7.12）
-    │   ├── Ae2TerminalRegistry  女仆终端 / 创造女仆接口的方块、物品、BE
-    │   ├── MaidTerminalBlock / MaidTerminalBlockEntity
-    │   ├── TerminalChunkLoader  临时加载无线访问点所在区块（Forge 票据）
-    │   ├── InfiniteItemStorage            ★ 取之不尽的 ME 存储
-    │   ├── CreativeMaidInterfaceBlock     ★ 创造女仆接口（见 §7.10）
-    │   ├── CreativeMaidInterfaceBlockEntity
-    │   ├── Ae2StorageTransfer            ME 存储搬运动作（方块来源与无线来源共用）
-    │   ├── WirelessMaidLink              无线终端的绑定/解析/距离/取电
-    │   ├── WirelessMaidTerminalItem      ★ 无线女仆终端（见 §7.11）
-    │   └── Ae2WirelessProvider           女仆用的无线取料源
-    └── create/
-        └── CreateSchematic   读机械动力蓝图（只读、一个字节都不写，见 §11）
+blueprint/
+├── BlueprintMod          入口：注册与事件总线
+├── registry/             注册表包装（方块、物品、方块实体、创造栏）
+├── schematic/            结构数据：Schematic（不可变）、SchematicStorage（存档内按 UUID 存）、编解码
+├── build/                建造的纯逻辑：BuildSession 状态机、站位搜索、阶段策略（**不碰 MC 运行时**，可单测）
+├── server/               服务端账本：CommandPostAssignments（女仆→指挥台）、CommandPostBindings（我绑哪台）、
+│                         MaidOwnership（主人→女仆）、PlayerData（跨死亡的玩家数据）、Advancements
+├── network/              ModNetwork + packet/（C2S 请求、S2C 同步）
+├── item/                 蓝图、空白蓝图、绑定书、说明书、蓝图终端、配方序列化
+├── block/                指挥台（方块 + 方块实体）
+├── client/               界面与渲染：gui/（各 Screen）、SchematicPreview、ProjectionRenderer、
+│                         BlueprintLayerView、ClientSchematicCache、ClientPostBinding、BuildProgressHud
+├── integration/maid/     车万女仆联动：BlueprintBuildController（施工主循环）、任务/学习/工业模式
+└── integration/ae2/      AE2 联动：无线终端、ME 取料、反射隔离（Ae2Compat）
 ```
 
-### 依赖方向（重要）
+### 3.2 依赖方向（重要）
 
-```
-        integration.maid ──┐
-        integration.ae2  ──┼──→ build / schematic / item   （核心）
-        integration.create ┘
-
-        client ──────────────→ build / schematic / item（+ MaidCompat 这类不引用模组类型的门面）
-        server ──────────────→ 核心（只维护索引与持久数据，不碰渲染）
-```
-
-**核心包（`build` / `schematic` / `item`）绝不 import 任何模组类型**。反向依赖靠两种机制实现：
-
-- **注册链**：核心定义接口（`BlockMaterials`、`BlockEntityRotation`），集成包实现并注册。
-- **安全入口**：`Ae2Compat` / `MaidCompat` 本身不引用对方类型，由它们在中转时判断模组是否存在。
-
-**允许的另一向引用只有一种写法**：`item` / `block` / `network` 里会 import `client.*ScreenOpener`
-与 `client.CommandPostProjections` 这类客户端状态类，但**引用只出现在 `DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> ...)` 的 lambda 里**——
-类加载是懒的，服务端永远走不到那一句（见 §7.15）。把它们写成字段类型、静态初始化、或方法里的直接调用，
-都会在专用服务端上变成 `NoClassDefFoundError`。
-
-违反这条会导致**没装对应模组的玩家无法启动游戏**。
-
----
+`build/` 不依赖任何 Minecraft 运行时；`client/` 只被客户端加载；`integration/*` 只在对应模组存在时才初始化
+（由反射与 `Ae2Compat` 把关）。违反任何一条，都会让**没装 AE2 / 没装女仆**的玩家崩在启动阶段——
+这是本项目最容易踩的坑（见 §7.2）。
 
 ## 4. 核心数据模型
 
@@ -963,479 +856,140 @@ owner.sendSystemMessage(component);              // 聊天栏：同上
 
 
 
-### 8.1 女仆不干活
-
-按顺序检查：
-
-1. **蓝图是否有锚点** —— 没锚点女仆不知道建在哪，会提示 `maid_no_anchor`。
-2. **女仆的任务是否是「蓝图施工」** —— `MaidBuildTickHandler` 只处理任务是 `BlueprintBuildTask.UID` 的女仆。
-3. **蓝图是否允许女仆施工** —— `MaidBuild` 标记。
-4. **看日志** —— `BlueprintMod.LOGGER` 会记录取料出发、取到几种、还料结果等关键节点。
-
-> **「下单了不干活」是另一条链路**：`MaidCraftTickHandler` 只处理**在「工业模式」**、
-> 且**正处于工作时间**的女仆。模式由下单自动切换（`MaidIndustryTask.employ`），
-> 所以先查作息：`Activity.WORK.equals(maid.getScheduleDetail())` ——
-> 不在工作时间她整段都不动，单子排队等着是**预期行为**，不是坏了。
-
-> **「指挥台指派了她却不动」**：放投影、指派女仆都只是**准备**，还要在界面上点过
-> 「开始建造」（`CommandPostBlockEntity.started`，见 §12）。另外她得是**你的**女仆、
-> 而且任务是「蓝图建造」——指派本身会自动切，但你事后手动改过模式就不归这条例管了。
-
-### 8.2 女仆取不到材料
-
-日志里搜 `女仆 ... 没取到材料`，后面会带上是"容器里有"还是"容器里没有"，以及背包空余格数。
-
-| 现象 | 可能原因 |
-|---|---|
-| "容器里没有还缺的" | 来源判断用错了清单（应查 `shortfall`），或者材料解析不对（见 §6.2） |
-| "容器里有还缺的" | 背包真的塞不下，或者 `transferInto` 的容量判断有误 |
-| 提示缺料清单但箱子里明明有 | 材料的**物品 ID** 和箱子里的不是同一个 —— 典型是 §6.2 那类方块 |
-| 一直重复搬同一种材料 | `remainingBill` 没生效，或者 `missingAmounts` 算错 |
-
-### 8.3 渲染相关
-
-**游戏直接退出，日志末尾是 `Unreported exception` + `Stopping server`** —— 渲染线程抛了异常。堆栈里找 `ProjectionRenderer` / `BlueprintScreen` / `CableBusOutline`，多半是坐标越界（见 §7.4）。
-
-**投影里某些方块看不见** —— 该方块的模型依赖 `ModelData`（AE2 线缆是典型）。检查 `CableBusOutline.isCableBus` 是否认出了它。
-
-**旋转蓝图后投影错位/残留** —— `PENDING` 的失效条件（§7.4）。
-
-### 8.4 编译/运行时错误
-
-**`NoClassDefFoundError` 指向 AE2 类型** —— 有代码在 `Ae2Compat.isLoaded()` 之外触碰了 `integration.ae2` 的类。检查调用点。
-
-**未装 TLM 时启动失败** —— 有代码在 `@LittleMaidExtension` 之外引用了 TLM 类型。
-
-**配方加载失败** —— 涉及软依赖模组物品的配方没有用 `forge:conditional` 包住。
-
-**`Rendersystem called from wrong thread`（出现在 `Server thread`），随后 `Render thread` 报
-`Reported exception thrown!`** —— 有代码在非渲染线程上碰了客户端 API，多半是开界面。
-典型是只按**物理端**判断、没判逻辑端，见 §7.15。
-
-**刚学会的做法"摆法"是空的、只剩配方 id**（时好时坏，每格正好 1 个时才必现） ——
-录入时存了合成格的活引用，材料被扣减后摆法跟着空了，见 §7.14。
-
-**女仆死亡时服务器崩溃**（`Ticking entity` + `UnsupportedOperationException`，栈里是
-`MaidOwnership.forget`） —— 表里存的是 `List.copyOf` 那种不可变列表，之后又对它 removeIf。
-2.1.1 已改成"整份换掉"。**凡是往里增删的集合，别用 `List.copyOf` / `List.of` 存**。
-
-### 8.5 验证第三方 API 的正确姿势
-
-**不要凭记忆或推测写第三方模组的 API。**
-
-```bash
-# 1. 查版本与下载地址
-https://api.modrinth.com/v2/project/<id>/version?loaders=["forge"]&game_versions=["1.20.1"]
-
-# 2. 列出 jar 内的类，确认真实包路径
-python -c "import zipfile; z=zipfile.ZipFile('xxx.jar'); print([n for n in z.namelist() if 'XXX' in n])"
-
-# 3. 核实方法签名
-javap -p -c -cp xxx.jar <全限定类名>
-```
-
-**这个方法纠正过多次凭印象写下的错误** —— 例如推测的 `AECapabilities` 类实际不存在（真名是 `appeng.capabilities.Capabilities`），以及差点把 `getUpdateTag` 的覆写误判成 `saveWithoutMetadata`。看字节码还能确认调用链，比如"线缆的部件方向到底存在哪"。
-
----
-
 ### 7.22 分层查看：过滤放在"拿到方块清单之后、渲染之前"
 
-蓝图预览要能一层层看（`client/BlueprintLayerView`）。它**只做一件事：按 Y 过滤方块清单**，筛完的清单
-交给 `SchematicPreview`——三处预览（蓝图面板、图纸详情页、终端缩略图）共用同一套分层口径与同一套
-`scaleFor` / `pick`，否则会出现"同一个建筑在面板里是第 3 层、在终端里是别的"。
+蓝图预览能一层层看（`client/BlueprintLayerView`）。它只做一件事：**按 Y 过滤方块清单**，筛完交给
+`SchematicPreview`——三处预览（面板、详情页、缩略图）画的是同一份东西，口径必须只有一处。
 
-**注意绘制循环目前有两份**：图纸详情页、终端缩略图走 `SchematicPreview.draw`，蓝图面板还留着自己那段
-`BlueprintScreen.drawPreview`（分层、抽稀、兜底各写了一遍）。改预览的**绘制**口径要两处一起改；
-只改分层过滤（`BlueprintLayerView`）则是一处。
-
-两条容易踩的，都是**顺序**问题：
-
-- **先按层筛、再抽稀。** 反过来的话，某一层本来就没剩几块，先抽稀等于把那几块也丢了，看着就像"这层是空的"。
-  所以 `SchematicPreview` 多了一个吃 `List` 的 `sample` 重载。
-- **抽稀步长按"筛完之后"的数量算。** 蓝图面板原来用的是整座建筑的 `countBlocks()`，分层之后必须换成筛完的
-  条数，否则只看一层时会被抽成几个孤块。
-
-还有一条界面上的：**别把控件摆进预览框**。预览那幅 3D 是在 `super.render` 之后画的，会压在控件上面，
-所以分层的操作全做在**预览框自己的边缘与鼠标**上，目前状态写成预览框左上角的一行字 + 一个问号
-（悬浮才展开说明）。详情页那边滚轮原本归材料清单，现在按指针位置分开管（`isOverPreview`）——
-两处各判一次矩形，别让一个滚轮同时干两件事。
-
-换层那条**用拖动条，不用键位**（`BlueprintLayerView.drawBar` / `overBar`）：预览框右边缘一条竖向滑块，
-底＝第 1 层、顶＝整栋，左键拖或点即换层，右键切"只看这一层"（把手变青色）。键位版本
-（`↑↓` 一层、`PgUp`/`PgDn` 十层、`Home`/`End` 到两头）试过，楼一高就难用——要么滚几百下、
-要么只能跳两端，中间那段全靠蒙；拖动是连续的，而且条的长短本身就把"这楼多高、现在在几分之几"
-画了出来。另外拖条与"拖动转视角"共用同一块预览：**按下时先判拖条**（`draggingLayer`），
-否则一拖就把视角也转了。
+- **先按层筛、再抽稀**：反过来会把某层剩下的几块也抽没，看着像"这层是空的"；
+- **抽稀步长按筛完的数量算**：拿整栋的 `countBlocks()` 算，只看一层时会被抽成几个孤块；
+- **别把控件摆进预览框**：那幅 3D 在 `super.render` 之后画，会压住控件——所以分层用拖动条
+  （`drawBar` / `overBar`：底＝第 1 层、顶＝整栋），右键切"只看这一层"；
+- **模式只归右键管**，拖条只动层号：拖一下就把模式掰回累积，玩家会以为右键没生效；
+- 拖条与"拖动转视角"共用同一块预览：按下时**先判拖条**（`draggingLayer`），否则一拖两动。
 
 ### 7.23 玩家持久数据的根节点不跨死亡
 
-`player.getPersistentData()` 的**根节点**会进存档、重登也还在，但**死一次就没了**。Forge 在
-`ServerPlayer#restoreFrom`（重生，以及"死亡后重进"走的同一条）里只复制一个子标签：
+`player.getPersistentData()` 的**根节点**会进存档、重登也在，但**死一次就没了**：Forge 在
+`ServerPlayer#restoreFrom` 里只复制 `PlayerPersisted` 这一层子标签。所以"只该记一次"的标记
+（说明书发过没有、绑的是哪台指挥台）都必须写在那一层：
 
-```java
-CompoundTag old = oldPlayer.getPersistentData();
-if (old.contains(PERSISTED_NBT_TAG))          // PERSISTED_NBT_TAG = "PlayerPersisted"
-    getPersistentData().put(PERSISTED_NBT_TAG, old.get(PERSISTED_NBT_TAG));
-```
+- 读：`root.getCompound(Player.PERSISTED_NBT_TAG)`，**改完必须 `root.put(...)` 回去**——
+  键不存在时 `getCompound` 返回的是一个没挂上去的新标签，直接写等于写进空气；
+- 升级：老版本写在根节点上的键，用 `PlayerData.adoptLegacyRootKeys` 在读取时就地搬进那一层，
+  再删掉根上那份（不这么做，老玩家的绑定会凭空消失）；
+- 封装在 `server/PlayerData`（`persisted` / `adoptLegacyRootKeys`），别各处自己拼。
 
-所以：
+**这个坑的特点是"重登测不出来"**：只有死亡 → 重生才会复现，所以验证得真 `/kill` 一次。
 
-- **"一辈子只该做一次"的玩家标记**（发过什么、绑着哪台指挥台）写 `PlayerData.persisted(player)`
-  那一层。写根节点的后果是"死一次就忘了"——表现成"怎么又给我发了一遍""终端不认这台了"，
-  而且**重登测不出来**（重登读的是存档里那份根节点，只有重生会换一个玩家实体）。
-- **确实只该活这一条命的状态**才留在根节点：死了就该清掉的临时标记。
-- 老版本写在根上的键，用 `PlayerData.adoptLegacyRootKeys(player, keys...)` 搬进 `PlayerPersisted`，
-  升级时才不会把每个人已有的记录清空。
+## 8. 排查手册
 
-这条是 2.1.1 的报障查出来的（"死亡重生后退出再进又收到一本说明书，反复死亡反复发"）：
-那次顺手把"首次进服送说明书"整个去掉了——**书不送了**，要的人自己用一本书加一张纸做，
-创造栏里也有一份。现在这条路上只剩指挥台的绑定记录，`CommandPostBindings` 已改到 `PlayerData`。
+### 8.1 女仆不干活
+
+先看三处，顺序别反：**她手上有没有图** → **模式是不是"建造"** → **指挥台有没有下令开工**。
+
+- 指派了但不动：多半指派落到了**没有投影的那一台**指挥台（见 §12.1）；
+- 有图有投影仍不动：确认 `started`——准备不等于施工，口令按下之后她才动；
+- 都不对：看日志里 `BlueprintBuildController` 的状态迁移，是不是卡在 `WAIT_MATERIAL`（缺料）。
+
+### 8.2 女仆取不到材料
+
+取料是**三层数量账**（§5.4）：身边容器 → 绑定书 → AE2。缺料的常见原因不是"没有"，而是**配方对不上**：
+容器里有原木、而这一步要木板，那就得有合成途径，或者改用算好的材料（§6.2）。
+
+### 8.3 渲染相关
+
+投影与预览里画不出模型的方块（线缆那类靠方块实体喂数据的）会退化成线框，这是有意的（§5.5）。
+新方块"透明 / 穿模"先查两件事：模型是不是非整块（要不要 `noOcclusion()`）、面与相邻方块贴得是不是太近
+（深度精度打架）。
+
+### 8.4 编译 / 运行时错误
+
+- `UnsupportedOperationException` 出现在集合操作里：拿 `List.of` / `List.copyOf` 存了之后又去改它。
+  规矩：要么存可变副本，要么只走"整份替换"（2.1.1 的崩服就是这个）。
+- `zip END header not found` / `Could not add library: <缓存 jar>`：Gradle 缓存里有半截文件（下载被打断）。
+  `gradlew --stop` → 删日志点名那个 jar → 重跑。
+- 没装 AE2 却崩在启动：`integration.ae2` 的类被主代码直接引用了，必须走 `Ae2Compat` 把关（§7.2）。
+
+### 8.5 验证第三方 API 的正确姿势
+
+别凭印象写。用 `javap` 或直接看 `~/.gradle/caches/forge_gradle/...` 里的 jar 核签名；Forge 的
+`patches/*.java.patch` 也在同一处，能确认注入点在不在。
 
 ## 9. 构建与发布
 
-### 构建配置要点（`build.gradle`）
-
-- `archivesBaseName = mod_name.replace(' ', '')` → `MaidConstruction`。
-- `processResources` 的 `filteringCharset = 'UTF-8'` —— 避免 Windows 下 GBK 乱码。
-- `jar.finalizedBy('reobfJar')`；**没有配置 jarJar**。
-- `jar` 会把根目录的 `LICENSE` 打进 `META-INF/LICENSE`。MIT 要求协议随「所有副本」分发，而 `mods.toml` 的 `license` 字段只是一个协议名；`reobfJar` 只重映射 `.class`，这个条目会原样留下。
-- 编译参数带 `-Xlint:deprecation`，所以**新增的过时 API 调用会以警告形式暴露**，别忽略。
-
-### 署名（`mod_authors`）的坑
-
-`gradle.properties` 的 `mod_authors` 是署名的**唯一来源**，它会同时流向：
-
-- `mods.toml` 的 `authors` → 游戏内模组列表的 Authors 行
-- jar 清单的 `Specification-Vendor` / `Implementation-Vendor`
-
-**汉字要写成 `\uXXXX` 转义**（`\u4F0A\u7EB3` = 伊纳）。`java.util.Properties` 按 ISO-8859-1 解析 `gradle.properties`，直接写 UTF-8 汉字会得到乱码。转义在两种解析方式下都成立，所以是最稳的写法。
-
-改完必须重新构建才对已发布的 jar 生效。
-
-### 发布流程
-
-```bash
-# 1. 升版本号
-#    gradle.properties 的 mod_version
-
-# 2. 写更新说明
-#    CHANGELOG.md 顶部加一段，格式：## [x.y.z] - YYYY-MM-DD
-
-# 3. 本地构建验证
-./gradlew build
-
-# 4. 提交并打标签
-git add -A && git commit -m "Release x.y.z"
-git tag vx.y.z && git push origin main && git push origin vx.y.z
-```
-
-推 tag 会触发 `.github/workflows/release.yml`：
-
-1. 构建，失败时把日志末尾 150 行写进 job summary 并上传 `build/reports/`。
-2. 从 `CHANGELOG.md` 用 `awk` 抽当前版本段落作为 Release 说明（**所以 CHANGELOG 的标题格式不能错**）。
-3. `softprops/action-gh-release` 发布，附上 `build/libs/*.jar`。
-4. 顺手把同一个 jar 传到 **CurseForge**（`itsmeow/curseforge-upload`，说明复用第 2 步的 `release_notes.md`）。
-   需要仓库 Secrets：`CF_API_KEY` 与 `CF_PROJECT_ID`；这一步是 `continue-on-error`，CF 挂了不拦 GitHub 发布，
-   但日志里会留红叉，需要手动补传一次。
-
-`workflow_dispatch` 手动触发时只构建、不发版（第 3、4 步都挂在 `refs/tags/v` 上）。
-
-两个容易踩的点：
-
-- **标签要用附注标签**（`git tag -a vx.y.z -m "..."`）。`git push --follow-tags`
-  **只推附注标签**，轻量标签会被静默留下——结果只推了 `main`、Release 压根不触发，
-  而命令行看起来是"推送成功了"。上面那行是显式 `git push origin vx.y.z`，没有这个问题。
-  可以用 `git ls-remote --tags origin` 确认标签是否真的到了远端（附注标签会多出一条
-  `refs/tags/vx.y.z^{}`）。
-- **CHANGELOG 的标题必须严格是 `## [x.y.z]` 开头**。抽说明的 `awk` 用的是
-  `index($0, "## [" ver "]") == 1` 前缀匹配，多一个空格都抽不到，会退化成兜底文案
-  "CHANGELOG.md 里没有 x.y.z 的条目"。本机没有 Git Bash 时，可以用等价的 Python 逻辑
-  先验证一遍再打标签：按行找 `startswith("## [" + ver + "]")` 起抄，遇到下一个 `## [` 停。
-
-### 版本号的语义
-
-- **补丁位**：修 bug、改文案、调数值
-- **次版本位**：行为变更、新增扩展点、换判定逻辑
-- **主版本位**：破坏存档兼容或协议兼容的改动（同时要升 `PROTOCOL_VERSION`）
-
----
+- 构建：`JAVA_HOME` 指到 **JDK 17**，`gradlew build` → `build/libs/MaidConstruction-<版本>.jar`。
+  产物里**不能有第三方类**（AE2 / TLM / Create 一律 `compileOnly`）——审核会看这个。
+- 版本：`gradle.properties` 的 `mod_version`，语义化版本；破坏性改动（改 modid、存档格式）走主版本。
+- 发布：`CHANGELOG.md` 顶部加 `## [x.y.z] - YYYY-MM-DD` → 提交推送 → 打标签 `vX.Y.Z` 推上去。
+  CI 会构建 → 从 CHANGELOG 抽该段当发布说明 → 建 GitHub Release → **自动上传 CurseForge**。
+  - 标题必须**严格**以 `## [x.y.z]` 开头：抽段的 `awk` 是前缀匹配，多一个空格就抽不到，会退化成兜底文案；
+  - CF 那步用仓库 Secrets `CF_API_KEY` / `CF_PROJECT_ID`；它 `continue-on-error`，失败只留红叉，
+    但**别把红叉当没发生**；
+  - `mod_authors` 别写成邮箱——会被解析成"名字 <邮箱>"那套格式，标红。
 
 ## 10. 给 AI 的特别提示
 
-如果你是被要求修改这个项目的 AI，请先读这一节。
+动手前先读 `CHANGELOG` 最近三段与本文 §7：这个项目一半的坑都写在那儿，重复踩一遍不值得。
 
-### 动手前的检查清单
+最容易改错的几条：
 
-1. **读完 [§7 关键陷阱](#7-关键陷阱与设计决策)**。那里每一条都是踩过的坑，重复踩的代价是玩家崩溃或物品丢失。
-2. **确认改动落在哪一层**。核心包（`build`/`schematic`/`item`）不能 import 模组类型；模组相关的逻辑必须走注册链或安全门面。
-3. **改动涉及第三方 API 时，先用 `javap` 验证签名**（见 §8.5）。不要凭记忆写。
-4. **改网络包要同步考虑 `PROTOCOL_VERSION`。**
-5. **改 `Schematic` / `BuildSession` 的数据语义时，检查所有调用方** —— 这两个类被多处依赖，`bill` / `remainingBill` / `shortfall` 的区分尤其容易搞混。
+- `client/` 里的类**不能**被主代码直接引用（专用服务端会 `NoClassDefFoundError`），一律 `DistExecutor` 包一层；
+- 判定"是不是我的指挥台"只走 `canUse`，别看方块实体上那个 `owner`（它会过期，见 §12.1）；
+- 玩家持久数据写 `PlayerData.persisted`，**别写根节点**（根节点不跨死亡，见 §7.23）；
+- 会被增删的集合别用 `List.of` / `List.copyOf` 存（见 2.1.1 崩服）；
+- 改完 `gradlew build`（含单测），**别中途取消**——取消会在缓存里留半截 jar。
 
-### 容易被改错的地方
-
-| 位置 | 风险 |
-|---|---|
-| `BuildSession.bill` vs `remainingBill` | 用途不同，混用会导致反复搬运（§7.5） |
-| `shortfall` vs `pendingBill` | 前者用于判断来源，后者传给 `transferInto`（§7.5） |
-| `BlockEntityRotation` 的实现 | 边搬边查会导致"多转一格"（§6.3） |
-| `Schematic.transformState` | 用的是**原始状态**的值，改成转换后的值会双重旋转（§7.3） |
-| `ProjectionRenderer` 的 `PENDING` 失效条件 | 少一个条件就会在世界里崩溃（§7.4） |
-| `Ae2Compat` | 加入任何 AE2 类型的引用都会破坏软依赖隔离（§7.2） |
-| 渲染循环里调 `Schematic.entries()` | 会为每方块新建对象，大结构下严重卡顿 |
-
-### 这个项目的验证现状
-
-**绝大多数改动只做过编译验证，没有实机测试。** 涉及运行时行为的改动（渲染、AI 状态机、网络同步、实际放置）都需要在游戏里验证。
-
-验证时优先覆盖这些路径：
-
-- 手持蓝图/绑定书右键**容器**（交互顺序）
-- **旋转**一个含 AE2 机器和线缆的结构，然后完整建一遍（§7.3 的两条路径）
-- 让女仆在**材料种类超过 8 种**的结构上施工（取料上限）
-- **缺少材料**时观察提示内容和频率
-- 中途打断女仆、存档重载后恢复（幂等性）
-
-### 代码风格
-
-- 注释写**为什么**，不写**是什么**。这个项目的注释密度较高，都是在解释设计取舍和历史原因 —— 保持这个风格。
-- 面向玩家的文本走翻译键，中英文都要加。
-- 日志用 `BlueprintMod.LOGGER`，区分 `warn`（可恢复）和 `error`（异常）。
-- 可空返回值标 `@Nullable`（`javax.annotation`）。
+验证现状：绝大多数改动只到"编译 + 单测"这一层，实机行为要用户配合验；别把"编译过了"说成"验过了"。
 
 ## 11. 待办
 
-### 展示物料
+### 还开着
 
-> 生成脚本（贴图、图标、指挥台）都在**本地** `tools/` 下：2026-10-03 起不再进版本库。
-> 换配色照样改脚本重跑，只是脚本不再随仓库分发——接手的人拿不到，这一点先知道。
-
-- ~~**模组 logo**~~ **已完成**：原图 `docs/logo-source.jpg`（画好的成品），
-  处理脚本 `tools/make_logo.py`（按比例内缩 1.2% 削掉那圈浅色底 → 缩到 256/512 → 自画圆角遮罩）。
-  产物：`src/main/resources/logo.png`（256，给 `mods.toml` 的 `logoFile`，游戏内模组列表显示它）、
-  `docs/logo-512.png`（发布页上传用）。换图：覆盖 `docs/logo-source.jpg` 再跑一次脚本。
-- **游戏内截图 3~5 张**：蓝图面板/录制、投影 + 女仆施工、进度条三行、学习池界面、说明书翻页。
-- 物品/方块贴图：14 张（`item/` 5 张、`block/` 9 张，其中指挥台是 7 张分面图），由
-  `python tools/make_textures.py` 从原版/AE2 底图改色生成（换配色只改脚本里那几张 ramp 表）。
-
-### 界面缺陷（待确认归属）
-
-- ~~无线女仆终端 / 绑定书的升级槽两排显示重叠~~ **先别当成我们的缺陷**：核过代码，本模组
-  **没有给任何界面加槽位**——无线女仆终端直接继承 AE2 的 `WirelessTerminalItem`，
-  面板、槽位、布局全是官方的；女仆终端与创造女仆接口登记的是 3 个槽（AE2 标准终端的数量），
-  界面也走官方的 `MEStorageMenu`；绑定书**根本没有升级槽**（`BindingBookItem` 里没有任何槽位代码），
-  原来那句"绑定书也有槽位"是写错了。
-- 真正会多出第二排的，是**同样给 AE2 无线终端补槽位的附属模组**（AE2WTLib 那类，猜测）。
-  这类模组自己往同一个界面塞槽，位置由它负责排开；我们的界面就是 AE2 的界面，插不上手。
-- **怎么确认是谁加的**：只装 AE2 + 车万女仆 + 本模组，打开无线女仆终端——应当只有一排 3 个槽，
-  与官方无线终端一致；再把那个附属装回去，多出的一排若与原有槽位叠在一起，就是它的问题。
-  确认前不要改我们的界面：改了只会把官方布局也带歪。
-- 要动的话，唯一该做的是**在资料里说明这属于兼容现象**，别写成"本模组已知缺陷"。
-
-### 对外说明（发布页/介绍文案）
-
-- 写清 **车万女仆（Touhou Little Maid）是必需前置**：`mods.toml` 里写的是软依赖（不装也不崩），
-  但核心玩法"女仆施工"离不开她；**AE2 是可选的**（装上才有无线终端取料那套）。
-- 联机注意事项：模组自带协议版本校验，**客户端与服务端必须装同一个版本**，不匹配会直接拒连。
-
-### 蓝图编辑（调试用）**已完成**
-
-入口在**图纸详情页**（终端里点开一份图纸后的那一页）的「编辑」按钮，进去是 `BlueprintEditScreen`。
-需求原文如下（实现与它一致）：
-
-- **左边照旧是蓝图浏览**（同一份 3D 预览、同一套拖动旋转与分层操作），只是每块都可选。
-- **右边换成物品列表**（JEI / NEI 那种观感）：**搜索栏必须保留**，能按名字筛。物品来源用
-  创造模式物品栏那套全量物品即可，**不硬依赖 JEI**——装了 JEI 的能点，没装的也得能开这个界面。
-- **点左边某一块** → 出现「替换 / 删除」，各自再分两种粒度：
-  - **同类替换**：把这份图里**同一种方块**全部换掉（例如所有橡木木板 → 云杉木板）；
-  - **单方块替换**：只换点中的这一格；
-  - **删除**同理：同类删除与单方块删除。
-- **选了「替换」之后，在右边点要换成的方块**（所以右边列表既是浏览器也是选择器），选中即原路返回；
-  删除不用选东西，点一下执行——危险动作要**二次确认**，与「删除文件」那条规矩一致（第一次只是问一句）。
-
-实现时定下来的几条（与最初的设想有一处不同，见第一条）：
-
-- **不必走网络包，因为图纸库里的图纸是客户端文件**：`SchematicStorage` 那份是"按下投影之后服务端收到的
-  拷贝"，而图纸库（`BlueprintLibrary`）读的是**你自己机器上的文件**。所以编辑是纯客户端的，不改协议号。
-- **改的是"这份图纸"，不是世界**：蓝图只是数据，改它不碰任何已建成的东西；但**拿它施工的结果会变**，
-  所以入口名就叫"编辑（调试）"，界面上还写着会另存。
-- **不原地改一个已经发出去的 id**：`ClientSchematicCache`、指挥台托管的投影、女仆手上的图都按 id 认
-  "同一份结构"。所以**只另存为新图纸**（`<原名>-edit.maidbp`），原图不动——就地改再让各处缓存失效，风险大得多。
-- **同类替换的判据是方块状态、不是方块**：`Schematic.withBlock(..., wholeKind)` 用 `BlockState#equals`，
-  含朝向、半砖上下那类属性；不然"把橡木木板全换掉"只会换掉朝向相同的那几块。
-- 结构本身**不可变**：每次改动返回一份新结构（`new Schematic(...)` 在 `Schematic` 内部，外面拿不到），
-  被换掉/删掉的那一格会**丢掉它的方块实体 NBT**——留着就是一堆谁也读不懂的垃圾数据。
-- **"改一格 / 改一类"不做成开关，做成点选方式**：左键点一格，`Shift` + 左键选"同一种方块的全部"
-  （两者都**描边高亮**，用的是与绘制同一套变换，见 `SchematicPreview.drawHighlights`）。
-  一个开关要玩家先想"我现在是哪种模式"，而点选是"我点哪儿就改哪儿"——手上那一下就是意图。
-- 选中状态存的是**一批坐标**（同类选中的可能上千格），改动时只调一次
-  `withBlock(..., wholeKind)`（同类与它同一条判据），不自己遍历——遍历容易把"改一格"误伤成"改一类"。
-- **撤回栈压的是"改动前的那一份"**：结构不可变，压进去的就是个引用，不占额外内存（因此不设上限也不太糟）。
-- **危险动作按两次**：删除、覆盖原图都沿用「删除文件」那条规矩；另存（`<原名>-edit.maidbp`）不设门槛。
+- **展示物料**：CurseForge / MCMOD 用的**游戏内截图**还没做（分层查看那张最适合放第一张）。
+- **`paused` 是空壳**：`setPaused` 全仓没有调用方——要么补一个暂停按钮，要么把这个字段连同"已暂停"
+  那几条文案一起删掉（倾向删，省得后人以为能用）。
+- **手册里一句待核**：它写着"附近还有别的女仆在建会多写一位"，但 `BuildProgressHud` / `MaidBuildProgress`
+  里没找到对应逻辑——要么补实现，要么把那句删掉。
 
 ### 明确不做（设计取舍）
 
-- **撤销与拆除都不做。** 这里是**真实建造**：材料真被消耗，与目标不一致的方块会被替换
-  （旧方块按战利品表回收，见 `Salvage`），所以既没有"一键回到之前"，也没有"照蓝图拆掉"。
-  建错了就自己拿镐子处理——这是取舍不是缺口，别再当"缺功能"提。
-  真要做，那是另一个玩法（拆除机），得单独设计，不是补漏。
+- 不做"缩放 / 裁切结构"：旋转与镜像够用，再多几种变换只会让"这份图到底是什么"变含糊。
+- 不做云端同步：图纸就是本地文件，拷给别人即可；加服务器反而多一套权限与版本问题。
+- 不做"区块没加载也远程施工"：那台指挥台的区块没加载就什么都不会发生——不替玩家偷偷加载别人家的区块。
 
 ### 候选方向（待讨论）
 
-按"收益 / 成本"粗排，都还没定：
-
-- **图纸格式互操作**：见下一条的清单。这是目前最容易变成"用不起来"的短板——
-  建筑圈的存量图纸大多不在我们的格式里。
-- **蓝图格式加版本字段**：`Schematic.write` 现在没有版本号，以后改格式只能靠校验失败拒载；
-  接外部格式之前先把它加上。
-- **多女仆分工**：同一张图派多只女仆，现在靠放置幂等凑出并行，没有任务切分，进度条也各算各的。
-- **"只补空、不替换"开关**：想保护已有建筑，眼下只能不给她们这张图。
-- **建筑清单导出**：清单只在界面里，不能存成文件分给队友。
-- **施工尺寸上限**：单边 128 / 体积 262144，是网络同步与内存的安全线；要不要为大结构另开一条路待议。
-- **跨模组路径的回归**：AE2 附属补槽位会让界面重叠（见上），Create 蓝图那条刚修过"朝向算两遍"——
-  这类跨模组路径值得再统一走一遍。
-- **导航让位规则**：学习池与施工共用一套导航，现在靠"谁先说话"的人工约定，值得抽成明确规则（§7.13）。
-
-### 图纸格式：现在认什么、缺哪几家
-
-**图纸库只认自家格式**：`.maidbp`（gzip NBT：`size` / `palette` / `blocks` / `block_entities`），
-外加两个老后缀 `.blueprint.nbt` / `.blueprint`（只读，导出统一新后缀）。
-
-**机械动力的蓝图不进图纸库**：它由 `CreateSchematic` 单独读，只在**女仆手上拿着**时才参与施工——
-那张图我们一个字节都不写，完工标记记在 `SchematicStorage` 里（见 §4.2、`MaidBlueprint`）。
-**导出的**只有自家格式。
-
-| 生态 | 格式 | 里面装什么 | 接入成本 |
-|---|---|---|---|
-| Litematica（含原版结构 `.nbt`） | `*.litematic` | NBT：多 region，每 region 一个 palette（`Name` + `Properties` 字符串，**与我们的写法几乎一致**）+ `BlockStates` 的 long 位压缩 | **最低**：语义同构，只差位压缩的读写（照 `PalettedContainer` 那套写），顺带覆盖"原版结构 `.nbt`" |
-| WorldEdit / Sponge Schematic | `*.schem`（Sponge v1/v2/v3） | NBT：`Palette`（状态 → 注册表 varint id）、`BlockData`、`BlockEntities`、`Entities`、`Metadata` | 中等：状态要按注册表数字 id 双向映射，且数字 id 依赖两端模组一致 |
-| 原版结构方块 / 数据包 | `*.nbt`（structure template） | palette + 逐方块的 pos / state / nbt | 低，而且**导出**价值最大：结构方块、数据包、Structure Gel 等都吃它 |
-| 旧的 MCEdit / Schematica | `*.schematic` | 数字 id:meta 的字节数组（1.12 时代） | 不建议：表达不了现代方块状态，只能读个大概 |
-| Axiom | 自有工程格式 | 客户端编辑器的文件 | 不划算：让它那边导出成 litematic / schem 再进来更实际 |
-| Building Gadgets 等模板类 | 各家私有（JSON / NBT 不一） | 剪贴板与模板 | 优先级低，格式稳定性也待核实 |
-
-**建议的顺序**：先"读 `*.litematic`"，再"读 Sponge `*.schem`"，导出先做"原版结构 `*.nbt`"
-（最省事、受众最广）。三者共用同一层 palette ↔ 方块状态转换——先把这层抽出来，
-之后每加一家就只是换个外壳。
+- **按层统计材料**：材料清单现在按整栋算，能不能按"只看这一层"统计（同一份过滤换个出口）。
+- **进度合并**：多只女仆同工地时把进度合成一条。
+- **1.12.2 下探**：TLM 在 1.12.2 有官方版，但渲染与网络那套要重写，成本另算。
 
 ## 12. 蓝图指挥台：托管投影与远程下单（已实现）
 
-下面这四条实现顺序里的每一步都能单独跑起来，**都已完成**（主体在 1.8.0，2.1.0 补的是不分距离/维度）。要点：
+一台方块，三件事：**托管一份图纸的投影**、**收下一批女仆**、**接受开工/停下的口令**。
+完整推演（为什么是方块不是物品、为什么不用 Menu、四步实现顺序）在 `git log --follow -p -- DEVELOPER.md`
+里翻得到，这里只留现在生效的规矩。
 
-- **两件东西、一条绑定链**：**蓝图终端（物品）**是钥匙兼图纸库入口，**指挥台（方块）**放在世界里干活。
-  拿终端右键指挥台即完成绑定，**绑定是玩家私有的**（每台指挥台记住它属于谁），
-  绑定之后才能在界面里指派女仆。状态挂方块实体——存档天然、多人各用各的、可以长期挂着。
-- **投影与口令不看距离、也不看维度**（2.1.0 起）：判定是"那台的**区块加载着** + 你是它的绑定主人"。
-  目标由服务端按**你现在绑定的那一台**解析（`CommandPostBindings.current`），客户端包里带的那个坐标
-  只当提示——这样远距离、跨维度托管都成立，而且"能动哪台"依旧只有一处判据。原来那处射程写成
-  `64.0D`（＝8 格²），离远一点就被静默丢掉，是"投影没反应"那类报障的来源。
-- **右键指挥台看三样**：当前投影的蓝图、指派给它的女仆、以及各自的建筑进度。
-- **绑定语义**（先定死，免得以后打架）：一台指挥台只属于一个绑定玩家（可解绑换人）；
-  一只女仆同一时间只绑一台指挥台——"她该建哪处工地"必须唯一，这也是现有施工模型的前提。
-- **一个玩家也只能绑一台**（2.0.0 补的）：绑第二台**自动解绑第一台**。为什么不靠"每台自己记"就够：
-  换绑时第一台多半在几百格外的**未加载区块**里，连它的方块实体都取不到，"把第一台解绑"无从下手
-  ——所以"现在绑的是哪一台"另记一份，**按玩家**记在持久数据里（`server/CommandPostBindings`，
-  写的是 `PlayerData.persisted` 那一层，见 §7.23：根节点死一次就丢）。
-  判定一律以这份记录为准（`canUse` = owner 是他 **且** 记着他现在绑的就是这一台）；方块实体上那个
-  `owner` 只用来显示"谁绑的"与拦住别人——它是**会过期的**（旧那台没加载时清不掉；等他哪天走回去
-  再右键一次，两处又对上了，这也是老存档第一条记录的就地认下方式）。
-  客户端那份镜像同一套规矩：`CommandPostProjections.update` 看到某台刚变成"是他的"，就把别处同名
-  的 owner 划掉——`nearestMine` 于是不会再挑中旧那台。
-  **漏掉这一条会怎样**：绑了两台之后从终端指派，`nearestMine` 挑的是**最近**那台、不是放着投影的
-  那台，指派就落到空台上——表现正是"指派了女仆没反应"（1.8.3 报上来的就是这个）。
-- **"我绑的是哪一台"要推给客户端**（`S2CPostBindingPacket`，协议 15）：登录时一次，加上每次绑定 /
-  换绑 / 解绑之后（`CommandPostBindings.send`）。为什么非推不可：那份记录在**服务端的玩家持久数据**里，
-  而提示是客户端画的；客户端自己那张 `CommandPostProjections` 只记**加载过的**指挥台，
-  走远了就查不到——可"我绑的那台在哪"恰恰是走远了才想看的东西。
-  终端物品的提示读的就是这一份（`ClientPostBinding.describe()`：同维度只报坐标，跨维度带上维度名，
-  不然那串数字会把人引到错的坐标上），退出世界时清掉（与名册同一处，`ProjectionRenderer.onLoggingOut`）。
-- **投影的可见性**：托管投影对所有人显示（全息本来就是给人看的，队友也能围观），
-  但**只有绑定玩家**能暂停、取消、改指派。
-- **投影由终端托管**：不再是"手持才显示"，放下去就在，**除非在终端里取消**。
-  它是客户端投影的四个来源之一（正在摆的投影 &gt; 自己手持 &gt; 指挥台托管 &gt; 附近女仆手持），见
-  `ProjectionRenderer.projectionSource`。
-- **一次性下单**：选图 → 右键方块定面（与锚点定位同一套）→ 选女仆（**可多选**）→
-  结构 id、锚点、朝向**一次性**落在指挥台上，之后她照单自己干，不再回调终端。
-  材料清单**不随单传递**：她拿结构和工地的现状现算（与"手上拿着蓝图"那条走的是同一套取料逻辑）。
-- **停下只有两条路**：手动改她的工作模式（原有机制），或者在终端里**收回口令 / 取消投影**。
-  收回口令 = 保住进度停下（再点一次「开始建造」就接着干）；取消投影 = 撤单，投影随之消失。
-  不做"超时自动撤单"——全息投影挂着不碍事，撤单必须是人点的。
-- **多女仆**：同一张图可以分给多只，靠放置幂等凑并行；界面必须把进度**合并**显示
-  （三只各报各的百分比对主人没有意义）。
-- **停工的边界**：终端被拆 = 撤单并让她们停下，别留一个谁也管不着的工地。
-- 女仆列表要显示"长相"：渲染她的 3D 形象必须碰 TLM 的客户端类，按老规矩关进
-  `MaidClientBridge`，没装 TLM 的客户端不许加载到那些类（1.6.3 崩过的那一类）。
+### 12.1 状态与所有权
 
-实现顺序（每一步都要能单独跑起来）：
+- 状态挂方块实体：`owner`、`schematicId` + `anchor` + `rotation`/`mirror`、`maids`、`started`、`completed`。
+- **一台只属于一个绑定玩家**（可解绑换人）；**一个玩家也只能绑一台**：绑第二台自动解绑第一台。
+  "现在绑的是哪一台"另记一份、**按玩家**存在持久数据里（`server/CommandPostBindings`）——
+  换绑时旧那台多半在未加载区块，够不着它的方块实体。
+- 判定一律走 `canUse` = `owner 是他` **且** 记录里他绑的就是这一台。方块实体上那个 `owner` 只用于显示
+  与拦别人，它是**会过期的**（旧那台没加载时清不掉）。
+- 客户端同一套规矩：`CommandPostProjections.update` 看到某台刚变成"是他的"，就把别处同名的 owner 划掉，
+  `nearestMine` 于是不会再挑中旧那台（漏掉这条的表现是"指派了女仆没反应"）。
+- **"我绑的是哪一台"要推给客户端**（`S2CPostBindingPacket`）：登录一次 + 每次绑定/换绑/解绑之后。
+  客户端自己那张表只记**加载过的**指挥台，走远了就查不到。
 
-1. ~~方块 + 方块实体 + 状态存档 + 打开界面（复用图纸库 / 详情页）~~ **已完成**
-2. ~~托管投影：状态同步（数据小，全局发）+ 结构数据按需点播（复用现有请求包）~~ **已完成**：
-   - **绑定**：拿蓝图终端右键指挥台（`C2SBindCommandPostPacket`，潜行 = 解绑）。走 `onItemUseFirst`
-     而不是 `useOn`，这样绑定这一下不会顺带把界面打开；两端判定条件一致（点到指挥台就吃掉），
-     否则会出现"界面时开时不开"。想看界面就空手右键。
-   - **放投影：图纸库里点「投影」→ 回到世界摆位置与朝向**。入口在图纸详情页：
-     进图纸库 → 点开一份 → 点「投影」。**不需要手上拿着蓝图**——库里那些东西是**客户端硬盘上的文件**，
-     服务端读不到，所以文件字节先留在客户端会话里，等按 E 定下时才随位置与朝向一起发出去
-     （`C2SCommandPostProjectionPacket`，服务端存成一份结构数据、指挥台记它的 id；
-     渲染、施工、别人围观都照旧按 id 走）。
-   - **定位用的是"在世界里"那一套**（`BlueprintRecordSession` 的 PROJECT 模式）：不给能力、
-     摘掉原版那两个键、屏幕角上写提示——与录制共用同一副架子，差别只有三处：
-     右键选的是**一个位置**（结构最小角钉在那儿）、方向键留给**朝向**（`←`/`→` 转 90°、`↑`/`↓` 翻面）、
-     `R` 是"清空位置"而不是"重来一遍"。世界里的线框按结构尺寸与当前旋转画（转 90° 时宽长互换），
-     尺寸在进入时解一次就够——每帧解一份几千方的结构只为画个框，不值。
-   - **放到哪一台**：从某台指挥台的界面进库的话就是那一台（坐标一路带进详情页）；
-     从终端进的话取**最近一台属于我的**（客户端那张表记了每台的主人）。一台都没有就在界面上说一句。
-   - **取消投影**在指挥台界面里点。界面里的反馈必须画在界面里（§7.17），所以前提判断客户端先做一遍、
-     服务端再验一次。
-   - **客户端那张投影表**（`CommandPostProjections`）**不靠新包**：登记挂在方块实体的 `load` 上
-     ——区块加载带的整份 NBT 与状态变更的更新包都会经过它；`setRemoved` 时划掉。
-     于是"走远了方块实体被卸掉、投影自己就没了"是白来的，也不必维护"该发给谁"。
-   - **渲染**把"来源"抽成了 `ProjectionSource`（id / 名字 / 朝向 / 翻面 / 锚点），按
-     **正在摆的投影 &gt; 自己手持 &gt; 指挥台托管 &gt; 附近女仆** 取第一个可用的；结构本体仍按需点播（同一个 id 那套）。
-3. ~~指派施工：给 `BlueprintBuildController` 加"外部指派"来源~~ **已完成**：
-   - `server/CommandPostAssignments`：女仆 → 指挥台（带维度）的**索引**。真相在指挥台的方块实体里
-     （它记着指派了哪些女仆），索引随方块实体 `load` 重建、`setRemoved` 划掉——不另存一份，
-     两份记录一旦对不上，女仆会照着一份过期名单干活。
-   - `BlueprintBuildController.tick`：手上没图时先问"有没有指挥台指派我"（`Assigned.NONE / IDLE / BUILD`）。
-     取数只在"从哪儿来"上分岔（`refreshAssignedSession` 从方块实体取 id/锚点/朝向），
-     建会话、算 `siteId`、站位那段与蓝图那条**共用**（抽成了 `afterSessionBuilt`）——
-     同一个工地走两条路进来，客户端的进度条认得出是同一处。
-   - 完工记在**指挥台**上（新增 `completed` 字段与存档）；**取消投影 = 撤单**，挂在上面的女仆一并撤下。
-4. ~~女仆列表~~ **已完成**（下单、进度合并、暂停都已落地）：
-   - `server/MaidOwnership`：**主人 → 他的女仆**（UUID + 名字 + 维度）。**进游戏时扫一遍**
-     （`MaidOwnershipTracker`，注册在 `MaidExtension` 里——那段只在女仆模组存在时执行，
-     否则类里的 `EntityMaid` 会让没装女仆的客户端 NoClassDefFoundError，见 §7.10）。
-     没进过表的只有"从没被加载过"的女仆，那基本只发生在"后来才装这个模组"的时候。
-   - `MaidRoster`（客户端）+ `C2SMaidListRequestPacket` / `S2CMaidListPacket`：名单与"已指派到哪台"
-     **一次给全**，分两次发只会出现"名单到了、状态还没到"的一帧错位。
-   - 名单**单开一个界面**（`MaidRosterScreen`）：每只一张卡、画成 3D 立绘——姓名那行文字认不出是谁。
-     立绘走原版实体渲染（`InventoryScreen.renderEntityInInventoryFollowsMouse`），实体按 UUID 在
-     `entitiesForRendering()` 里找（客户端没有按 UUID 查的入口）；她不在附近就只画名字。
-     **指挥台界面与蓝图终端都只留一个「女仆」按钮**：指挥台那点地方连"名字 + 状态"都摆不下，
-     更摆不下立绘（早先挤在图纸库底部时，窗口被顶出了屏幕）。
-     点卡片即指派：从指挥台进来指**这一台**，从终端进来指**最近一台属于我的**（远程指派）。
-   - 指派时**远处的直接传送**到指挥台上方一格（`teleportTo`）；她的区块没加载时先记下指派，
-     等她加载后自己开工。只能指派**自己的**女仆——UUID 是客户端给的，先用那张表认一遍。
-   - **指派必须把她的工作模式一并切过来**（`BlueprintBuildTask.employ/release`，与「工业模式」同一套）：
-     `MaidBuildTickHandler` 只在她的任务是「蓝图建造」时才驱动她（那道闸门有意为之，免得别的模式下
-     她突然开始搬方块），而指派只改指挥台那一侧的状态——不切模式，界面里看着就是"指派了没反应，
-     她照旧种地"。切换按**边沿**做（只在她刚被指派、刚被撤单时动一次）：她干活期间主人手动换了模式，
-     那是主人的意思，不该被一直掰回来。**还没放投影时她就是这个模式在空转 = 待命**，
-     不干扰别的活；投影放下之后也还是待命，要等口令。
-   - **开工要有一道口令**（`CommandPostBlockEntity.started`，默认 false）：放投影、指派女仆都只是
-     **准备**，准备不该等于开工——玩家常常要先把她叫齐、把料备好，而"女仆自己就开踢"这种设计
-     一旦遇上"我先放个投影看看位置对不对"，代价就是她当场跑去搬方块。控制器那道闸门就在
-     `BlueprintBuildController.ensureAssignedSession` 里（没口令 = `IDLE`），界面上的「开始建造 / 停下」
-    走 `C2SCommandPostStartPacket`（校验与放投影同一套：不看距离与维度，只认"那台的区块加载着 +
-    他是绑定它的那个玩家"）。换投影、撤投影都会把口令收回
-    （`placeProjection`/`clearProjection` 里置 false），因为那是新工地了。
-     `CommandPostBlockEntity.paused` 这个字段**目前没有写入点**：暂停实际就是"收回口令"，
-     状态判定里留着它是为将来做真正的暂停（要另加一个包）——别以为它已经在用。
-   - **状态只有两个，而且由服务端算**：`S2CMaidListPacket.Status` 是 空闲 / 待命 / 正在建——
-     判据就是上面那道闸门那一组（有投影 + 有口令 + 没暂停没完工 = 正在建）。**不能让客户端自己
-     照方块实体猜**：名册里可能有别处的指挥台，那台的方块实体客户端根本没同步。界面那一侧
-     （女仆卡片、终端主页）共用 `MaidRoster.statusText/statusColor`，两处不会写出两个说法。
-   - **终端主页**（`BlueprintHomeScreen`）是"工地现在怎么样"：指挥台在哪、托着哪张图、哪一步、
-     我的女仆各自在干嘛，外加「开始建造」那一下。图纸库回答的是另一个问题（"我有哪些图纸"），
-     所以它退成了一页（右键终端 → 主页 →「图纸库」）。指挥台的状态整份随方块实体的更新包同步，
-     界面每帧读它就行，不必再开一份客户端缓存。
+### 12.2 投影与口令：不看距离、不看维度
+
+判定是"那台的**区块加载着** + 你是它的绑定主人"。目标由服务端按**你现在绑定的那一台**解析
+（`CommandPostBindings.current`），包里的坐标只当提示——所以包体与协议号都没动。
+（原来是 64 格射程，还写成 `64.0D`＝8 格²，离远一点就被静默丢掉。）
+
+### 12.3 女仆怎么知道该建哪处
+
+优先级：**手上那张图** > **指挥台指派** > 没有。指派走 `server/CommandPostAssignments`（女仆→指挥台，带维度）。
+把蓝图交给女仆时会把那张图**收走**，免得"她手上那张"与"指挥台那份"各说各的。
