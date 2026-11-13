@@ -1,5 +1,6 @@
 package com.example.blueprint.item;
 
+import com.example.blueprint.Advancements;
 import com.example.blueprint.client.ManualScreenOpener;
 import com.example.blueprint.registry.ModItems;
 import net.minecraft.network.chat.Component;
@@ -63,8 +64,18 @@ public class ManualItem extends Item {
         if (level.isClientSide) {
             // DistExecutor 包一层：服务端不会去加载客户端的界面类（与蓝图终端同一条规矩）
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> ManualScreenOpener::open);
+        } else {
+            // 翻开就算"拿到"——说明书不再由模组硬塞给人（见类注释），
+            // 这条进度总得有个发放点，否则它下面挂的"开工""建完"在进度界面里一直是隐藏的
+            Advancements.grant(player, Advancements.GUIDE_BOOK);
         }
         return InteractionResultHolder.success(stack);
+    }
+
+    /** 合成出来的那一刻也算拿到（那份"翻开才给"留着兜住创造栏拿的、别人递过来的） */
+    @Override
+    public void onCraftedBy(ItemStack stack, Level level, Player player) {
+        Advancements.grant(player, Advancements.GUIDE_BOOK);
     }
 
     @Override

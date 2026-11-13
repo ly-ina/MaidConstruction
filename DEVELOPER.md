@@ -85,7 +85,6 @@ com.example.blueprint
 ├── BlueprintConfig         配置项（config/maidconstruction-common.toml，一律走静态读取方法）
 ├── BlueprintCommand        /maidconstruction list | where | stop
 ├── Advancements            进度（advancement）发放：判据全是 impossible，只能由代码给
-├── ManualGiveaway          首次进服发一本说明书（"发过没有"记在玩家持久数据里）
 ├── block/
 │   ├── CommandPostBlock
 │   └── CommandPostBlockEntity  ★ 指挥台：投影 / 指派 / 口令 / 完工，状态随 BE 同步
@@ -948,7 +947,8 @@ owner.sendSystemMessage(component);              // 聊天栏：同上
 
 **别跟着改的两样**（改了会直接伤到人）：
 
-- 玩家持久数据里的键（`ManualGiveaway.GIVEN_TAG`）——它不是注册名，改了等于给每个进过服的人重发一次说明书；
+- 玩家持久数据里的键（`CommandPostBindings` 那两个 `maidconstruction:bound_post_*`）——它不是注册名，
+  改了等于让每个人丢掉"我绑的是哪一台"（而旧那台可能远在未加载区块里，没法就地补回来）；
 - Java 包名与类名（`com.example.blueprint`）——只是路径，对加载没有影响，改了白改。
 
 **改名的实操顺序**（照它走不容易漏）：`gradle.properties` 与 `MOD_ID` → 资源目录 `git mv` →
@@ -1015,6 +1015,10 @@ owner.sendSystemMessage(component);              // 聊天栏：同上
 **刚学会的做法"摆法"是空的、只剩配方 id**（时好时坏，每格正好 1 个时才必现） ——
 录入时存了合成格的活引用，材料被扣减后摆法跟着空了，见 §7.14。
 
+**女仆死亡时服务器崩溃**（`Ticking entity` + `UnsupportedOperationException`，栈里是
+`MaidOwnership.forget`） —— 表里存的是 `List.copyOf` 那种不可变列表，之后又对它 removeIf。
+2.1.1 已改成"整份换掉"。**凡是往里增删的集合，别用 `List.copyOf` / `List.of` 存**。
+
 ### 8.5 验证第三方 API 的正确姿势
 
 **不要凭记忆或推测写第三方模组的 API。**
@@ -1062,6 +1066,30 @@ javap -p -c -cp xxx.jar <全限定类名>
 要么只能跳两端，中间那段全靠蒙；拖动是连续的，而且条的长短本身就把"这楼多高、现在在几分之几"
 画了出来。另外拖条与"拖动转视角"共用同一块预览：**按下时先判拖条**（`draggingLayer`），
 否则一拖就把视角也转了。
+
+### 7.23 玩家持久数据的根节点不跨死亡
+
+`player.getPersistentData()` 的**根节点**会进存档、重登也还在，但**死一次就没了**。Forge 在
+`ServerPlayer#restoreFrom`（重生，以及"死亡后重进"走的同一条）里只复制一个子标签：
+
+```java
+CompoundTag old = oldPlayer.getPersistentData();
+if (old.contains(PERSISTED_NBT_TAG))          // PERSISTED_NBT_TAG = "PlayerPersisted"
+    getPersistentData().put(PERSISTED_NBT_TAG, old.get(PERSISTED_NBT_TAG));
+```
+
+所以：
+
+- **"一辈子只该做一次"的玩家标记**（发过什么、绑着哪台指挥台）写 `PlayerData.persisted(player)`
+  那一层。写根节点的后果是"死一次就忘了"——表现成"怎么又给我发了一遍""终端不认这台了"，
+  而且**重登测不出来**（重登读的是存档里那份根节点，只有重生会换一个玩家实体）。
+- **确实只该活这一条命的状态**才留在根节点：死了就该清掉的临时标记。
+- 老版本写在根上的键，用 `PlayerData.adoptLegacyRootKeys(player, keys...)` 搬进 `PlayerPersisted`，
+  升级时才不会把每个人已有的记录清空。
+
+这条是 2.1.1 的报障查出来的（"死亡重生后退出再进又收到一本说明书，反复死亡反复发"）：
+那次顺手把"首次进服送说明书"整个去掉了——**书不送了**，要的人自己用一本书加一张纸做，
+创造栏里也有一份。现在这条路上只剩指挥台的绑定记录，`CommandPostBindings` 已改到 `PlayerData`。
 
 ## 9. 构建与发布
 
@@ -1307,7 +1335,7 @@ git tag vx.y.z && git push origin main && git push origin vx.y.z
 - **一个玩家也只能绑一台**（2.0.0 补的）：绑第二台**自动解绑第一台**。为什么不靠"每台自己记"就够：
   换绑时第一台多半在几百格外的**未加载区块**里，连它的方块实体都取不到，"把第一台解绑"无从下手
   ——所以"现在绑的是哪一台"另记一份，**按玩家**记在持久数据里（`server/CommandPostBindings`，
-  与"发过说明书没有"同一个口袋）。
+  写的是 `PlayerData.persisted` 那一层，见 §7.23：根节点死一次就丢）。
   判定一律以这份记录为准（`canUse` = owner 是他 **且** 记着他现在绑的就是这一台）；方块实体上那个
   `owner` 只用来显示"谁绑的"与拦住别人——它是**会过期的**（旧那台没加载时清不掉；等他哪天走回去
   再右键一次，两处又对上了，这也是老存档第一条记录的就地认下方式）。

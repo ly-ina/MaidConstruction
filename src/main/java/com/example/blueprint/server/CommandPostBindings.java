@@ -27,8 +27,9 @@ import javax.annotation.Nullable;
  * 第一台多半在几百格外的**未加载区块**里——连它的方块实体都取不到，"把第一台解绑"就无从下手。
  * 于是"现在绑的是哪一台"必须**按玩家**另记一份。
  * <p>
- * <b>为什么放在玩家的持久数据里</b>：它本来就是"这个人的一件事"，跟着存档走、跨维度也在、重登还在
- * （与 {@code ManualGiveaway} 那条"发过说明书没有"同一个口袋）。
+ * <b>为什么放在玩家的持久数据里</b>：它本来就是"这个人的一件事"，跟着存档走、跨维度也在、重登还在。
+ * 写的是 {@link PlayerData#persisted} 那一层而**不是根节点**：根节点上的键死一次就没了，
+ * 表现是"死回来之后终端不认这台指挥台了"（同一个坑的完整解释在那个类里）。
  * <p>
  * <b>旧 owner 是一句过期的话</b>：换绑时旧那台若没加载，它方块实体上的 {@code owner} 清不掉。
  * 所以"这台归他管吗"一律以这份记录为准（见 {@link #isCurrent} / {@link #canUse}），
@@ -51,7 +52,9 @@ public final class CommandPostBindings {
     /** 他现在绑的是哪一台；没绑过返回 null */
     @Nullable
     public static GlobalPos current(ServerPlayer player) {
-        CompoundTag data = player.getPersistentData();
+        // 老版本写在根节点上：搬过来再读，免得升级之后"绑着的那台"凭空消失
+        PlayerData.adoptLegacyRootKeys(player, KEY_DIMENSION, KEY_POS);
+        CompoundTag data = PlayerData.persisted(player);
         if (!data.contains(KEY_DIMENSION) || !data.contains(KEY_POS)) {
             return null;
         }
@@ -124,13 +127,13 @@ public final class CommandPostBindings {
     }
 
     private static void remember(ServerPlayer player, GlobalPos post) {
-        CompoundTag data = player.getPersistentData();
+        CompoundTag data = PlayerData.persisted(player);
         data.putString(KEY_DIMENSION, post.dimension().location().toString());
         data.putLong(KEY_POS, post.pos().asLong());
     }
 
     private static void forget(ServerPlayer player) {
-        CompoundTag data = player.getPersistentData();
+        CompoundTag data = PlayerData.persisted(player);
         data.remove(KEY_DIMENSION);
         data.remove(KEY_POS);
     }

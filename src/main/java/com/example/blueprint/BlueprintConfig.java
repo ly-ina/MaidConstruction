@@ -34,7 +34,6 @@ public final class BlueprintConfig {
     private static ForgeConfigSpec.ConfigValue<String> CREATIVE_ITEM_MODE;
     private static ForgeConfigSpec.IntValue STEP_OUT_GRACE_TICKS;
     private static ForgeConfigSpec.BooleanValue ALLOW_HARD_MOVE;
-    private static ForgeConfigSpec.BooleanValue GIVE_GUIDE_BOOK;
 
     /**
      * 出厂设置。取不到配置时就用这些，别让"配置没加载"变成"功能坏掉"。
@@ -52,7 +51,6 @@ public final class BlueprintConfig {
     private static final int DEF_PROGRESS_RADIUS = 16;
     private static final int DEF_STEP_OUT_GRACE_TICKS = 40;
     private static final boolean DEF_ALLOW_HARD_MOVE = true;
-    private static final boolean DEF_GIVE_GUIDE_BOOK = true;
     private static final String DEF_CREATIVE_ITEM_MODE = "blocks";
     /** 创造女仆接口可以列出的范围（{@code maidconstruction-common.toml} 里那一项的取值） */
     private static final List<String> CREATIVE_ITEM_MODES = List.of("blocks", "all");
@@ -134,13 +132,6 @@ public final class BlueprintConfig {
                         "关掉的话她就就地开工：好处是绝不会看见瞬移，坏处是可能在自己砌的墙里留个洞。")
                 .define("allow_hard_move", DEF_ALLOW_HARD_MOVE);
         builder.pop();
-
-        builder.comment("说明书").push("guide_book");
-        GIVE_GUIDE_BOOK = builder
-                .comment("玩家第一次进这个存档时，发一本《女仆建筑说明书》（原版成书，能翻页）。",
-                        "关掉也不会让人抓瞎：说明书可以用「一本书 + 一张纸」自己合成。")
-                .define("give_on_first_join", DEF_GIVE_GUIDE_BOOK);
-        builder.pop();
     }
 
     /** 施工是否按作息表来 */
@@ -186,11 +177,6 @@ public final class BlueprintConfig {
     /** 让位时间用完她还没走出去时，允不允许直接把她挪到落脚点上 */
     public static boolean allowHardMove() {
         return read(ALLOW_HARD_MOVE, DEF_ALLOW_HARD_MOVE);
-    }
-
-    /** 新玩家第一次进这个存档时，发不发说明书 */
-    public static boolean giveGuideBookOnFirstJoin() {
-        return read(GIVE_GUIDE_BOOK, DEF_GIVE_GUIDE_BOOK);
     }
 
     /** 创造女仆接口只申报可放置的方块吗（false 就是申报全部物品） */

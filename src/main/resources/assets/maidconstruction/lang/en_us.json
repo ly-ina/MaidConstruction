@@ -17,7 +17,6 @@
   "task.maidconstruction.industry.desc": "Works through the orders placed in her study pool: fetches materials from storage, crafts them by hand, and only during her working hours",
 
   "gui.maidconstruction.build_progress": "%s left · %s%%",
-  "manual.maidconstruction.given": "You received the Maid Construction guide book - right-click to read it.",
   "advancements.maidconstruction.root.title": "Maid Construction",
   "advancements.maidconstruction.root.description": "Start directing maids with blueprints",
   "advancements.maidconstruction.guide_book.title": "The Guide Book",

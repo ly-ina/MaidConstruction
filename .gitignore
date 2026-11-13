@@ -26,7 +26,9 @@
 *.launch
 
 # 临时诊断目录：核对第三方 API 时下载的 jar，不该进仓库
+# （两个写法都认：老的是带点的 .ae2check，现在实际用的是 ae2check/）
 /.ae2check/
+/ae2check/
 
 # 提交信息临时文件（Windows 下 cmd 会吞引号，只能走文件）
 /commit_msg.txt

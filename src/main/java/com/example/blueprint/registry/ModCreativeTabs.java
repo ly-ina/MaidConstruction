@@ -31,8 +31,8 @@ public final class ModCreativeTabs {
                     .displayItems((params, output) -> {
                         output.accept(ModItems.BLUEPRINT.get());
                         output.accept(ModItems.BLUEPRINT_TERMINAL.get());
-                        // 说明书只能"送"（新玩家第一次进世界，见 ManualGiveaway），
-                        // 但玩家把它弄丢之后总得有个地方再拿一本——就摆在这儿
+                        // 说明书不再由模组硬塞（2.1.1 起取消"首次进服送一本"）：
+                        // 想看得自己做（一本书 + 一张纸），创造模式在这栏里直接拿
                         output.accept(ManualItem.create());
                         output.accept(ModItems.BINDING_BOOK.get());
                         // 指挥台与 AE2 无关，谁都能用；AE2 那几个终端在下面单独加

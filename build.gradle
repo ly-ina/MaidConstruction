@@ -48,8 +48,16 @@ minecraft {
     }
 }
 
+// 本地核对用的原始 jar 目录：项目下的 ae2check/、或它外面那层 MyMod/ae2check/ 都认
+def localModDirs = [file('ae2check'), file('../ae2check')].findAll { it.isDirectory() }
+
 repositories {
     mavenCentral()
+
+    // 本地 jar 必须走 flatDir：{@code fg.deobf} **不认 files(...) 依赖**——
+    // 它只会甩一句 "files(...) dependencies are not deobfuscated"，然后拿 SRG 名去编译，
+    // 结果满屏 cannot find symbol。flatDir 才是它能反映射的形状。
+    localModDirs.each { dir -> flatDir { dirs dir } }
 
     // 车万女仆通过 Modrinth Maven 分发（TLM 官方推荐的依赖方式）
     maven {
@@ -95,18 +103,49 @@ processResources {
     }
 }
 
+// 本地核对用的原始 jar：有就直接拿它编译，没有才走 Modrinth 下载。
+// 为什么要这两个 jar：compileOnly 也要求在编译期 classpath 上解析得到那些类——
+// integration.maid 里直接写了 EntityMaid、integration.ae2 里直接写了 appeng.*；
+// 而 fg.deobf 还得先拿到原始 jar 做一次 SRG → 官方名的反向映射。
+// 这里按文件名通配找、再从文件名反推 flatDir 要的 "name:version"（flatDir 不看 group，
+// 只认 <name>-<version>.jar），所以换 jar 版本时不必改脚本。
+def localModNotation = { String pattern ->
+    for (def dir : localModDirs) {
+        def found = fileTree(dir) { include pattern }.files.find { true }
+        if (found != null) {
+            def base = found.name.substring(0, found.name.length() - '.jar'.length())
+            int dash = base.indexOf('-')
+            if (dash > 0) {
+                return "local:" + base.substring(0, dash) + ":" + base.substring(dash + 1)
+            }
+        }
+    }
+    return null
+}
+def localTlm = localModNotation('*ouhou*maid*.jar')
+def localAe2 = localModNotation('*appliedenergistics2*.jar')
+
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // 车万女仆（软依赖：运行时未安装也不会崩溃，靠 @LittleMaidExtension 反射加载）
-    compileOnly fg.deobf("maven.modrinth:touhou-little-maid:${tlm_version}")
-    runtimeOnly fg.deobf("maven.modrinth:touhou-little-maid:${tlm_version}")
+    if (localTlm != null) {
+        compileOnly fg.deobf(localTlm)
+        runtimeOnly fg.deobf(localTlm)
+    } else {
+        compileOnly fg.deobf("maven.modrinth:touhou-little-maid:${tlm_version}")
+        runtimeOnly fg.deobf("maven.modrinth:touhou-little-maid:${tlm_version}")
+    }
 
     // AE2 也是软依赖，但故意只进编译期、不加 runtimeOnly：
     // 整合包装了 AE2 就能从 ME 网络取料，没装则一切照旧。
     // 相关代码全部关在 integration.ae2 包里，运行时由 Ae2Compat 把关，
     // 避免没装 AE2 时触发 NoClassDefFoundError。
-    compileOnly fg.deobf("maven.modrinth:ae2:${ae2_version}")
+    if (localAe2 != null) {
+        compileOnly fg.deobf(localAe2)
+    } else {
+        compileOnly fg.deobf("maven.modrinth:ae2:${ae2_version}")
+    }
 
     // 单元测试：只测**不碰 Minecraft 运行时**的那部分纯逻辑。
     // 这一轮反复改错的几处（客户端进度记账、站位判据、进度只往前不往回）恰好都是纯逻辑，
