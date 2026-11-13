@@ -67,7 +67,8 @@ public class ManualScreen extends Screen {
     /** 目录里那一行的名字：正文第一行去掉【】，没有标题行就退回第一行原文 */
     private static String labelOf(String body) {
         int end = body.indexOf('\n');
-        String first = (end < 0 ? body : body.substring(0, end)).replace("【", "").replace("】", "").trim();
+        String first = (end < 0 ? body : body.substring(0, end))
+                .replace("【", "").replace("】", "").replace("[", "").replace("]", "").trim();
         return first.isEmpty() ? "?" : first;
     }
 
@@ -182,7 +183,8 @@ public class ManualScreen extends Screen {
             //   【…】本章标题（金色 + 下面一条短线）
             //   ※ …  注意事项（偏橙，缩进）
             //   · …  操作步骤（正常色，缩进）
-            if (line.startsWith("【")) {
+            // 中文标题用【】，英文标题用 [，两种都当标题画
+            if (line.startsWith("【") || line.startsWith("[")) {
                 graphics.drawString(this.font, line, x, y, COLOR_HEADING, false);
                 int rule = Math.min(width, this.font.width(line));
                 graphics.fill(x, y + LINE_HEIGHT - 3, x + rule, y + LINE_HEIGHT - 2, 0xFF5A4A18);
