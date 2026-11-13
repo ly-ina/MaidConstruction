@@ -80,7 +80,7 @@ public class C2SMaidListRequestPacket {
         }
         if (!(level.getBlockEntity(postPos) instanceof CommandPostBlockEntity post)
                 || post.getSchematicId() == null
-                || !post.isStarted() || post.isPaused() || post.isCompleted()) {
+                || !post.isStarted() || post.isCompleted()) {
             return S2CMaidListPacket.Status.STANDBY;
         }
         return S2CMaidListPacket.Status.BUILDING;

@@ -47,7 +47,6 @@ public class CommandPostBlockEntity extends BlockEntity {
     private static final String KEY_ANCHOR = "Anchor";
     private static final String KEY_ROTATION = "Rotation";
     private static final String KEY_MIRROR = "Mirror";
-    private static final String KEY_PAUSED = "Paused";
     private static final String KEY_COMPLETED = "Completed";
     private static final String KEY_STARTED = "Started";
     private static final String KEY_MAIDS = "Maids";
@@ -70,8 +69,6 @@ public class CommandPostBlockEntity extends BlockEntity {
     private BlockPos anchor;
     private Rotation rotation = Rotation.NONE;
     private Mirror mirror = Mirror.NONE;
-    /** 暂停：保住进度停下，撤单才是把投影一起取消 */
-    private boolean paused;
     /** 这台托的那份建完了：建完就不再派她往工地跑（与蓝图上的完工标记同一条规矩） */
     private boolean completed;
     /**
@@ -138,15 +135,6 @@ public class CommandPostBlockEntity extends BlockEntity {
 
     public Mirror getMirror() {
         return mirror;
-    }
-
-    public boolean isPaused() {
-        return paused;
-    }
-
-    public void setPaused(boolean value) {
-        this.paused = value;
-        markUpdated();
     }
 
     public boolean isStarted() {
@@ -284,7 +272,6 @@ public class CommandPostBlockEntity extends BlockEntity {
         }
         tag.putInt(KEY_ROTATION, this.rotation.ordinal());
         tag.putInt(KEY_MIRROR, this.mirror.ordinal());
-        tag.putBoolean(KEY_PAUSED, this.paused);
         tag.putBoolean(KEY_COMPLETED, this.completed);
         tag.putBoolean(KEY_STARTED, this.started);
 
@@ -313,7 +300,6 @@ public class CommandPostBlockEntity extends BlockEntity {
         Mirror[] mirrors = Mirror.values();
         this.rotation = rotations[Math.floorMod(tag.getInt(KEY_ROTATION), rotations.length)];
         this.mirror = mirrors[Math.floorMod(tag.getInt(KEY_MIRROR), mirrors.length)];
-        this.paused = tag.getBoolean(KEY_PAUSED);
         this.completed = tag.getBoolean(KEY_COMPLETED);
         // 没有这个键（1.8.0 之前的存档）= false = 等她等口令，正是想要的行为
         this.started = tag.getBoolean(KEY_STARTED);

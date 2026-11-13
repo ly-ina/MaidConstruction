@@ -154,9 +154,6 @@ public final class CommandPostProjections {
         if (!post.isStarted()) {
             return Component.translatable("gui.maidconstruction.post.state.standby");
         }
-        if (post.isPaused()) {
-            return Component.translatable("gui.maidconstruction.post.state.paused");
-        }
         return Component.translatable("gui.maidconstruction.post.state.building");
     }
 
@@ -171,6 +168,6 @@ public final class CommandPostProjections {
         if (!post.isStarted()) {
             return 0xFFAA00;
         }
-        return post.isPaused() ? 0xFF8800 : 0x55FF55;
+        return 0x55FF55;
     }
 }
