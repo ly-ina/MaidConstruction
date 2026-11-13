@@ -33,7 +33,12 @@ public class ManualScreen extends Screen {
     /** 左边目录那一列的宽度 */
     private static final int TOC_WIDTH = 132;
     private static final int ROW_HEIGHT = 11;
-    private static final int LINE_HEIGHT = 12;
+    /**
+     * 正文字号系数：原版字体换不了，放大只会糊，**缩小**反而清爽，一屏也能多放几行。
+     * 行高与折行宽度都跟着它走，否则要么挤成一片、要么右边空一条。
+     */
+    private static final float BODY_SCALE = 0.8F;
+    private static final int LINE_HEIGHT = 10;
 
     private static final int COLOR_PANEL = 0xE8100014;
     private static final int COLOR_DIVIDER = 0xFF3A3A3A;
@@ -90,7 +95,7 @@ public class ManualScreen extends Screen {
     /** 把当前这一章折成一行行文本（宽度按正文那一栏算） */
     private void rewrap() {
         String body = Component.translatable(this.entries.get(this.selected).key()).getString();
-        int width = WINDOW_WIDTH - TOC_WIDTH - 24;
+        int width = (int) ((WINDOW_WIDTH - TOC_WIDTH - 24) / BODY_SCALE);
         List<String> lines = new ArrayList<>();
         for (String raw : body.split("\n", -1)) {
             if (raw.isEmpty()) {
@@ -177,26 +182,29 @@ public class ManualScreen extends Screen {
         int width = WINDOW_WIDTH - TOC_WIDTH - 24;
         int y = top + HEADER + 4;
         int end = Math.min(this.bodyLines.size(), this.scroll + visibleLines());
+        // 整块正文按 BODY_SCALE 缩小：坐标先除回去，这样外面的行高/宽度仍按真实像素算
+        graphics.pose().pushPose();
+        graphics.pose().scale(BODY_SCALE, BODY_SCALE, 1.0F);
+        int sx = (int) (x / BODY_SCALE);
+        int indent = (int) (4 / BODY_SCALE);
         for (int i = this.scroll; i < end; i++) {
             String line = this.bodyLines.get(i);
-            // 三级层次只靠颜色与缩进——原版字体放大只会糊，这已经是最有效的一层：
-            //   【…】本章标题（金色 + 下面一条短线）
-            //   ※ …  注意事项（偏橙，缩进）
-            //   · …  操作步骤（正常色，缩进）
-            // 中文标题用【】，英文标题用 [，两种都当标题画
+            int sy = (int) (y / BODY_SCALE);
+            // 三级层次：标题（金色 + 一条短线）/ 注意（偏橙，缩进）/ 步骤（正常色，缩进）
             if (line.startsWith("【") || line.startsWith("[")) {
-                graphics.drawString(this.font, line, x, y, COLOR_HEADING, false);
-                int rule = Math.min(width, this.font.width(line));
-                graphics.fill(x, y + LINE_HEIGHT - 3, x + rule, y + LINE_HEIGHT - 2, 0xFF5A4A18);
+                graphics.drawString(this.font, line, sx, sy, COLOR_HEADING, false);
+                int rule = Math.min((int) (width / BODY_SCALE), this.font.width(line));
+                graphics.fill(sx, sy + LINE_HEIGHT - 2, sx + rule, sy + LINE_HEIGHT - 1, 0xFF5A4A18);
             } else if (line.startsWith("※")) {
-                graphics.drawString(this.font, line, x + 4, y, COLOR_NOTE, false);
+                graphics.drawString(this.font, line, sx + indent, sy, COLOR_NOTE, false);
             } else if (line.startsWith("·")) {
-                graphics.drawString(this.font, line, x + 4, y, COLOR_TEXT, false);
+                graphics.drawString(this.font, line, sx + indent, sy, COLOR_TEXT, false);
             } else {
-                graphics.drawString(this.font, line, x, y, COLOR_TEXT, false);
+                graphics.drawString(this.font, line, sx, sy, COLOR_TEXT, false);
             }
             y += LINE_HEIGHT;
         }
+        graphics.pose().popPose();
         // 还有下文时，右下角写一句，免得玩家以为就这么多
         if (this.scroll < maxScroll()) {
             Component more = Component.translatable("gui.maidconstruction.manual.more",

@@ -45,13 +45,6 @@ public class ManualItem extends Item {
             "manual.maidconstruction.page6",
             "manual.maidconstruction.page7",
             "manual.maidconstruction.page8",
-            "manual.maidconstruction.page9",
-            "manual.maidconstruction.page10",
-            "manual.maidconstruction.page11",
-            "manual.maidconstruction.page12",
-            "manual.maidconstruction.page13",
-            "manual.maidconstruction.page14",
-            "manual.maidconstruction.page15",
     };
 
     public ManualItem(Properties properties) {
